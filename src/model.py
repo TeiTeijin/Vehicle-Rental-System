@@ -11,9 +11,9 @@ class Users(Base):
     phone = Column(String(255))
     passward_hash = Column(String(255), nullable=False)
     address = Column(String(255), nullable=False)
-    linense_number = Column(String(12), nullable=False)
+    linense_number = Column(String(12), nullable=False, unique=True)
     linense_expiry = Column(Date, nullable= False)
-    role = Column(Enum('customerr','staff','admin'), nullable=False)
+    role = Column(Enum('customer','staff','admin'), nullable=False, default='customer')
     created_at = Column(DateTime, nullable= False)
 
 class Booking(Base):
@@ -26,7 +26,7 @@ class Booking(Base):
     end_date = Column(Date, nullable=False)
     actual_return_date = Column(Date, nullable=False)
     total_cost = Column(DECIMAL(10,2), nullable=False)
-    status = Column(Enum('pending','confirmed','ongoing','completed','cancelled'), nullable=False)
+    status = Column(Enum('pending','confirmed','ongoing','completed','cancelled'), nullable=False, default='pending')
     created_at = Column(DateTime, nullable= False)
 
 class Vehicle(Base):
@@ -40,14 +40,14 @@ class Vehicle(Base):
     plate_number = Column(String(7), nullable=False, unique=True)
     daily_rate = Column(DECIMAL(10,2), nullable=False)
     mileage = Column(Integer, nullable=False)
-    status = Column(Enum('available','reserved','rented','maintenance'))
+    status = Column(Enum('available','reserved','rented','maintenance'), nullable= False, default='available')
     created_at = Column(DateTime, nullable= False)
 
 class Vehicle_Category(Base):
     __tablename__ = "VEHICLE_CATEGORY"
 
     category_id = Column(Integer, primary_key=True, autoincrement= True)
-    category_name= Column(Enum('Car','SUV','Motorcycle','Truck'), nullable=False) # add more type of vehicle
+    category_name= Column(Enum('Car','Motorcycle','Truck'), nullable=False) # add more type of vehicle
     base_rate_multiplier = Column(DECIMAL(10,2), nullable = False)
 
 class Inspection_Report(Base):
@@ -56,9 +56,9 @@ class Inspection_Report(Base):
     inspection_id = Column(Integer, primary_key=True, autoincrement= True)
     booking_id = Column(Integer, ForeignKey("BOOKING.booking_id"), nullable= False)
     inspected_by = Column(Integer, ForeignKey("USERS.user_id"), nullable= False) #staffuser id hindi ko alam pano gawin staff lang
-    inspection_type = Column(Enum('pre-rental','post-rental'),nullable=False)
+    inspection_type = Column(Enum('pre-rental','post-rental'),nullable=False, default='pre-rental')
     mileage_reading = Column(Integer, nullable= False)
-    fuel_level = Column(Enum('empty','quarter','half','three_quarter','full',),nullable=True)
+    fuel_level = Column(Enum('empty','quarter','half','three_quarter','full',),nullable=False)
     damage_note = Column(String(255), nullable=True) # ginawa ko null = true baka kasi wala damage 
     photo_url = Column(String(255), nullable= False)
     inspected_at = Column(DateTime, nullable= False)
@@ -69,8 +69,8 @@ class Payment(Base):
     payment_id = Column(Integer, primary_key=True, autoincrement= True)
     booking_id = Column(Integer, ForeignKey("BOOKING.booking_id"), nullable= False)
     amount = Column(DECIMAL(10,2), nullable=False)
-    method = Column(Enum('cash','card','gcash'), nullable= False)
-    status = Column(Enum('pending','paid','failed','refunded'), nullable= False)
+    method = Column(Enum('cash','card','gcash'), nullable= False,default='cash') 
+    status = Column(Enum('pending','paid','failed','refunded'), nullable= False, default='pending')
     paid_at = Column(DateTime, nullable= False)
 
 class Penalty(Base):
@@ -78,7 +78,7 @@ class Penalty(Base):
 
     penalty_id = Column(Integer, primary_key=True, autoincrement= True)
     booking_id = Column(Integer, ForeignKey("BOOKING.booking_id"), nullable= False)
-    penalty_type = Column(Enum('late_return','damage','cleaning','other'), nullable=False)
+    penalty_type = Column(Enum('late_return','damage','cleaning','none','other'), nullable=False)
     amount = Column(DECIMAL(10,2), nullable=False)
     description = Column(String(255), nullable= False)
     created_at = Column(DateTime, nullable= False)
@@ -92,7 +92,7 @@ class Maintenance_Record(Base):
     cost = Column(DECIMAL(10,2), nullable=False)
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
-    status = Column(Enum('scheduled','ongoing','completed'), nullable= False)
+    status = Column(Enum('scheduled','ongoing','completed'), nullable= False, default='scheduled')
 
 class Vehicle_Media(Base):
     __tablename__ = "VEHICLE_MEDIA"
