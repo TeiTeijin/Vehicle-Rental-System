@@ -1,3 +1,6 @@
 plan.md
 .env
 ca.pem
+receipts/
+media_assets/
+__pycache__/
