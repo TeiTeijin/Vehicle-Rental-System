@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Enum, ForeignKey, DECIMAL, DateTime
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 
@@ -15,3 +16,8 @@ class Vehicle(Base):
     mileage = Column(Integer, nullable=False)
     status = Column(Enum('available', 'reserved', 'rented', 'maintenance'), nullable=False, default='available')
     created_at = Column(DateTime, nullable=False)
+
+    category = relationship("Vehicle_Category", back_populates="vehicles")
+    bookings = relationship("Booking", back_populates="vehicle")
+    media = relationship("Vehicle_Media", back_populates="vehicle")
+    maintenance_records = relationship("Maintenance_Record", back_populates="vehicle")

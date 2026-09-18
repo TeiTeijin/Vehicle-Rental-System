@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, Enum, ForeignKey, DECIMAL, DateTime
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 
@@ -11,3 +12,5 @@ class Payment(Base):
     method = Column(Enum('cash', 'card', 'gcash'), nullable=False, default='cash')
     status = Column(Enum('pending', 'paid', 'failed', 'refunded'), nullable=False, default='pending')
     paid_at = Column(DateTime, nullable=False)
+
+    booking = relationship("Booking", back_populates="payment")

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Enum, ForeignKey, DECIMAL, Date
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 
@@ -12,3 +13,5 @@ class Maintenance_Record(Base):
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
     status = Column(Enum('scheduled', 'ongoing', 'completed'), nullable=False, default='scheduled')
+
+    vehicle = relationship("Vehicle", back_populates="maintenance_records")

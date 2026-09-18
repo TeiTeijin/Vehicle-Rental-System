@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Enum, ForeignKey, DateTime
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 
@@ -11,6 +12,9 @@ class Inspection_Report(Base):
     inspection_type = Column(Enum('pre-rental', 'post-rental'), nullable=False, default='pre-rental')
     mileage_reading = Column(Integer, nullable=False)
     fuel_level = Column(Enum('empty', 'quarter', 'half', 'three_quarter', 'full'), nullable=False)
-    damage_note = Column(String(255), nullable=True)
+    damage_notes = Column(String(255), nullable=True)
     photo_url = Column(String(255), nullable=False)
     inspected_at = Column(DateTime, nullable=False)
+
+    booking = relationship("Booking", back_populates="inspections")
+    inspector = relationship("Users", back_populates="inspections")
