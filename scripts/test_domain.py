@@ -1,3 +1,4 @@
+import os
 from collections import namedtuple
 from datetime import date, datetime
 
@@ -53,8 +54,14 @@ def test_availability() -> None:
     print(f"Clear request available? {clear}")
     assert clear is True, "clear slot must be accepted"
 
-    conf = AvailabilityChecker.find_conflict(date(2026, 9, 5), date(2026, 9, 9), existing)
-    assert conf is not None, "edge-touch must count as conflict"
+    conf = AvailabilityChecker.find_conflict(date(2026, 9, 4), date(2026, 9, 9), existing)
+    assert conf is not None, "a genuine overlap (4-8 Sep vs 1-5 Sep) must be a conflict"
+
+    # Edge-touch is NOT a conflict: bookings are half-open [start, end), so a
+    # car back on the 5th can be re-rented on the 5th. This used to assert the
+    # opposite, which made same-day turnaround impossible.
+    touch = AvailabilityChecker.find_conflict(date(2026, 9, 5), date(2026, 9, 8), existing)
+    assert touch is None, "edge-touch must be allowed (half-open booking range)"
 
 
 def test_database_round_trip() -> None:
@@ -75,17 +82,34 @@ def test_database_round_trip() -> None:
         booking = session.query(Booking).filter_by(status="completed").first()
         assert booking is not None, "no completed booking seeded"
         print(f"Completed booking #{booking.booking_id}: {booking.vehicle.make} {booking.vehicle.model}, "
-              f"paid={booking.payment.amount if booking.payment else None}, "
+              f"paid={sum(p.amount for p in booking.payments if p.status == 'paid')}, "
               f"penalties={len(booking.penalties)}, inspections={len(booking.inspections)}")
 
         assert booking.vehicle.model == "Vios"
-        assert booking.payment is not None
+        assert booking.payments, "expected at least one payment on the completed booking"
+        assert any(p.status == "paid" for p in booking.payments)
         assert booking.penalties, "expected at least one penalty on completed booking"
 
         from app.models import Users
 
-        assert verify_password("customer123", session.query(Users).filter_by(role="customer").one().password_hash)
-        print("Password hash/bcrypt check: OK")
+        # seed_data.py generates a random password unless SEED_PASSWORD_CUSTOMER
+        # is exported, so a hardcoded literal only passed by coincidence of a
+        # previous manual export. Assert the hash is a real bcrypt hash instead,
+        # and only verify the plaintext when the seed password is known.
+        customer = session.query(Users).filter_by(role="customer").one()
+        assert customer.password_hash.startswith("$2"), "customer password is not bcrypt-hashed"
+
+        seed_password = os.getenv("SEED_PASSWORD_CUSTOMER")
+        if seed_password:
+            assert verify_password(seed_password, customer.password_hash), (
+                "customer password does not match SEED_PASSWORD_CUSTOMER"
+            )
+            print("Password hash/bcrypt check: OK (matched SEED_PASSWORD_CUSTOMER)")
+        else:
+            print(
+                "Password hash/bcrypt check: format OK "
+                "(plaintext not verified; set SEED_PASSWORD_CUSTOMER to check it)"
+            )
     finally:
         session.close()
 

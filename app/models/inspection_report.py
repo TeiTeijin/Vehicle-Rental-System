@@ -13,7 +13,11 @@ class Inspection_Report(Base):
     mileage_reading = Column(Integer, nullable=False)
     fuel_level = Column(Enum('empty', 'quarter', 'half', 'three_quarter', 'full'), nullable=False)
     damage_notes = Column(String(255), nullable=True)
-    photo_url = Column(String(255), nullable=False)
+
+    # Was NOT NULL, which check-in satisfied by writing an empty string. A
+    # rental that was never photographed has no photo, and "" said nothing
+    # except that the column demanded a value.
+    photo_url = Column(String(255), nullable=True)
     inspected_at = Column(DateTime, nullable=False)
 
     booking = relationship("Booking", back_populates="inspections")

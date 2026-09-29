@@ -164,6 +164,8 @@ def seed_bookings_and_children(session) -> None:
             method="gcash",
             status="paid",
             paid_at=now,
+            recorded_by=staff.user_id,
+            reference_no="GCASH-SEED-0001",
         )
     )
     session.add(

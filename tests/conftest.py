@@ -99,7 +99,7 @@ def customer_factory(session):
             "phone": f"0917000{n:04d}",
             "password_hash": _password(),
             "address": f"{n} Test Street",
-            "license_number": f"LIC-TEST-{n:04d}",
+            "license_number": f"LIC{n:08d}",
             "license_expiry": TODAY + timedelta(days=365),
             "role": "customer",
             "created_at": datetime(2026, 1, 1, 9, 0),
@@ -132,12 +132,15 @@ def vehicle_factory(session):
     counter = {"n": 0}
 
     def _make(category: Vehicle_Category, **overrides) -> Vehicle:
-        counter["n"] += 0  # plates are passed in explicitly below
+        # plate_number is UNIQUE and only 7 characters wide, so the counter has
+        # to advance or the second vehicle in a test violates the constraint.
+        counter["n"] += 1
+        n = counter["n"]
         fields = {
             "make": "Toyota",
             "model": "Vios",
             "year": 2022,
-            "plate_number": "AAA-000",
+            "plate_number": f"AAA-{n:03d}",
             "daily_rate": "2500.00",
             "mileage": 0,
             "status": "available",
@@ -178,3 +181,49 @@ def booking_factory(session):
         return row
 
     return _make
+
+
+# --------------------------------------------------------------------------
+# Ready-made instances
+#
+# The factories above are for tests that need several rows. Most tests need
+# exactly one customer, one car and one member of staff, and spelling out
+# three factory calls in every signature is noise.
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def customer(customer_factory) -> Users:
+    return customer_factory()
+
+
+@pytest.fixture
+def staff(staff_factory) -> Users:
+    return staff_factory()
+
+
+@pytest.fixture
+def admin(customer_factory) -> Users:
+    return customer_factory(
+        full_name="Branch Admin", email="admin@example.com", role="admin"
+    )
+
+
+@pytest.fixture
+def vehicle(car_category, vehicle_factory) -> Vehicle:
+    """One available Toyota Vios at 2,500/day."""
+    return vehicle_factory(car_category)
+
+
+@pytest.fixture
+def second_vehicle(car_category, vehicle_factory) -> Vehicle:
+    return vehicle_factory(
+        car_category, make="Honda", model="Civic", plate_number="BBB-001"
+    )
+
+
+@pytest.fixture
+def moto(moto_category, vehicle_factory) -> Vehicle:
+    return vehicle_factory(
+        moto_category, make="Honda", model="Click 125i", plate_number="MMP-001"
+    )

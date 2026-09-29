@@ -17,5 +17,6 @@ class Users(Base):
     role = Column(Enum('customer', 'staff', 'admin'), nullable=False, default='customer')
     created_at = Column(DateTime, nullable=False)
 
-    bookings = relationship("Booking", back_populates="user")
+    bookings = relationship("Booking", back_populates="user", foreign_keys="Booking.user_id")
     inspections = relationship("Inspection_Report", back_populates="inspector")
+    payments_recorded = relationship("Payment", back_populates="recorder")
