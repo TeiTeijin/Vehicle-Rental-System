@@ -63,11 +63,14 @@ def test_database_round_trip() -> None:
     from app.database import SessionLocal
     from app.models import Booking, Vehicle
     from app.utils.security import verify_password
+    from scripts.seed_data import VEHICLES
 
     session = SessionLocal()
     try:
         total_vehicles = session.query(func.count(Vehicle.vehicle_id)).scalar()
-        assert total_vehicles == 5, f"expected 5 vehicles, found {total_vehicles}"
+        assert total_vehicles == len(VEHICLES), (
+            f"expected {len(VEHICLES)} vehicles from the seed list, found {total_vehicles}"
+        )
 
         booking = session.query(Booking).filter_by(status="completed").first()
         assert booking is not None, "no completed booking seeded"

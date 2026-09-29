@@ -30,21 +30,31 @@ def _fresh_rows(session, vehicle) -> list[Vehicle_Media]:
     return fresh if len(fresh) == len(rows) and rows else []
 
 
-def _cache_for_car(session, vehicle) -> None:
+def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
+    """Cache the photo URL, and optionally the 3D model payload.
+
+    `include_3d` defaults to False on purpose. Resolving the generation slug
+    and fetching the model payload costs 2 extra HTTP round trips per vehicle,
+    and the hero only ever reads the 2D photo. Nothing else in the project
+    reads `model_3d_url` yet, so the default keeps those calls off the startup
+    path. Flip it to True when the 3D viewer lands; the `model_3d_url` column
+    and the `model_3d` row are already in place for it.
+    """
     image_url = ci.get_signed_image_url(vehicle.make, vehicle.model, vehicle.year)
     model_url = None
     watermarked = True
 
-    try:
-        gen = ci.resolve_generation_slug(vehicle.make, vehicle.model, vehicle.year)
-        if gen:
-            model = ci.get_vehicle_model_3d_payload(vehicle.make, vehicle.model, gen)
-            glb = (model.get("model") or {}).get("glb")
-            if glb:
-                model_url = glb
-                watermarked = bool((model.get("model") or {}).get("watermarked"))
-    except ci.CarImagesError:
-        pass
+    if include_3d:
+        try:
+            gen = ci.resolve_generation_slug(vehicle.make, vehicle.model, vehicle.year)
+            if gen:
+                model = ci.get_vehicle_model_3d_payload(vehicle.make, vehicle.model, gen)
+                glb = (model.get("model") or {}).get("glb")
+                if glb:
+                    model_url = glb
+                    watermarked = bool((model.get("model") or {}).get("watermarked"))
+        except ci.CarImagesError:
+            pass
 
     session.add(
         Vehicle_Media(
@@ -99,7 +109,7 @@ def _cache_for_motorcycle(session, vehicle) -> None:
     )
 
 
-def get_or_fetch_media(session, vehicle) -> list[Vehicle_Media]:
+def get_or_fetch_media(session, vehicle, include_3d: bool = False) -> list[Vehicle_Media]:
     cached = _fresh_rows(session, vehicle)
     if cached:
         return cached
@@ -109,7 +119,7 @@ def get_or_fetch_media(session, vehicle) -> list[Vehicle_Media]:
     if is_motorcycle(vehicle):
         _cache_for_motorcycle(session, vehicle)
     else:
-        _cache_for_car(session, vehicle)
+        _cache_for_car(session, vehicle, include_3d=include_3d)
 
     session.flush()
     return list(
