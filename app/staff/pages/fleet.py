@@ -1,0 +1,109 @@
+"""Fleet: every vehicle, its state, and what is wrong with it.
+
+Two things this screen has to get right, because both are questions a member of
+staff asks out loud at the counter:
+
+  * **"Can I rent this out right now?"** is not the same as ``status ==
+    "available"``. A car can read available and still be unusable -- a licence
+    that has expired, an open maintenance job. ``fleet_service.is_rentable``
+    is the single answer to that question, so the screen shows a separate
+    "Blocked" column rather than folding the two together and leaving someone
+    to discover the problem at handover.
+
+  * **"Is it out?"** is derived from the booking, never from ``status``.
+    ``status`` says the car is physically gone; a booking says it is promised
+    to someone. They disagree often, and the booking is the one that matters.
+"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+from sqlalchemy import select
+
+from app.models import Vehicle
+from app.services import booking_service, fleet_service
+from app.staff.pages.base import StaffPage
+from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
+
+
+def _fleet_rows(context):
+    """One row per vehicle, with every fact the screen shows.
+
+    A single query per table rather than a lazy load per cell. Ten vehicles is
+    nothing, but the shape is the point: a screen that issues a query while
+    painting cannot be wrapped in one transaction, and a second member of
+    staff checking a car out mid-scroll would see a half-updated row.
+    """
+    today = date.today()
+    with context.reading() as session:
+        vehicles = session.execute(
+            select(Vehicle).order_by(Vehicle.make, Vehicle.model)
+        ).scalars().all()
+
+        rows = []
+        for vehicle in vehicles:
+            open_bookings = booking_service.active_bookings(session, vehicle)
+            # "Due back" is the next end date, which is the question actually
+            # being asked at the counter. Overdue is separate, and louder.
+            due = min((b.end_date for b in open_bookings), default=None)
+
+            # Maintenance is looked up for the next 30 days: a car in the
+            # workshop next month is not blocked today, but it is the thing
+            # someone needs to know when they are planning a long rental.
+            blocked = fleet_service.maintenance_conflict(
+                session, vehicle, today, today + timedelta(days=30)
+            )
+            issues = []
+            if blocked:
+                issues.append(f"Maintenance until {blocked.end_date:%d %b}")
+            if not fleet_service.is_rentable(vehicle):
+                issues.append("Not rentable")
+
+            rows.append(
+                (
+                    vehicle.plate_number,
+                    f"{vehicle.make} {vehicle.model}",
+                    str(vehicle.year),
+                    f"{vehicle.daily_rate:,.2f}",
+                    f"{vehicle.mileage:,} km" if vehicle.mileage else "-",
+                    vehicle.status.replace("_", " ").title(),
+                    due.strftime("%d %b") if due else "-",
+                    "Yes" if due and due < today else "-",
+                    "; ".join(issues) or "-",
+                )
+            )
+        return rows
+
+
+class FleetPage(StaffPage):
+    def __init__(self, shell) -> None:
+        super().__init__(
+            shell,
+            "Fleet",
+            "Every vehicle, whether it is out, and what is stopping it.",
+        )
+        self.table = LoadStateTable(
+            [
+                Column("Plate", ALIGN_LEFT),
+                Column("Vehicle", ALIGN_LEFT),
+                Column("Year", ALIGN_RIGHT),
+                Column("Rate / day", ALIGN_RIGHT),
+                Column("Odometer", ALIGN_RIGHT),
+                Column("Status"),
+                Column("Due back", ALIGN_RIGHT),
+                Column("Overdue"),
+                Column("Blocked by", ALIGN_LEFT),
+            ],
+            lambda: _fleet_rows(self.context),
+            empty_message="No vehicles yet. Add one from the admin tools.",
+        )
+        self.body.addWidget(self.table, 1)
+
+    def refresh(self) -> None:
+        super().refresh()
+        self.table.load()
+
+
+def build_fleet_page(shell) -> FleetPage:
+    return FleetPage(shell)
