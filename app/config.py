@@ -35,5 +35,11 @@ def _build_database_url(raw: str | None) -> str:
 
 
 DATABASE_URL = _build_database_url(os.getenv("DATABASE_URL"))
+
+#: Public alias for callers outside this module. The underscore name predates
+#: the staff app and is imported as-is by ``tests/test_config.py``; both names
+#: refer to the same function, so nothing has to be updated in lockstep.
+build_database_url = _build_database_url
+
 CI_API_KEY = os.getenv("CI_API_KEY", "")
 CI_API_SECRET = os.getenv("CI_API_SECRET", "")

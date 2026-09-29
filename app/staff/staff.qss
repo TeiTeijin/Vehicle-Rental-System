@@ -1,0 +1,382 @@
+/* STAFF APP
+   Same palette as the customer app (app/ui/styles.qss) so the two windows
+   look like one product, plus the semantic colours the operations screens
+   need. Object names are defined in app/staff/theme.py and set from Python,
+   because a mistyped selector here fails silently.
+*/
+
+QMainWindow, QWidget {
+    background: #F1E8D8;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+}
+
+QWidget#page {
+    background: #F1E8D8;
+}
+
+/* NAVBAR */
+
+QFrame#navbar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #D8CCBB;
+}
+
+QLabel#logo {
+    background: transparent;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+QLabel#navUser {
+    background: transparent;
+    color: #8A8175;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QPushButton#navItem {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 2px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QPushButton#navItem:hover {
+    border-bottom: 2px solid #171717;
+}
+
+QPushButton#navItem:checked {
+    border-bottom: 2px solid #171717;
+}
+
+QPushButton#navItem:disabled {
+    color: #C4BBA9;
+}
+
+QPushButton#ghostButton {
+    background: #EEEAE1;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton#ghostButton:hover {
+    background: #E6E1D6;
+    border-color: #C9BCA6;
+}
+
+QPushButton#ghostButton:disabled {
+    color: #C4BBA9;
+    border-color: #D8CCBB;
+}
+
+/* DEMO BANNER
+   Deliberately loud. The only realistic way to end up reconciling against
+   fiction is to forget which database is open, so the window says so. */
+
+QFrame#demoBanner {
+    background: #B07D2B;
+    border: none;
+}
+
+QLabel#demoBannerText {
+    background: transparent;
+    color: #FFFFFF;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* PAGE CHROME */
+
+QLabel#pageTitle {
+    background: transparent;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+QLabel#pageSubtitle {
+    background: transparent;
+    color: #8A8175;
+    font-size: 13px;
+}
+
+/* TABLE STATES
+   An empty table is ambiguous: it can mean "no rows" or "the query failed".
+   The failure state gets its own colour and its own retry button. */
+
+QTableView {
+    background: #FFFFFF;
+    alternate-background-color: #FAF6EF;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+    gridline-color: #EDE6D9;
+    selection-background-color: #EDE6D9;
+    selection-color: #1A1A1A;
+    font-size: 13px;
+}
+
+QHeaderView::section {
+    background: #EEEAE1;
+    border: none;
+    border-bottom: 1px solid #D8CCBB;
+    padding: 9px 8px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QTableView QTableCornerButton::section {
+    background: #EEEAE1;
+    border: none;
+}
+
+QLabel#emptyState {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+    color: #8A8175;
+    font-size: 14px;
+}
+
+QLabel#errorState {
+    background: #FFFFFF;
+    border: 1px solid #A8452F;
+    border-radius: 6px;
+    color: #A8452F;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#errorDetail {
+    background: transparent;
+    color: #8A8175;
+    font-size: 12px;
+}
+
+QPushButton#retryButton {
+    background: #A8452F;
+    border: 1px solid #A8452F;
+    border-radius: 6px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 7px 18px;
+}
+
+QPushButton#retryButton:hover {
+    background: #903926;
+    border-color: #903926;
+}
+
+/* STATUS PILL
+   Background is set from Python via colour_for() in theme.py, because the
+   colour depends on the value and a stylesheet cannot select on cell text. */
+
+QLabel#statusPill {
+    border-radius: 9px;
+    padding: 2px 9px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* INPUTS */
+
+QLineEdit, QDateEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    selection-background-color: #D8CCBB;
+    selection-color: #1A1A1A;
+}
+
+QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QTextEdit:focus {
+    border: 1px solid #171717;
+}
+
+QLineEdit:disabled, QDateEdit:disabled, QComboBox:disabled, QSpinBox:disabled,
+QDoubleSpinBox:disabled, QTextEdit:disabled {
+    background: #F4EFE5;
+    color: #C4BBA9;
+}
+
+/* An inline validation error, shown under the field that caused it. */
+QLabel#fieldError {
+    background: transparent;
+    color: #A8452F;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#fieldLabel {
+    background: transparent;
+    color: #8A8175;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+QComboBox QAbstractItemView {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    selection-background-color: #EDE6D9;
+    selection-color: #1A1A1A;
+    outline: none;
+}
+
+/* BUTTONS */
+
+QPushButton#primaryButton {
+    background: #1A1A1A;
+    border: 1px solid #1A1A1A;
+    border-radius: 6px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 18px;
+}
+
+QPushButton#primaryButton:hover {
+    background: #171717;
+    border-color: #171717;
+}
+
+QPushButton#primaryButton:disabled {
+    background: #C4BBA9;
+    border-color: #C4BBA9;
+    color: #FFFFFF;
+}
+
+QPushButton#secondaryButton {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+    color: #1A1A1A;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 18px;
+}
+
+QPushButton#secondaryButton:hover {
+    background: #F4EFE5;
+    border-color: #C9BCA6;
+}
+
+QPushButton#dangerButton {
+    background: #FFFFFF;
+    border: 1px solid #A8452F;
+    border-radius: 6px;
+    color: #A8452F;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 18px;
+}
+
+QPushButton#dangerButton:hover {
+    background: #A8452F;
+    color: #FFFFFF;
+}
+
+/* LOGIN */
+
+QWidget#loginRoot {
+    background: #EEEAE1;
+}
+
+QLabel#loginTitle {
+    background: transparent;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QLabel#loginSubtitle {
+    background: transparent;
+    color: #8A8175;
+    font-size: 13px;
+}
+
+QLabel#loginError {
+    background: #FBEDEA;
+    border: 1px solid #A8452F;
+    border-radius: 6px;
+    color: #A8452F;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 12px;
+}
+
+/* TOAST
+   Non-blocking confirmation. Anchored bottom-right by app/staff/feedback.py. */
+
+QFrame#toast {
+    background: #1A1A1A;
+    border: none;
+    border-radius: 6px;
+}
+
+QLabel#toastText {
+    background: transparent;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#toastText[kind="ok"] {
+    color: #B9D4C1;
+}
+
+QLabel#toastText[kind="error"] {
+    color: #F0BFB2;
+}
+
+/* DIALOGS */
+
+QDialog {
+    background: #F1E8D8;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #D8CCBB;
+    border-radius: 5px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #C9BCA6;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background: #D8CCBB;
+    border-radius: 5px;
+    min-width: 30px;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}

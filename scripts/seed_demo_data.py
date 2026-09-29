@@ -53,6 +53,39 @@ SEED = 20260929
 
 DEMO_ADMIN_EMAIL = "admin@rentdesk.local"
 
+#: A known counter-staff login. The role split is a headline feature -- a staff
+#: member may check a car out but not cancel a confirmed booking -- and it
+#: cannot be demonstrated without a known staff address. The other staff are
+#: generated, so their emails change with the seed.
+DEMO_STAFF_EMAIL = "counter@rentdesk.local"
+
+#: How many cars sit in the workshop in the demo. They are held out of the
+#: random booking walk, so a car is never both in the workshop and out on rent.
+WORKSHOP_CARS = 2
+
+#: The rentals forced onto the Today screen, as
+#: (days since it was due back, length in days). A day count of 0 means due
+#: back today; a positive one means it should have come back already, which is
+#: what puts a row in the Overdue table; a negative one means still running.
+#:
+#: These are the cases a random walk essentially never produces on its own --
+#: they are all one- or two-day windows -- and without them the most useful
+#: tables on the Today screen render empty, which looks identical to a broken
+#: query.
+TODAYS_PLANS = [
+    (2, 4),    # overdue by two days
+    (5, 3),    # overdue by five days
+    (0, 5),    # due back today
+    (0, 2),    # due back today, short rental
+    (-9, 12),  # still out, long rental
+]
+
+#: How many cars are left with no booking at all, so the branch is not running
+#: at 100% and every "free to rent" style figure is non-zero. A demo where the
+#: whole fleet is out cannot show what the Fleet screen looks like when someone
+#: is actually looking for a car.
+UNBOOKED_CARS = 3
+
 #: Hostnames that must never be a demo target, whatever the flags say. The
 #: Aiven project this was built against is the obvious one; the pattern catches
 #: other Aiven projects and the usual MySQL cloud providers too.
@@ -87,11 +120,26 @@ VEHICLE_SPECS = [
     ("Toyota", "Fortuner", 2023, "DEM-104", "5500.00", "Car", 7, "Automatic", "Diesel", "SUV"),
     ("Mitsubishi", "Xpander", 2022, "DEM-105", "3800.00", "Car", 7, "Automatic", "Petrol", "MPV"),
     ("Mazda", "CX-5", 2023, "DEM-106", "5200.00", "Car", 5, "Automatic", "Petrol", "SUV"),
+    ("Nissan", "Altima", 2021, "DEM-107", "3300.00", "Car", 5, "Automatic", "Petrol", "Sedan"),
+    ("Ford", "Explorer", 2022, "DEM-108", "5800.00", "Car", 7, "Automatic", "Petrol", "SUV"),
+    ("Toyota", "Innova", 2023, "DEM-109", "4000.00", "Car", 7, "Automatic", "Diesel", "MPV"),
+    ("Honda", "City", 2022, "DEM-110", "2700.00", "Car", 5, "Automatic", "Petrol", "Sedan"),
+    ("Isuzu", "D-Max", 2022, "DEM-111", "4800.00", "Car", 5, "Manual", "Diesel", "Pickup"),
+    ("Mitsubishi", "Mirage", 2021, "DEM-112", "2300.00", "Car", 4, "Automatic", "Petrol", "Hatchback"),
     ("Honda", "Click 125i", 2023, "DEM-201", "800.00", "Motorcycle", 2, "Automatic", "Petrol", "Underbone"),
     ("Yamaha", "NMAX 155", 2022, "DEM-202", "1000.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter"),
     ("Kawasaki", "Ninja 400", 2023, "DEM-203", "1400.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone"),
     ("Honda", "PCX 150", 2023, "DEM-204", "1200.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter"),
+    ("Yamaha", "FZ-S", 2022, "DEM-205", "1100.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone"),
+    ("Kymco", "P200", 2023, "DEM-206", "950.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter"),
 ]
+
+#: `MaintenanceRecord.status` is an Enum column. `in_progress` is not one of its
+#: values -- the open state is `ongoing` -- and writing it anyway raises a
+#: LookupError on read, not on insert, so a typo here would surface much later.
+MAINTENANCE_OPEN_STATUS = "ongoing"
+MAINTENANCE_SCHEDULED_STATUS = "scheduled"
+MAINTENANCE_OPEN_STATES = (MAINTENANCE_SCHEDULED_STATUS, MAINTENANCE_OPEN_STATUS)
 
 MAINTENANCE_JOBS = [
     ("Oil and filter change", "3000.00"),
@@ -307,12 +355,23 @@ def rental_total(rate, days: int) -> Decimal:
 
 
 def _make_maintenance(
-    session: Session, rng: random.Random, vehicles: list[Vehicle], today: date
-) -> None:
-    """One or two historical service records per vehicle, spread over time.
+    session: Session,
+    rng: random.Random,
+    vehicles: list[Vehicle],
+    in_workshop: list[Vehicle],
+    today: date,
+) -> list[Maintenance_Record]:
+    """Historical service per vehicle, plus open jobs on the workshop cars.
 
-    All completed: the demo's "in the workshop" state comes from live fleet
-    actions in the app, not from seeding a car as unavailable.
+    All the historical work is `completed`; the open jobs belong to
+    `in_workshop` only. Without open jobs the Today page's workshop table is
+    always empty, and an empty workshop in a demo is indistinguishable from a
+    broken query -- the exact confusion the rest of this seeding avoids.
+
+    `in_workshop` is passed in rather than sliced off the end of `vehicles`
+    here, because the same vehicles are reserved for today's rentals. Picking
+    them in two places independently is how a car ends up marked both
+    `maintenance` and `rented`.
     """
     for vehicle in vehicles:
         for _ in range(rng.randint(1, 2)):
@@ -328,7 +387,30 @@ def _make_maintenance(
                     status="completed",
                 )
             )
+
+    open_jobs = []
+    for vehicle in in_workshop:
+        description, cost = rng.choice(MAINTENANCE_JOBS)
+        started = today - timedelta(days=rng.randint(0, 3))
+        record = Maintenance_Record(
+            vehicle=vehicle,
+            description=description,
+            cost=cost,
+            start_date=started,
+            # An end date in the future is the "expected back" figure, which
+            # is what the Fleet screen's blocked-by column quotes.
+            end_date=started + timedelta(days=rng.randint(2, 6)),
+            status=(
+                MAINTENANCE_OPEN_STATUS
+                if started < today
+                else MAINTENANCE_SCHEDULED_STATUS
+            ),
+        )
+        session.add(record)
+        open_jobs.append(record)
+
     session.flush()
+    return open_jobs
 
 
 def _make_bookings(
@@ -354,9 +436,43 @@ def _make_bookings(
 
     # vehicle_id -> list of (start, end) already taken
     taken: dict[int, list[tuple[date, date]]] = {v.vehicle_id: [] for v in vehicles}
+    free_after: dict[int, date] = {v.vehicle_id: today - timedelta(days=days_back) for v in vehicles}
 
-    def overlaps(vehicle_id: int, start: date, end: date) -> bool:
-        return any(start < e and s < end for s, e in taken[vehicle_id])
+    def place(vehicle_id: int, start: date, end: date) -> bool:
+        """Claim [start, end) for a vehicle, or report it is already taken."""
+        if any(start < e and s < end for s, e in taken[vehicle_id]):
+            return False
+        if start < free_after[vehicle_id]:
+            # The vehicle is still finishing an earlier rental. The random walk
+            # below would otherwise "plan" a car into two places at once.
+            return False
+        taken[vehicle_id].append((start, end))
+        free_after[vehicle_id] = end
+        return True
+
+    # Vehicles held back from the walk. The walk fills every vehicle's calendar
+    # out to today+14, so a car needed for a rental that is due back now has to
+    # be kept out of the walk entirely -- there is no gap in a fully booked
+    # calendar to put one in.
+    #
+    # The split must line up with `_force_todays_work` and `seed()`: the first
+    # `WORKSHOP_CARS` go to the workshop, the rest carry today's rentals. Slicing
+    # these independently in two places is how a car ends up both in the
+    # workshop and out on rent, so the split is stated once, here.
+    # Two groups are held out of the walk:
+    #
+    #   * the tail, which `seed()` and `_force_todays_work` split between the
+    #     workshop and today's rentals -- the walk fills every calendar out to
+    #     today+14, so there is no gap left to place a car that is due back now;
+    #   * `UNBOOKED_CARS` before it, which get no bookings whatsoever, so the
+    #     branch is not running at 100% and "free to rent" is never zero.
+    reserved = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS)) :]
+    idle = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS) + UNBOOKED_CARS) : -(
+        WORKSHOP_CARS + len(TODAYS_PLANS)
+    )]
+    walkable = [
+        v for v in vehicles if v not in reserved and v not in idle
+    ]
 
     for offset in range(days_back, -14, -1):
         start = today - timedelta(days=offset)
@@ -366,12 +482,11 @@ def _make_bookings(
         count = rng.randint(3, 6) if busy else rng.randint(1, 4)
 
         for _ in range(count):
-            vehicle = rng.choice(vehicles)
+            vehicle = rng.choice(walkable)
             span = rng.choice([1, 2, 2, 3, 3, 4, 5, 6, 7])
             end = start + timedelta(days=span)
-            if overlaps(vehicle.vehicle_id, start, end):
+            if not place(vehicle.vehicle_id, start, end):
                 continue
-            taken[vehicle.vehicle_id].append((start, end))
 
             customer = rng.choice(customers)
             taker = rng.choice(staff)
@@ -401,9 +516,70 @@ def _make_bookings(
                 booking
             )
 
+    _force_todays_work(session, rng, vehicles, customers, staff, taken, free_after, today)
     session.add_all(completed + ongoing + pending)
     session.flush()
     return completed, ongoing, pending
+
+
+def _force_todays_work(
+    session,
+    rng: random.Random,
+    vehicles: list[Vehicle],
+    customers: list[Users],
+    staff: list[Users],
+    taken: dict[int, list[tuple[date, date]]],
+    free_after: dict[int, date],
+    today: date,
+) -> None:
+    """Guarantee the cases the Today screen exists to show.
+
+    The random walk above reliably produces rentals that are out now and
+    collections coming up, but it almost never produces a car that is *due back
+    today* and essentially never one that is *overdue* -- both are narrow
+    windows, and a day is a short time to be in one. So the demo would show an
+    empty "Overdue" table and an empty "Due back today" table, and the most
+    useful part of that screen would look broken.
+
+    Two overdue, two due back today, and one rental that started a while ago
+    and is still legitimately running. Each is placed on a vehicle reserved
+    from the random walk, through the same `taken`/`free_after` bookkeeping, so
+    nothing collides and the app still considers the data valid.
+
+    The first `WORKSHOP_CARS` of the reserved slice are skipped: they are in the
+    workshop, and a car cannot be in the workshop and out on rent.
+    """
+    reserved = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS)) :]
+    for_rent = reserved[WORKSHOP_CARS:]
+
+    for vehicle, (days_late, span) in zip(for_rent, TODAYS_PLANS):
+        end = today - timedelta(days=days_late)
+        start = end - timedelta(days=span)
+        if start < free_after[vehicle.vehicle_id]:
+            continue
+        if any(start < e and s < end for s, e in taken[vehicle.vehicle_id]):
+            continue
+        taken[vehicle.vehicle_id].append((start, end))
+        free_after[vehicle.vehicle_id] = end
+
+        # `ongoing` with no `actual_return_date`. Where the end date is already
+        # past, that is exactly the state `overdue_returns` is defined to find.
+        session.add(
+            Booking(
+                user=rng.choice(customers),
+                vehicle=vehicle,
+                start_date=start,
+                end_date=end,
+                actual_return_date=None,
+                total_cost=rental_total(vehicle.daily_rate, span),
+                status="ongoing",
+                created_at=datetime.combine(
+                    start - timedelta(days=2), datetime.min.time()
+                )
+                + timedelta(hours=9),
+                created_by=rng.choice(staff).user_id,
+            )
+        )
 
 
 def _settle_completed(
@@ -652,6 +828,17 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
         staff = [
             _staff_member(rng, 900 + n, "staff") for n in (1, 2, 3)
         ]
+        counter = Users(
+            full_name="Demo Counter Staff",
+            email=DEMO_STAFF_EMAIL,
+            phone="09170000002",
+            password_hash=hash_password("demo-password"),
+            address="1 Demo Street, Quezon City",
+            license_number="DL000001",
+            license_expiry=date(2030, 12, 31),
+            role="staff",
+            created_at=datetime(2026, 1, 2, 8, 0),
+        )
         admin = Users(
             full_name="Demo Branch Admin",
             email=DEMO_ADMIN_EMAIL,
@@ -663,15 +850,28 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
             role="admin",
             created_at=datetime(2026, 1, 2, 8, 0),
         )
-        session.add_all(staff + [admin])
+        session.add_all(staff + [counter, admin])
         session.flush()
 
         customers = _make_customers(session, rng, 24, today)
         vehicles = _make_vehicles(session, categories)
-        _make_maintenance(session, rng, vehicles, today)
+        # The tail of the vehicle list is reserved from the random walk: the
+        # first two sit in the workshop, the rest carry today's rentals. Both
+        # groups have to be excluded from the walk, and choosing them once here
+        # is what stops a car being marked `maintenance` and `rented` at once.
+        workshop = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS)) : -len(TODAYS_PLANS)]
+        open_jobs = _make_maintenance(session, rng, vehicles, workshop, today)
 
         completed, ongoing, pending = _make_bookings(
             session, rng, vehicles, customers, staff, days_back=days_back, today=today
+        )
+        # `_force_todays_work` adds to the session directly rather than to
+        # `ongoing`, so the ongoing list is rebuilt from the database to keep
+        # the vehicle-status pass below and the reported count in agreement.
+        ongoing = list(
+            session.execute(
+                select(Booking).where(Booking.status == "ongoing")
+            ).scalars()
         )
 
         # Actual return dates and odometer movement for everything finished.
@@ -687,19 +887,25 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
 
         # Vehicles out on rent right now should say so, or the Fleet tab will
         # show cars as available that are physically gone.
+        #
+        # A car in the workshop is not out, even if a stray booking says
+        # otherwise -- and the two open maintenance jobs are on cars that are
+        # deliberately not rented, so `maintenance` wins cleanly rather than
+        # needing a tiebreak.
+        in_workshop = {record.vehicle_id for record in open_jobs}
         for vehicle in vehicles:
             is_out = any(b.vehicle_id == vehicle.vehicle_id for b in ongoing)
-            vehicle.status = "rented" if is_out else "available"
-            if is_out:
-                for record in vehicle.maintenance_records:
-                    if record.status == "scheduled":
-                        record.status = "completed"
+            if vehicle.vehicle_id in in_workshop:
+                vehicle.status = "maintenance"
+            elif is_out:
+                vehicle.status = "rented"
             else:
+                vehicle.status = "available"
                 vehicle.mileage += rng.randint(0, 40_000)
         session.flush()
 
         counts = {
-            "staff": len(staff) + 1,
+            "staff": len(staff) + 2,  # generated, the demo counter, and the admin
             "customers": len(customers),
             "vehicles": len(vehicles),
             "bookings_completed": len(completed),
@@ -783,7 +989,9 @@ def main() -> None:
     width = max(len(k) for k in counts)
     for key, value in counts.items():
         print(f"  {key:<{width}}  {value:>6}")
-    print(f"\nDone. Sign in as {DEMO_ADMIN_EMAIL} with password 'demo-password'.")
+    print("\nDone. Password for every demo login is 'demo-password'.")
+    print(f"  admin  {DEMO_ADMIN_EMAIL}     sees the dashboard charts")
+    print(f"  staff  {DEMO_STAFF_EMAIL}     counter actions only, no charts")
 
 
 if __name__ == "__main__":

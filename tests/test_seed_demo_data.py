@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Booking,
     Inspection_Report,
+    Maintenance_Record,
     Payment,
     Penalty,
     Users,
@@ -33,7 +34,12 @@ from app.models import (
 )
 from app.utils.security import verify_password
 from scripts import seed_demo_data
-from scripts.seed_demo_data import DEMO_ADMIN_EMAIL, SEED, UnsafeTarget
+from scripts.seed_demo_data import (
+    DEMO_ADMIN_EMAIL,
+    DEMO_STAFF_EMAIL,
+    SEED,
+    UnsafeTarget,
+)
 
 #: Pinned so the generated data is byte-identical on every run of the suite.
 TODAY = date(2026, 9, 29)
@@ -253,25 +259,77 @@ class TestGeneratedDataIsValid:
             assert booking.start_date >= TODAY - timedelta(days=14)
 
     def test_status_matches_the_dates(self, demo):
-        """Status is derived from the calendar, not chosen at random."""
+        """Status is derived from the calendar, not chosen at random.
+
+        The one deliberate exception is a rental that is still `ongoing` even
+        though its end date has passed: that is exactly the overdue state the
+        Today screen exists to show, and a seeded overdue car is what stops the
+        Overdue table rendering empty. It stays `ongoing` and stays without an
+        `actual_return_date` -- it just has not been brought back yet.
+        """
         for booking in rows_of(demo, Booking):
-            if booking.end_date <= TODAY:
-                assert booking.status == "completed", booking
-                assert booking.actual_return_date is not None, booking
-            elif booking.start_date <= TODAY < booking.end_date:
+            if booking.start_date <= TODAY < booking.end_date:
                 assert booking.status == "ongoing", booking
-            else:
+                assert booking.actual_return_date is None, booking
+            elif booking.start_date > TODAY:
                 assert booking.status in ("pending", "confirmed"), booking
+            else:  # started on or before today, and the window has closed
+                overdue = booking.end_date <= TODAY and booking.status == "ongoing"
+                if not overdue:
+                    assert booking.status == "completed", booking
+                    assert booking.actual_return_date is not None, booking
+                else:
+                    assert booking.actual_return_date is None, booking
 
     def test_ongoing_rentals_mark_their_vehicle_rented(self, demo):
-        """Otherwise the Fleet tab offers cars that are physically gone."""
+        """Otherwise the Fleet tab offers cars that are physically gone.
+
+        `maintenance` is the third legitimate value: a car in the workshop is
+        neither on the road nor free, and the seeder guarantees those cars carry
+        no live booking so the two states can never contradict each other.
+        """
         out = {
             b.vehicle_id
             for b in rows_of(demo, Booking, Booking.status == "ongoing")
         }
+        in_workshop = {
+            record.vehicle_id
+            for record in rows_of(
+                demo,
+                Maintenance_Record,
+                Maintenance_Record.status.in_(("scheduled", "ongoing")),
+            )
+        }
         for vehicle in rows_of(demo, Vehicle):
-            expected = "rented" if vehicle.vehicle_id in out else "available"
+            if vehicle.vehicle_id in in_workshop:
+                expected = "maintenance"
+            elif vehicle.vehicle_id in out:
+                expected = "rented"
+            else:
+                expected = "available"
             assert vehicle.status == expected, vehicle.plate_number
+
+    def test_a_car_is_never_in_the_workshop_and_on_rent(self, demo):
+        """The two states are physically exclusive, so seed them exclusively."""
+        in_workshop = {
+            record.vehicle_id
+            for record in rows_of(
+                demo,
+                Maintenance_Record,
+                Maintenance_Record.status.in_(("scheduled", "ongoing")),
+            )
+        }
+        assert in_workshop, "demo should show something in the workshop"
+        for booking in rows_of(
+            demo, Booking, Booking.status.in_(("confirmed", "ongoing"))
+        ):
+            assert booking.vehicle_id not in in_workshop, booking
+
+    def test_some_cars_are_free_to_rent(self, demo):
+        """A branch at 100% utilisation cannot show what searching for a car
+        looks like, and every 'available' figure on screen reads as zero."""
+        free = rows_of(demo, Vehicle, Vehicle.status == "available")
+        assert len(free) >= 3, [v.plate_number for v in free]
 
     def test_every_booking_records_who_took_it(self, demo):
         for booking in rows_of(demo, Booking):
@@ -296,6 +354,50 @@ class TestGeneratedDataIsValid:
         """`photo_url` is nullable, and most demo inspections have no photo."""
         for report in rows_of(demo, Inspection_Report):
             assert report.photo_url is None or isinstance(report.photo_url, str)
+
+
+class TestTodayScreenHasSomethingToShow:
+    """The Today tab exists to answer three questions: what is out, what is due
+    back, and what is late. A random booking walk essentially never lands in
+    the last two categories -- they are one- and two-day windows -- so they are
+    placed on purpose. Without them the screen renders three empty tables,
+    which is indistinguishable from a broken query.
+    """
+
+    def test_some_rentals_are_out_now(self, demo):
+        out = rows_of(demo, Booking, Booking.status == "ongoing")
+        assert len(out) >= 3
+
+    def test_some_rentals_are_due_back_today(self, demo):
+        due = rows_of(
+            demo, Booking, Booking.status == "ongoing", Booking.end_date == TODAY
+        )
+        assert len(due) >= 2, "the Due back today table would be empty"
+
+    def test_some_rentals_are_overdue(self, demo):
+        """Ongoing, end date already past, and no `actual_return_date`."""
+        late = rows_of(
+            demo,
+            Booking,
+            Booking.status == "ongoing",
+            Booking.end_date < TODAY,
+            Booking.actual_return_date.is_(None),
+        )
+        assert len(late) >= 2, "the Overdue table would be empty"
+
+    def test_some_cars_are_in_the_workshop(self, demo):
+        open_jobs = rows_of(
+            demo,
+            Maintenance_Record,
+            Maintenance_Record.status.in_(("scheduled", "ongoing")),
+        )
+        assert len(open_jobs) >= 2, "the Workshop table would be empty"
+
+    def test_no_future_booking_on_an_overdue_or_returned_car(self, demo):
+        """The forced rentals share vehicles with the random walk, so a
+        collision would show up as a car booked into two places at once."""
+        for booking in rows_of(demo, Booking, Booking.status == "pending"):
+            assert booking.vehicle.status != "maintenance", booking
 
 
 class TestMoneyIsConsistent:
@@ -379,9 +481,15 @@ class TestMoneyIsConsistent:
 
 
 class TestNobodyRealIsContactable:
+    #: The two documented logins. `rentdesk.local` is not a resolvable domain,
+    #: so nothing in a demo database can reach a real person by email.
+    KNOWN_LOGINS = frozenset({DEMO_ADMIN_EMAIL, DEMO_STAFF_EMAIL})
+
     def test_all_emails_are_fictional(self, demo):
         for user in rows_of(demo, Users):
-            assert user.email.endswith("@example.com") or user.email == DEMO_ADMIN_EMAIL
+            assert (
+                user.email.endswith("@example.com") or user.email in self.KNOWN_LOGINS
+            ), user.email
 
     def test_phones_look_like_placeholders(self, demo):
         for user in rows_of(demo, Users):
@@ -394,6 +502,15 @@ class TestDemoAdmin:
             select(Users).where(Users.email == DEMO_ADMIN_EMAIL)
         ).scalars().one()
         assert admin.role == "admin"
+
+    def test_counter_exists_and_is_not_an_admin(self, demo):
+        """The whole staff/admin split is the point of the second login, so it
+        has to be asserted: a `counter` typed as `admin` would hand out the
+        dashboard charts to the wrong person."""
+        counter = demo.execute(
+            select(Users).where(Users.email == DEMO_STAFF_EMAIL)
+        ).scalars().one()
+        assert counter.role == "staff"
 
     def test_admin_password_really_verifies(self, tmp_path, monkeypatch):
         """The stubbed hash in the shared fixture must not hide a typo in the
