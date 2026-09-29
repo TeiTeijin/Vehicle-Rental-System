@@ -22,7 +22,16 @@ def _build_database_url(raw: str | None) -> str:
             value = str(BASE_DIR / value)
         query.append((key, value))
 
-    return urlunsplit((scheme, parts.netloc, parts.path, urlencode(query), ""))
+    search = urlencode(query)
+
+    if parts.netloc:
+        return urlunsplit((scheme, parts.netloc, parts.path, search, ""))
+
+    # urlunsplit() drops the "//" authority marker whenever netloc is empty, so
+    # rebuilding a SQLite URL through it turns "sqlite:///rental.db" into
+    # "sqlite:/rental.db" -- a string SQLAlchemy refuses to parse. SQLite URLs
+    # carry everything in the path with no authority, so emit them by hand.
+    return f"{scheme}://{parts.path}{'?' + search if search else ''}"
 
 
 DATABASE_URL = _build_database_url(os.getenv("DATABASE_URL"))

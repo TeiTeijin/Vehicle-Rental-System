@@ -1,9 +1,19 @@
-"""Add hero spec columns to VEHICLE, backfill them, and seed one SUV.
+"""Backfill the hero spec columns on VEHICLE for databases that predate them.
 
-Idempotent: every step checks current state first, so re-running is safe.
+A *fresh* database does not need this script. `scripts/init_db.py` builds
+VEHICLE straight from the ORM, which already declares seats / transmission /
+fuel_type / body_style, and `scripts/seed_data.py` already populates them for
+every seeded vehicle. This exists only to upgrade a VEHICLE table created
+before those columns were added to the model.
+
+Idempotent: every step inspects current state first, so re-running is safe.
 
     python -m scripts.migrate_vehicle_specs --dry-run
     python -m scripts.migrate_vehicle_specs
+
+Schema only. Vehicle rows are seeded by `scripts/seed_data.py`, not here --
+this script used to also insert the showcase Fortuner, which duplicated the row
+seed_data already creates and so could never be relied on.
 """
 
 from __future__ import annotations
@@ -11,14 +21,15 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text, update
 
 from app.database import engine
 from app.models import Vehicle
 
 TABLE = Vehicle.__tablename__
 
-# (column, MySQL ENUM/SCALAR DDL fragment)
+# Column -> DDL fragment. The ENUM lists must stay in step with the Column
+# declarations in app/models/vehicle.py.
 NEW_COLUMNS: list[tuple[str, str]] = [
     ("seats", "INT NULL"),
     ("transmission", "ENUM('Automatic','Manual') NULL"),
@@ -29,7 +40,7 @@ NEW_COLUMNS: list[tuple[str, str]] = [
     ),
 ]
 
-# Spec values below are hand-written assumptions, NOT manufacturer data.
+# These are hand-written assumptions, NOT manufacturer data.
 # Correct them if you have the real figures.
 BACKFILL: dict[tuple[str, str], dict] = {
     ("Toyota", "Vios"): dict(seats=5, transmission="Automatic", fuel_type="Petrol", body_style="Sedan"),
@@ -39,163 +50,120 @@ BACKFILL: dict[tuple[str, str], dict] = {
     ("Yamaha", "NMAX 155"): dict(seats=2, transmission="Automatic", fuel_type="Petrol", body_style="Scooter"),
 }
 
-SHOWCASE_SUV = dict(
-    make="Toyota",
-    model="Fortuner",
-    year=2023,
-    plate_number="FOR1234",
-    daily_rate="4500.00",
-    mileage=15000,
-    seats=7,
-    transmission="Automatic",
-    fuel_type="Diesel",
-    body_style="SUV",
-)
-
 
 def existing_columns() -> set[str]:
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table"
-            ),
-            {"table": TABLE},
-        )
-        return {r[0] for r in rows}
+    """Column names on VEHICLE, on any backend.
+
+    Uses SQLAlchemy's inspector rather than information_schema, which only
+    exists on MySQL and made this script crash with a raw driver error on
+    SQLite.
+    """
+    inspector = inspect(engine)
+    if TABLE not in inspector.get_table_names():
+        return set()
+    return {column["name"] for column in inspector.get_columns(TABLE)}
 
 
 def add_columns(present: set[str], dry_run: bool) -> set[str]:
+    if not present:
+        print(f"  ! {TABLE} does not exist yet -- run scripts/init_db.py first")
+        return present
+
     for column, ddl in NEW_COLUMNS:
         if column in present:
             print(f"  = {TABLE}.{column:<12} already exists, skipping")
             continue
-        sql = f"ALTER TABLE {TABLE} ADD COLUMN {column} {ddl}"
         if dry_run:
             print(f"  + {TABLE}.{column:<12} WOULD ADD  ({ddl})")
         else:
             with engine.begin() as conn:
-                conn.execute(text(sql))
+                conn.execute(text(f"ALTER TABLE {TABLE} ADD COLUMN {column} {ddl}"))
             print(f"  + {TABLE}.{column:<12} added       ({ddl})")
         present.add(column)
     return present
 
 
-def car_category_id() -> int:
-    with engine.connect() as conn:
-        value = conn.execute(
-            text("SELECT category_id FROM VEHICLE_CATEGORY WHERE category_name = 'Car'")
-        ).scalar()
-    if value is None:
-        raise SystemExit("no 'Car' row in VEHICLE_CATEGORY - seed the database first")
-    return int(value)
+def backfill(present: set[str], dry_run: bool) -> None:
+    missing = [column for column, _ in NEW_COLUMNS if column not in present]
+    if missing:
+        print(f"  ! spec columns not present ({', '.join(missing)}); nothing to backfill")
+        return
 
-
-def backfill(dry_run: bool) -> None:
-    sql = (
-        "UPDATE VEHICLE v JOIN VEHICLE_CATEGORY c ON c.category_id = v.category_id "
-        "SET v.seats = :seats, v.transmission = :transmission, "
-        "v.fuel_type = :fuel_type, v.body_style = :body_style "
-        "WHERE v.make = :make AND v.model = :model AND v.seats IS NULL"
-    )
-    for make, model in BACKFILL:
-        spec = BACKFILL[(make, model)]
+    for (make, model), spec in BACKFILL.items():
         if dry_run:
             print(f"  ~ would backfill {make} {model:<11} {spec}")
             continue
-        with engine.begin() as txn:
-            result = txn.execute(text(sql), dict(spec, make=make, model=model))
-        affected = result.rowcount
+
+        # A Core UPDATE rather than MySQL's UPDATE...JOIN, so this runs on any
+        # backend. Only touches rows that still have no specs.
+        stmt = (
+            update(Vehicle)
+            .where(
+                Vehicle.make == make,
+                Vehicle.model == model,
+                Vehicle.seats.is_(None),
+            )
+            .values(**spec)
+        )
+        with engine.begin() as conn:
+            affected = conn.execute(stmt).rowcount
         if affected:
             print(f"  ~ backfilled {make} {model:<11} {spec}")
         else:
             print(f"  = {make} {model:<11} already has specs, skipping")
 
 
-def seed_suv(dry_run: bool) -> None:
-    with engine.connect() as conn:
-        exists = conn.execute(
-            text(f"SELECT vehicle_id FROM {TABLE} WHERE plate_number = :plate"),
-            {"plate": SHOWCASE_SUV["plate_number"]},
-        ).first()
-    if exists:
-        print(f"  * {SHOWCASE_SUV['make']} {SHOWCASE_SUV['model']} already present (id={exists[0]}), skipping")
-        return
-
-    payload = dict(SHOWCASE_SUV)
-    if dry_run:
-        print(f"  + would insert {payload['make']} {payload['model']} {payload['year']} plate={payload['plate_number']}")
-        return
-
-    payload["category_id"] = car_category_id()
-    payload["status"] = "available"
-    payload["created_at"] = datetime.now()
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                f"INSERT INTO {TABLE} "
-                "(category_id, make, model, year, plate_number, daily_rate, mileage, "
-                "seats, transmission, fuel_type, body_style, status, created_at) "
-                "VALUES (:category_id, :make, :model, :year, :plate_number, :daily_rate, "
-                ":mileage, :seats, :transmission, :fuel_type, :body_style, :status, :created_at)"
-            ),
-            payload,
-        )
-    print(f"  + inserted {payload['make']} {payload['model']} {payload['year']} plate={payload['plate_number']}")
-
-
-def show_table() -> None:
-    present = existing_columns()
-    spec_cols = [c for c, _ in NEW_COLUMNS if c in present]
+def show_table(present: set[str]) -> None:
+    spec_cols = [column for column, _ in NEW_COLUMNS if column in present]
     wanted = ["vehicle_id", "make", "model", "year", "plate_number", "daily_rate", *spec_cols, "status"]
-    select = ", ".join(f"v.{c}" for c in wanted)
 
     with engine.connect() as conn:
         rows = conn.execute(
-            text(f"SELECT {select} FROM {TABLE} v ORDER BY v.year DESC, v.vehicle_id")
+            text(
+                f"SELECT {', '.join(wanted)} FROM {TABLE} ORDER BY year DESC, vehicle_id"
+            )
         ).fetchall()
 
-    if not spec_cols:
-        print("  (spec columns not present yet - run without --dry-run to add them)")
+    if not rows:
+        print("  (no vehicles yet -- run scripts/seed_data.py)")
+        return
 
-    pad = {c: max(len(c), 5) for c in spec_cols}
-    header = f"  {'id':<4}{'vehicle':<24}{'plate':<10}{'rate':>9}  " + "".join(
-        f"{c:<{pad[c] + 2}}" for c in spec_cols
-    ) + "status"
+    header = f"  {'id':<4}{'vehicle':<24}{'plate':<10}{'rate':>9}  status"
     print()
     print(header)
     print("  " + "-" * (len(header) - 2))
-    for r in rows:
-        row = dict(zip(wanted, r))
-        name = f"{row['make']} {row['model']} {row['year']}"
-        spec = "".join(
-            f"{str(row[c] or '-'):<{pad[c] + 2}}" for c in spec_cols
+    for row in rows:
+        record = dict(zip(wanted, row))
+        name = f"{record['make']} {record['model']} {record['year']}"
+        specs = "  ".join(
+            f"{column}={record[column]}" for column in spec_cols if record[column] is not None
         )
         print(
-            f"  {row['vehicle_id']:<4}{name:<24}{row['plate_number']:<10}"
-            f"{float(row['daily_rate']):>9,.2f}  {spec}{row['status']}"
+            f"  {record['vehicle_id']:<4}{name:<24}{record['plate_number']:<10}"
+            f"{float(record['daily_rate']):>9,.2f}  {record['status']}"
+            + (f"   [{specs}]" if specs else "")
         )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true", help="print changes without applying them")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print changes without applying them",
+    )
     args = parser.parse_args()
 
     print("=== 1. add columns ===")
-    add_columns(existing_columns(), args.dry_run)
+    present = add_columns(existing_columns(), args.dry_run)
 
     print()
     print("=== 2. backfill existing rows ===")
-    backfill(args.dry_run)
+    backfill(present, args.dry_run)
 
     print()
-    print("=== 3. seed showcase SUV ===")
-    seed_suv(args.dry_run)
-
-    print()
-    print("=== current VEHICLE table ===")
-    show_table()
+    print(f"=== current {TABLE} table ===")
+    show_table(present)
 
 
 if __name__ == "__main__":
