@@ -1,0 +1,209 @@
+/* PALETTE
+bg = #F1E8D8
+navbar = #FFFFFF
+text = #1A1A1A
+muted = #8A8175
+accent = #D8CCBB
+underline = #171717
+auth_bg = #EEEAE1
+auth_bg_hover = #E6E1D6
+border = #D8CCBB
+*/
+
+QMainWindow, QWidget {
+    background: #F1E8D8;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+}
+
+QFrame#navbar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #D8CCBB;
+}
+
+QWidget#navSection {
+    background: transparent;
+}
+
+QLabel#logo {
+    background: transparent;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+    font-size: 16px;
+    font-weight: 600;
+}
+
+QPushButton#navItem {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 2px;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QPushButton#navItem:hover {
+    border-bottom: 2px solid #171717;
+}
+
+QPushButton#navItem:checked {
+    border-bottom: 2px solid #171717;
+}
+
+QPushButton#authButton {
+    background: #EEEAE1;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+    padding: 0 16px;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QPushButton#authButton:hover {
+    background: #E6E1D6;
+    border-color: #C9BCA6;
+}
+
+QPushButton#authButton[authenticated="true"] {
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 0;
+}
+
+QPushButton#authButton[authenticated="true"]:hover {
+    background: #F1E8D8;
+    border: none;
+}
+
+/* HERO SHOWCASE
+hero_bg  = #EEEAE1
+hero_ink = #9B978F at 95% (car name)
+muted    = #1A1A1A at 90% / 80% (eyebrow / spec row)
+outline  = #AAA294 (view details border)
+book_bg  = #1A1A1A
+*/
+
+QWidget#heroScroll,
+QWidget#hero {
+    background: #EEEAE1;
+    border: none;
+}
+
+QLabel#heroEyebrow {
+    background: transparent;
+    color: rgba(26, 26, 26, 0.90);
+    font-family: "Inter 18pt";
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* No font-size here on purpose: the name is scaled per slide so it always
+   bleeds past the photo, and a stylesheet font-size would beat setFont(). */
+QLabel#heroName {
+    background: transparent;
+    color: rgba(155, 151, 143, 0.95);
+    font-family: "Inter 18pt";
+    font-weight: 700;
+}
+
+QLabel#heroImage {
+    background: transparent;
+    border: none;
+}
+
+/* Skeleton blocks. Cosmetic only: they make a wait legible, they do not
+   shorten it. These background rules are superseded by Skeleton.paintEvent,
+   which fills and sweeps the block itself; they are kept so the blocks still
+   read as blocks under any style that gets applied before the first paint. */
+QWidget#heroImageSkeleton {
+    background: #DDD8CD;
+    border: none;
+}
+
+QWidget#heroEyebrowSkeleton {
+    background: #D3CDC1;
+    border: none;
+}
+
+QWidget#heroPriceSkeleton {
+    background: #D3CDC1;
+    border: none;
+}
+
+QWidget#heroSpecsSkeleton {
+    background: #DDD8CD;
+    border: none;
+}
+
+QLabel#heroPrice {
+    background: transparent;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#heroSpecs {
+    background: transparent;
+    color: rgba(26, 26, 26, 0.80);
+    font-family: "Inter 18pt";
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#heroStatus {
+    background: transparent;
+    color: rgba(26, 26, 26, 0.80);
+    font-family: "Inter 18pt";
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QToolButton#heroArrow {
+    background: transparent;
+    border: none;
+    border-radius: 24px;
+}
+
+QToolButton#heroArrow:hover:enabled {
+    background: #E6E1D6;
+}
+
+QToolButton#heroArrow:disabled {
+    background: transparent;
+}
+
+QPushButton#heroViewDetails {
+    background: #EEEAE1;
+    border: 1px solid #AAA294;
+    border-radius: 6px;
+    color: #1A1A1A;
+    font-family: "Inter 18pt";
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QPushButton#heroViewDetails:hover {
+    background: #E6E1D6;
+    border-color: #8A8175;
+}
+
+QPushButton#heroBook {
+    background: #1A1A1A;
+    border: 1px solid #1A1A1A;
+    border-radius: 6px;
+    color: #FFFFFF;
+    font-family: "Inter 18pt";
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QPushButton#heroBook:hover {
+    background: #171717;
+    border-color: #171717;
+}

@@ -23,11 +23,12 @@ CATEGORIES = [
 ]
 
 VEHICLES = [
-    {"make": "Toyota", "model": "Vios", "year": 2022, "plate": "TOY1234", "daily_rate": "2500.00", "mileage": 42000, "category": "Car"},
-    {"make": "Honda", "model": "Civic", "year": 2021, "plate": "CIV1234", "daily_rate": "3000.00", "mileage": 38000, "category": "Car"},
-    {"make": "Toyota", "model": "Camry", "year": 2020, "plate": "CAM1234", "daily_rate": "3500.00", "mileage": 51000, "category": "Car"},
-    {"make": "Honda", "model": "Click 125i", "year": 2023, "plate": "CLK1234", "daily_rate": "800.00", "mileage": 12000, "category": "Motorcycle"},
-    {"make": "Yamaha", "model": "NMAX 155", "year": 2022, "plate": "NMA1234", "daily_rate": "1000.00", "mileage": 15000, "category": "Motorcycle"},
+    {"make": "Toyota", "model": "Vios", "year": 2022, "plate": "TOY1234", "daily_rate": "2500.00", "mileage": 42000, "category": "Car", "seats": 5, "transmission": "Automatic", "fuel_type": "Petrol", "body_style": "Sedan"},
+    {"make": "Honda", "model": "Civic", "year": 2021, "plate": "CIV1234", "daily_rate": "3000.00", "mileage": 38000, "category": "Car", "seats": 5, "transmission": "Manual", "fuel_type": "Petrol", "body_style": "Sedan"},
+    {"make": "Toyota", "model": "Camry", "year": 2020, "plate": "CAM1234", "daily_rate": "3500.00", "mileage": 51000, "category": "Car", "seats": 5, "transmission": "Automatic", "fuel_type": "Hybrid", "body_style": "Sedan"},
+    {"make": "Toyota", "model": "Fortuner", "year": 2023, "plate": "FOR1234", "daily_rate": "4500.00", "mileage": 15000, "category": "Car", "seats": 7, "transmission": "Automatic", "fuel_type": "Diesel", "body_style": "SUV"},
+    {"make": "Honda", "model": "Click 125i", "year": 2023, "plate": "CLK1234", "daily_rate": "800.00", "mileage": 12000, "category": "Motorcycle", "seats": 2, "transmission": "Automatic", "fuel_type": "Petrol", "body_style": "Underbone"},
+    {"make": "Yamaha", "model": "NMAX 155", "year": 2022, "plate": "NMA1234", "daily_rate": "1000.00", "mileage": 15000, "category": "Motorcycle", "seats": 2, "transmission": "Automatic", "fuel_type": "Petrol", "body_style": "Scooter"},
 ]
 
 USERS = [
@@ -98,6 +99,10 @@ def seed_categories_and_vehicles(session) -> None:
                 plate_number=v["plate"],
                 daily_rate=v["daily_rate"],
                 mileage=v["mileage"],
+                seats=v["seats"],
+                transmission=v["transmission"],
+                fuel_type=v["fuel_type"],
+                body_style=v["body_style"],
                 status="available",
                 created_at=datetime.now(),
             )

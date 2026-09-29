@@ -14,6 +14,10 @@ class Vehicle(Base):
     plate_number = Column(String(7), nullable=False, unique=True)
     daily_rate = Column(DECIMAL(10, 2), nullable=False)
     mileage = Column(Integer, nullable=False)
+    seats = Column(Integer, nullable=True)
+    transmission = Column(Enum('Automatic', 'Manual'), nullable=True)
+    fuel_type = Column(Enum('Petrol', 'Diesel', 'Electric', 'Hybrid'), nullable=True)
+    body_style = Column(Enum('SUV', 'Sedan', 'Hatchback', 'MPV', 'Pickup', 'Underbone', 'Scooter'), nullable=True)
     status = Column(Enum('available', 'reserved', 'rented', 'maintenance'), nullable=False, default='available')
     created_at = Column(DateTime, nullable=False)
 
