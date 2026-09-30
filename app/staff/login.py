@@ -170,9 +170,11 @@ class LoginView(QWidget):
 
         wordmark = QLabel("Rent Desk", self)
         wordmark.setObjectName(OBJ_LOGIN_WORDMARK)
+        wordmark.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         caption = QLabel("Staff Sign in", self)
         caption.setObjectName(OBJ_LOGIN_CAPTION)
+        caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.email = FloatingField("Email", self)
         if context.selection.is_demo:
