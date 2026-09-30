@@ -85,16 +85,22 @@ CAPTION = "#9B978F"
 #: does not read as the most important control in the app.
 BUTTON = "#E5D7BE"
 BUTTON_HOVER = "#DCCBAE"
-#: The rule under a field. Weightens to PETROL on focus.
+#: The rule under a field. Weightens to FIELD_FOCUS on focus.
 RULE = "#CFC6B5"
-#: Keyboard focus ring on the entry itself.
-FIELD_FOCUS = "#1F4E5F"
+#: Keyboard focus ring on the entry itself. The sign-in's button sand, so the
+#: one accent on that page is a single colour.
+FIELD_FOCUS = "#E5D7BE"
+#: The focus colour where it has to carry 12px text. #E5D7BE on white is
+#: 1.42:1 and would leave the lifted caption invisible, so the caption takes a
+#: darker shade of the same hue -- 4.84:1, and still recognisably the sand.
+FIELD_FOCUS_TEXT = "#8A6D3F"
 
 OBJ_LOGIN_ROOT = "loginRoot"
 OBJ_LOGIN_FORM = "loginForm"
 OBJ_LOGIN_WORDMARK = "loginWordmark"
 OBJ_LOGIN_CAPTION = "loginCaption"
 OBJ_LOGIN_FIELD = "loginField"
+OBJ_LOGIN_REVEAL = "loginReveal"
 OBJ_LABEL_REST = "loginLabel"
 OBJ_LABEL_LIFTED = "loginLabelLifted"
 OBJ_LOGIN_BUTTON = "loginButton"

@@ -26,7 +26,8 @@ import re
 from collections import Counter
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QApplication, QWidget
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -41,6 +42,10 @@ from app.staff.login import (  # noqa: E402
     FIELD_TOP,
     LOGIN_SIZE,
     MASK_CHAR,
+    REVEAL_ICON_HIDDEN,
+    REVEAL_ICON_PX,
+    REVEAL_ICON_SHOWN,
+    REVEAL_TINT,
     LoginView,
 )
 
@@ -195,29 +200,42 @@ class TestThePageIsActuallyWhite:
 
 
 # --------------------------------------------------------------------------
-# The two centred labels
+# The two headings, pinned left
 # --------------------------------------------------------------------------
 
 
-class TestTheHeadingIsCentred:
+class TestTheHeadingIsLeftAligned:
     @pytest.mark.parametrize(
         "object_name", [theme.OBJ_LOGIN_WORDMARK, theme.OBJ_LOGIN_CAPTION]
     )
-    def test_the_ink_sits_on_the_window_centre_line(self, view, object_name):
+    def test_the_ink_lines_up_with_the_fields(self, view, object_name):
         """`setAlignment` alone does nothing on a QLabel, because its maximum
         width is its text width, so the layout hands it no slack to distribute.
-        The widget has to be centred in its row as well."""
+        `AlignLeft` in the row below is what actually puts it there -- and what
+        matters is that the headings start where the fields start, not merely
+        that they are somewhere left of the middle."""
         from PySide6.QtWidgets import QLabel
 
         label = next(
             w for w in view.findChildren(QLabel) if w.objectName() == object_name
         )
-        x0, x1 = _ink_box(view, label)
-        centre = (x0 + x1) / 2
-        window_centre = (view.width() - 1) / 2
-        assert abs(centre - window_centre) <= 1.5, (
-            f"{object_name} is {centre - window_centre:+.1f}px off centre"
+        x0, _ = _ink_box(view, label)
+        field_left = view.email.mapTo(view, QPoint(0, 0)).x()
+        assert abs(x0 - field_left) <= 2, (
+            f"{object_name} starts at x={x0} but the fields start at {field_left}"
         )
+
+    @pytest.mark.parametrize(
+        "object_name", [theme.OBJ_LOGIN_WORDMARK, theme.OBJ_LOGIN_CAPTION]
+    )
+    def test_the_widget_is_not_being_centred_by_the_layout(self, view, object_name):
+        from PySide6.QtWidgets import QLabel
+
+        label = next(
+            w for w in view.findChildren(QLabel) if w.objectName() == object_name
+        )
+        form = view.findChild(QWidget, theme.OBJ_LOGIN_FORM)
+        assert label.mapTo(form, QPoint(0, 0)).x() == 0, "the row is centring it"
 
     def test_the_two_labels_say_what_they_should(self, view):
         from PySide6.QtWidgets import QLabel
@@ -453,6 +471,374 @@ class TestTheMaskedField:
         assert view.email.text() == "someone@rentdesk.local"
 
 
+class TestTheRevealToggle:
+    """The eye in the password field."""
+
+    def test_it_belongs_to_the_password_field(self, view):
+        assert view.reveal.parent() is view.password, "it should ride in the field"
+
+    def test_it_sits_at_the_right_end_and_stays_inside(self, view):
+        toggle, field = view.reveal, view.password
+        right_gap = field.width() - (toggle.x() + toggle.width())
+        assert 0 <= right_gap <= 12, f"right gap is {right_gap}px"
+        assert toggle.y() >= 0 and toggle.y() + toggle.height() <= field.height()
+
+    def test_the_typed_text_cannot_run_under_the_eye(self, view):
+        """A 30px button parked on top of the field would sit on the end of a
+        long password unless the field keeps room for it."""
+        toggle = view.reveal
+        reserved = view.password.textMargins().right()
+        text_right_edge = view.password.width() - reserved
+        assert text_right_edge <= toggle.x(), (
+            f"text runs to x={text_right_edge} but the eye starts at {toggle.x()}"
+        )
+
+    def test_the_password_starts_masked(self, view):
+        assert view.password._masked
+        assert not view.reveal.isChecked()
+
+    def test_a_click_shows_the_password_and_another_hides_it(self, view):
+        view.reveal.click()
+        assert view.reveal.isChecked()
+        assert not view.password._masked, "the field and the eye disagreed"
+        view.reveal.click()
+        assert not view.reveal.isChecked()
+        assert view.password._masked
+
+    def test_the_button_is_the_only_source_of_truth(self, view):
+        """The eye and the field used to each keep their own flag; if only one
+        is flipped the icon and the text disagree."""
+        view.reveal.set_revealed(True, animated=False)
+        assert view.reveal.isChecked()
+        assert not view.password._masked
+        view.reveal.set_revealed(False, animated=False)
+        assert view.password._masked
+
+    def test_the_eye_says_which_way_it_will_go(self, view):
+        assert "Show" in view.reveal.toolTip()
+        view.reveal.click()
+        assert "Hide" in view.reveal.toolTip()
+
+    def test_it_is_not_in_the_tab_order(self, view):
+        """Tab is for filling the form in; the eye is a shortcut, and a stop
+        in the chain that only leads back to the same field."""
+        from PySide6.QtCore import Qt
+
+        assert view.reveal.focusPolicy() == Qt.FocusPolicy.NoFocus
+
+    def test_the_fade_actually_runs_and_lands_on_the_icon(self, view):
+        from PySide6.QtCore import QPropertyAnimation
+
+        fade = view.reveal._fade
+        assert isinstance(fade, QPropertyAnimation) or fade.duration() > 0
+        view.reveal.click()
+        assert fade.state() == QPropertyAnimation.State.Running
+        _settle(view.password)
+        assert view.reveal._progress == 1.0
+        # Not left a hair short, which would keep a ghost of the other eye.
+        view.reveal.click()
+        _settle(view.password)
+        assert view.reveal._progress == 0.0
+
+    def test_both_eye_images_are_actually_loaded(self, view):
+        """A missing file gives a null pixmap and a silently blank button."""
+        for name in (REVEAL_ICON_HIDDEN, REVEAL_ICON_SHOWN):
+            pixmap = view.reveal._source[name]
+            assert not pixmap.isNull(), f"{name} did not load"
+            assert pixmap.width() >= REVEAL_ICON_PX, f"{name} is too small to draw"
+
+    def test_the_eye_paints_something(self, view):
+        """Null pixmaps and successful ones both pass the size check above."""
+        painted = _toggle_pixels(view, view.reveal)
+        assert painted, "the toggle is drawing nothing at all"
+        assert REVEAL_TINT.lower() in painted, f"expected the tint, painted {painted}"
+
+    def test_no_cream_square_behind_the_eye(self, view):
+        """The global QWidget rule fills this page with cream, so the toggle
+        has to opt out explicitly -- exactly the trap that turned the form
+        column cream."""
+        image = view.grab().toImage()
+        origin = view.reveal.mapTo(view, view.reveal.rect().topLeft())
+        for y in range(origin.y(), origin.y() + view.reveal.height()):
+            for x in range(origin.x(), origin.x() + view.reveal.width()):
+                assert image.pixelColor(x, y).name() != theme.BG.lower(), (
+                    f"cream at {(x, y)} behind the eye"
+                )
+
+    def test_the_two_eyes_are_different_pictures(self, view):
+        """Otherwise the cross-fade has nothing to fade between."""
+        hidden = view.reveal._source[REVEAL_ICON_HIDDEN].toImage()
+        shown = view.reveal._source[REVEAL_ICON_SHOWN].toImage()
+        assert hidden != shown, "the crossed and plain eye are the same file"
+
+    def test_the_eye_shows_the_current_state_not_the_next_one(self, view):
+        """Masked has to look masked, and revealed has to look revealed.
+
+        Both files are "an eye", and the crossed-out one is very nearly the
+        plain one plus a diagonal, so comparing whole pictures barely separates
+        them. The diagonal is the part that distinguishes the states, so that
+        is what gets asserted: drawn while masked, gone once revealed.
+        """
+        assert view.reveal.dominant_icon == REVEAL_ICON_HIDDEN
+        assert _slash_strength(view) > 0.7, "masked, but the eye is not struck out"
+
+        view.reveal.click()
+        _settle(view.password)
+        assert view.reveal.dominant_icon == REVEAL_ICON_SHOWN
+        assert _slash_strength(view) < 0.2, "revealed, but it is still struck out"
+
+        view.reveal.click()
+        _settle(view.password)
+        assert _slash_strength(view) > 0.7
+
+    def test_mid_fade_the_slash_is_only_half_gone(self, view):
+        """Halfway, the strike sits between the two states rather than having
+        snapped to one of them."""
+        assert 0.3 < _slash_strength(view, 0.5) < 0.8
+
+    def test_revealing_draws_letters_and_masking_draws_bullets(self, view):
+        view.password.setText("demo-password")
+        view.reveal.click()
+        _settle(view.password)
+        revealed = _first_glyph_width(view)
+        view.reveal.click()
+        _settle(view.password)
+        masked = _first_glyph_width(view)
+        assert masked < revealed, (
+            f"masked {masked}px vs revealed {revealed}px -- the mask may not be on"
+        )
+
+
+#: Summed RGB below which a pixel counts as ink. The artwork is tinted to
+#: #8A8175, which sums to 384, and antialiased edges land anywhere between that
+#: and white, so the cut has to sit close to white to catch a thin diagonal.
+INK_CUTOFF = 760
+
+
+def _is_ink(image, x: int, y: int, cutoff: int = INK_CUTOFF) -> bool:
+    return sum(image.pixelColor(x, y).getRgb()[:3]) < cutoff
+
+
+def _toggle_ink(view, toggle) -> set:
+    """The (x, y) points inside the toggle that carry ink, relative to it."""
+    image = view.grab().toImage()
+    origin = toggle.mapTo(view, toggle.rect().topLeft())
+    return {
+        (x - origin.x(), y - origin.y())
+        for y in range(origin.y(), origin.y() + toggle.height())
+        for x in range(origin.x(), origin.x() + toggle.width())
+        if _is_ink(image, x, y)
+    }
+
+
+def _source_ink(toggle, filename, cutoff: int = INK_CUTOFF) -> set:
+    """The same picture scaled into the toggle, ink only.
+
+    Rebuilt with the widget's own draw call so the comparison is against what
+    the eye is *supposed* to be on screen, not a hand-copied threshold.
+    """
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    size = toggle.width()
+    image = QImage(size, size, QImage.Format.Format_ARGB32)
+    image.fill(QColor(255, 255, 255))
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    side = REVEAL_ICON_PX
+    painter.drawPixmap(
+        QRect((size - side) // 2, (size - side) // 2, side, side),
+        toggle._source[filename],
+    )
+    painter.end()
+    return {
+        (x, y)
+        for y in range(size)
+        for x in range(size)
+        if _is_ink(image, x, y, cutoff)
+    }
+
+
+def _agreement(rendered: set, expected: set) -> float:
+    """How much of the expected ink actually turned up, 0..1."""
+    if not expected:
+        return 0.0
+    return len(rendered & expected) / len(expected)
+
+
+def _slash_strength(view, progress: float | None = None) -> float:
+    """How strongly the crossed-out eye's diagonal is drawn, 0..1.
+
+    Measured against the part the plain eye does not have, so the shared body
+    of the two pictures cannot pad the score. Full strength is taken as
+    whatever the diagonal measures at 50% opacity on the crossed-out eye --
+    derived, not hard-coded, so it does not depend on the tint or on how this
+    platform antialiases a diagonal.
+    """
+    toggle = view.reveal
+    only_here = _source_ink(toggle, REVEAL_ICON_HIDDEN) - _source_ink(
+        toggle, REVEAL_ICON_SHOWN
+    )
+    if not only_here:
+        return 0.0
+
+    def measure() -> float:
+        image = view.grab().toImage()
+        origin = toggle.mapTo(view, toggle.rect().topLeft())
+        total = 0.0
+        for dx, dy in only_here:
+            total += 765 - sum(
+                image.pixelColor(origin.x() + dx, origin.y() + dy).getRgb()[:3]
+            )
+        return total / len(only_here)
+
+    def at(value: float) -> float:
+        keep = toggle._progress
+        toggle._progress = value
+        toggle.repaint()
+        reading = measure()
+        toggle._progress = keep
+        toggle.repaint()
+        return reading
+
+    reference = at(0.0)
+    if reference <= 20:
+        return 0.0
+    if progress is None:
+        return measure() / reference
+    return at(progress) / reference
+
+
+def _toggle_pixels(view, toggle) -> dict:
+    from PySide6.QtWidgets import QWidget
+
+    image = view.grab().toImage()
+    origin = toggle.mapTo(view, QPoint(0, 0))
+    counts: dict = {}
+    for y in range(origin.y(), origin.y() + toggle.height()):
+        for x in range(origin.x(), origin.x() + toggle.width()):
+            name = image.pixelColor(x, y).name()
+            if name != "#ffffff":
+                counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _first_glyph_width(view) -> int:
+    image = view.grab().toImage()
+    top = view.password.mapTo(view, view.password.rect().topLeft()).y()
+    xs = set()
+    for y in range(top + 24, top + view.password.height() - 6):
+        for x in range(2, view.reveal.x()):
+            c = image.pixelColor(x, y)
+            if c.red() + c.green() + c.blue() < 600:
+                xs.add(x)
+    ordered = sorted(xs)
+    if not ordered:
+        return 0
+    group = [ordered[0]]
+    for a, b in zip(ordered, ordered[1:]):
+        if b - a > 1:
+            break
+        group.append(b)
+    return group[-1] - group[0] + 1
+
+
+class TestTheFocusColour:
+    @staticmethod
+    def _rule_colours(view, field) -> set:
+        """Every non-white colour in the last few rows of a field.
+
+        Sampling one exact row is fragile: a 1px rule and a 2px one do not
+        start on the same line, and the focused one also shifts the padding.
+        """
+        image = view.grab().toImage()
+        bottom = field.mapTo(view, field.rect().bottomLeft()).y()
+        found = set()
+        for y in range(bottom - 3, bottom + 1):
+            for x in range(80, 240):
+                name = image.pixelColor(x, y).name()
+                if name != "#ffffff":
+                    found.add(name)
+        return found
+
+    def test_the_focused_rule_is_the_button_sand(self, view):
+        _focus(view, view.password)
+        found = self._rule_colours(view, view.password)
+        assert theme.BUTTON.lower() in found, f"rule colours were {found}"
+
+    def test_an_unfocused_rule_stays_the_pale_rule(self, view):
+        _focus(view, view.password)
+        _blur(view, view.password)
+        found = self._rule_colours(view, view.password)
+        assert theme.RULE.lower() in found, f"rule colours were {found}"
+        assert theme.BUTTON.lower() not in found, "the accent stuck after blur"
+
+    def test_the_lifted_caption_stays_readable(self, view):
+        """The accent is now the button's sand, which is 1.42:1 on white and
+        would leave a 12px caption invisible, so the caption uses a darker
+        shade of the same colour. This is what stops that regressing."""
+        _focus(view, view.password)
+        view.repaint()
+        image = view.grab().toImage()
+        label = view.password._label
+        origin = label.mapTo(view, QPoint(0, 0))
+        ink = set()
+        for y in range(origin.y(), origin.y() + label.height()):
+            for x in range(origin.x(), origin.x() + label.width()):
+                c = image.pixelColor(x, y)
+                if c.red() + c.green() + c.blue() < 600:
+                    ink.add(c.name())
+        assert ink, "the caption is not being drawn at all"
+        assert theme.FIELD_FOCUS_TEXT.lower() in ink, (
+            f"caption ink was {ink}, expected the token's shade"
+        )
+
+    def test_the_stylesheet_agrees_with_the_palette(self):
+        """Three copies of one colour drift. The tokens are the source; the
+        stylesheet has to be spelling the same ones."""
+        qss = theme.load_stylesheet().lower()
+        for token in (
+            theme.BUTTON,
+            theme.FIELD_FOCUS,
+            theme.FIELD_FOCUS_TEXT,
+            theme.RULE,
+        ):
+            assert token.lower() in qss, f"{token} is in the palette but not the sheet"
+
+    def test_no_stale_petrol_is_left_on_the_sign_in(self):
+        """Petrol used to be the focus colour. It is still the brand colour,
+        so it may stay in the palette, but the sign-in must not use it."""
+        sheet = theme.load_stylesheet()
+        sign_in = sheet[ sheet.index("QWidget#loginRoot") : ]
+        assert theme.PETROL.lower() not in sign_in.lower(), (
+            "the sign-in is still painting with petrol"
+        )
+
+
+class TestTheTypography:
+    def test_no_widget_falls_back_off_inter(self, view):
+        from app.utils.fonts import BUNDLED_FAMILY
+
+        offenders = []
+        for widget in view.findChildren(QWidget):
+            getter = getattr(widget, "text", None)
+            label = getter() if callable(getter) else ""
+            if not isinstance(label, str) or not label.strip():
+                continue
+            if BUNDLED_FAMILY not in widget.font().family():
+                offenders.append((widget.objectName(), label, widget.font().family()))
+        assert not offenders, offenders
+
+    def test_the_application_font_is_inter_not_just_the_stylesheet(self, view):
+        """`font-family` in a stylesheet is a request. Anything the sheet does
+        not reach would quietly use the system default, so the app font is set
+        as well."""
+        from app.utils.fonts import BUNDLED_FAMILY
+
+        app = QApplication.instance()
+        assert BUNDLED_FAMILY in app.font().family(), app.font().family()
+
+
 # --------------------------------------------------------------------------
 # Stylesheet integrity
 # --------------------------------------------------------------------------
@@ -467,7 +853,8 @@ class TestNoDeadStylesheetRules:
 
         rules = set(
             re.findall(
-                r"Q(?:Widget|Label|LineEdit|Frame|PushButton)#(login[A-Za-z]*)\s*\{",
+                r"Q(?:Widget|Label|LineEdit|Frame|PushButton|AbstractButton)"
+                r"#(login[A-Za-z]*)\s*\{",
                 theme.load_stylesheet(),
             )
         )
@@ -497,6 +884,7 @@ class TestNoDeadStylesheetRules:
             (theme.OBJ_LOGIN_WORDMARK, "QLabel"),
             (theme.OBJ_LOGIN_CAPTION, "QLabel"),
             (theme.OBJ_LOGIN_BUTTON, "QPushButton"),
+            (theme.OBJ_LOGIN_REVEAL, "QAbstractButton"),
         ):
             wrong = [
                 m
