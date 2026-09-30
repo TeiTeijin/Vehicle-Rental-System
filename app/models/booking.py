@@ -24,6 +24,17 @@ class Booking(Base):
     # questions staff actually get asked about it.
     cancel_reason = Column(String(255), nullable=True)
 
+    # Whether the rental was walked in at the counter or taken online. The
+    # branch reports on both, and the split cannot be reconstructed from
+    # anything else here: `created_by` says who took the booking, not where the
+    # customer found us, and one member of staff takes both kinds.
+    #
+    # Nullable rather than defaulted, on purpose. This column did not exist
+    # until the dashboard needed it, so every booking already on disk has no
+    # value for it -- which is TRUE information (the branch was not recording
+    # it), not a zero. Backfilling from nothing would invent history.
+    channel = Column(Enum('walk_in', 'online'), nullable=True)
+
     user = relationship("Users", back_populates="bookings", foreign_keys=[user_id])
     vehicle = relationship("Vehicle", back_populates="bookings")
 

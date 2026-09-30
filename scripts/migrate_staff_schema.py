@@ -56,6 +56,11 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
     "BOOKING": [
         ("created_by", "INT NULL", "which member of staff took the booking"),
         ("cancel_reason", "VARCHAR(255) NULL", "why a booking was cancelled"),
+        (
+            "channel",
+            "VARCHAR(8) NULL",
+            "walked in at the counter or taken online; needed by the dashboard",
+        ),
     ],
     "INSPECTION_REPORT": [
         (
@@ -73,6 +78,10 @@ INDEXES: list[tuple[str, str, list[str]]] = [
     ("BOOKING", "ix_booking_status_end", ["status", "end_date"]),
     # The Payments tab filters by status and created_at every refresh.
     ("PAYMENT", "ix_payment_status_created", ["status", "created_at"]),
+    # The dashboard's activity heatmap groups BOOKING by created_at across
+    # sixteen weeks, and its channel chart groups the same column by channel.
+    # Both are a full scan of BOOKING without this.
+    ("BOOKING", "ix_booking_created_at", ["created_at"]),
     # check_licence and the Customers tab both look a user up by licence.
     ("USERS", "ix_users_license_number", ["license_number"]),
 ]
@@ -309,7 +318,7 @@ def verify() -> bool:
 
     expected = {
         "PAYMENT": ["recorded_by", "reference_no", "note", "created_at"],
-        "BOOKING": ["created_by", "cancel_reason"],
+        "BOOKING": ["created_by", "cancel_reason", "channel"],
     }
     for table, columns in expected.items():
         present = _columns(table)
