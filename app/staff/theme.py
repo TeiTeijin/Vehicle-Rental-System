@@ -91,6 +91,7 @@ RULE = "#CFC6B5"
 FIELD_FOCUS = "#1F4E5F"
 
 OBJ_LOGIN_ROOT = "loginRoot"
+OBJ_LOGIN_FORM = "loginForm"
 OBJ_LOGIN_WORDMARK = "loginWordmark"
 OBJ_LOGIN_CAPTION = "loginCaption"
 OBJ_LOGIN_FIELD = "loginField"

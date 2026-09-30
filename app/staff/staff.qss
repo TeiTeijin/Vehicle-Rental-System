@@ -297,6 +297,14 @@ QWidget#loginRoot {
     background: #FFFFFF;
 }
 
+/* The form column. It has to be told to paint nothing, because the blanket
+   `QWidget { background: #F1E8D8 }` at the top of this file matches it -- it
+   has no object name of its own to override it with -- and it then draws a
+   cream panel straight over the white page. */
+QWidget#loginForm {
+    background: transparent;
+}
+
 QLabel#loginWordmark {
     background: transparent;
     color: #171717;

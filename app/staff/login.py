@@ -47,6 +47,7 @@ from app.staff.theme import (
     OBJ_LOGIN_FIELD,
     OBJ_LOGIN_FOOT,
     OBJ_LOGIN_ROOT,
+    OBJ_LOGIN_FORM,
     OBJ_LOGIN_WORDMARK,
 )
 from app.utils.fonts import load_fonts
@@ -101,6 +102,12 @@ class FloatingField(QLineEdit):
 
     def _restack(self, *, animate: bool = True) -> None:
         """Put the label where it belongs for the current focus/text state."""
+        # Derived, not remembered. Caching this in the focus handlers left it
+        # stale whenever the text changed without a focus change -- clearing
+        # the field, which is exactly what sign-out does to the password.
+        # A field holding text keeps its label up: the words are the answer
+        # now, so the caption is a label again rather than a prompt.
+        self._lifted = self.hasFocus() or bool(self.text())
         font = QFont(self.font())
         font.setPixelSize(LABEL_LIFTED_PX if self._lifted else LABEL_REST_PX)
         self._label.setFont(font)
@@ -130,14 +137,10 @@ class FloatingField(QLineEdit):
             self._label.move(target)
 
     def focusInEvent(self, event) -> None:
-        self._lifted = True
         super().focusInEvent(event)
         self._restack()
 
     def focusOutEvent(self, event) -> None:
-        # A field that still holds text keeps its label up: the words are the
-        # answer now, so the caption is a label again rather than a prompt.
-        self._lifted = bool(self.text())
         super().focusOutEvent(event)
         self._restack()
 
@@ -214,6 +217,7 @@ class LoginView(QWidget):
         self.hint.setWordWrap(True)
 
         form = QWidget(self)
+        form.setObjectName(OBJ_LOGIN_FORM)
         form.setFixedWidth(300)
         form_layout = QVBoxLayout(form)
         form_layout.setContentsMargins(0, 0, 0, 0)
