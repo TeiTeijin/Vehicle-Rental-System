@@ -72,6 +72,13 @@ LABEL_LIFTED_PX = 12
 LABEL_LIFT_Y = 3
 
 
+#: Drawn over a masked field. Qt's own password dot is a fixed-size
+#: decoration -- it stays 11x11px whatever the field's font size, so it
+#: cannot be tuned -- and PySide6 does not bind `QLineEdit::setEchoChar`, so
+#: the character cannot be swapped either.
+MASK_CHAR = "\u2022"
+
+
 class FloatingField(QLineEdit):
     """A line edit whose label starts inside as a placeholder and lifts out.
 
@@ -80,7 +87,9 @@ class FloatingField(QLineEdit):
     font is set, so the two states are measured rather than guessed.
     """
 
-    def __init__(self, caption: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, caption: str, parent: QWidget | None = None, *, masked: bool = False
+    ) -> None:
         super().__init__(parent)
         self.setObjectName(OBJ_LOGIN_FIELD)
         # The floating label does the placeholder's job. Leaving Qt's own
@@ -89,6 +98,7 @@ class FloatingField(QLineEdit):
         self.setPlaceholderText("")
 
         self._caption = caption
+        self._masked = masked
         self._label = QLabel(caption, self)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._lifted = False
@@ -144,6 +154,39 @@ class FloatingField(QLineEdit):
             self._fly.start()
         else:
             self._label.move(target)
+
+    def paintEvent(self, event) -> None:
+        """Draw a masked field's own dots instead of Qt's oversized ones.
+
+        The text is swapped for a same-length run of `MASK_CHAR` only for the
+        duration of the paint, and the real value is put back afterwards, so
+        the widget keeps the genuine text the whole time it is not painting.
+        Editing, selection, undo, paste and the caret all stay Qt's problem.
+
+        Painting the same number of characters in the same font also means Qt
+        positions the caret and the selection for us, which it could not do if
+        we drew the dots on top of a paint of the real text.
+        """
+        if not self._masked:
+            super().paintEvent(event)
+            return
+
+        secret = QLineEdit.text(self)
+        shown = MASK_CHAR * len(secret)
+        if shown == secret:
+            super().paintEvent(event)
+            return
+
+        cursor = self.cursorPosition()
+        blocked = self.blockSignals(True)
+        try:
+            QLineEdit.setText(self, shown)
+            self.setCursorPosition(min(cursor, len(shown)))
+            super().paintEvent(event)
+        finally:
+            QLineEdit.setText(self, secret)
+            self.setCursorPosition(min(cursor, len(secret)))
+            self.blockSignals(blocked)
 
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
@@ -201,8 +244,7 @@ class LoginView(QWidget):
         # The two together also behave if the form is ever made wider.
 
         self.email = FloatingField("Email", self)
-        self.password = FloatingField("Password", self)
-        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password = FloatingField("Password", self, masked=True)
         self.password.returnPressed.connect(self.attempt_sign_in)
         self.email.returnPressed.connect(self._focus_password)
 
