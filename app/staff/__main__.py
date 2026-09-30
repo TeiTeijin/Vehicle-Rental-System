@@ -54,9 +54,14 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     from app.staff.shell import StaffShell
+    from app.utils.fonts import load_fonts
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("RentDesk Staff")
+
+    # The stylesheet names the bundled family; without this the widgets render
+    # in whatever Qt picks instead. Needs the QApplication above to exist.
+    load_fonts()
 
     context = StaffContext(selection)
     try:

@@ -5,20 +5,28 @@ table, so this view is where a `customer` row is turned away -- the check is
 here as well as in ``StaffContext.require_staff`` because refusing at the door
 gives a clearer message than refusing on the first page.
 
-Two details worth keeping:
+Three details worth keeping:
 
   * The error is shown in one fixed place above the button, not as a popup, so
     the password field keeps focus and the user can just try again.
   * The email is lowercased on the way in, matching ``sign_in``, so an address
     typed with capitals still works instead of failing with "incorrect
     password" for a reason that is not about the password.
+  * The window is a fixed size while this is showing. The app behind it opens
+    at 1180x760 for tables of bookings, and a sign-in form stretched to that
+    width is a form stretched to that width.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPoint,
+    QPropertyAnimation,
+    Qt,
+)
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -30,11 +38,119 @@ from PySide6.QtWidgets import (
 from app.models import Users
 from app.services.auth_service import AuthError, sign_in
 from app.staff.context import StaffContext, StaffUser
-from app.staff.theme import OBJ_ERROR
+from app.staff.theme import (
+    OBJ_LABEL_LIFTED,
+    OBJ_LABEL_REST,
+    OBJ_LOGIN_BUTTON,
+    OBJ_LOGIN_CAPTION,
+    OBJ_LOGIN_ERROR,
+    OBJ_LOGIN_FIELD,
+    OBJ_LOGIN_FOOT,
+    OBJ_LOGIN_ROOT,
+    OBJ_LOGIN_WORDMARK,
+)
+from app.utils.fonts import load_fonts
+
+#: The sign-in window is exactly this size and no other. Chosen so the form
+#: sits comfortably at 16px type without the fields stretching, and so the
+#: error line has room to appear without the window jumping.
+LOGIN_SIZE = 432, 512
+
+#: Reserved clear space at the top of a field, matched to the transparent
+#: `border-top` in the stylesheet. The lifted label flies up *into* this band
+#: rather than above the widget: a QLineEdit is a QAbstractScrollArea, so a
+#: child positioned at a negative y is clipped by the viewport and never
+#: painted at all.
+FIELD_TOP = 20
+#: The rule under the field.
+FIELD_BOTTOM = 1
+#: Label type sizes, and where it sits in each state.
+LABEL_REST_PX = 16
+LABEL_LIFTED_PX = 12
+#: The lifted label sits just inside the reserved band.
+LABEL_LIFT_Y = 3
+
+
+class FloatingField(QLineEdit):
+    """A line edit whose label starts inside as a placeholder and lifts out.
+
+    The label is a child of the edit rather than a sibling in a layout, because
+    it has to cross the field's top edge. Sizing comes from `sizeHint` after the
+    font is set, so the two states are measured rather than guessed.
+    """
+
+    def __init__(self, caption: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName(OBJ_LOGIN_FIELD)
+        # The floating label does the placeholder's job. Leaving Qt's own
+        # placeholder set as well would leave the word sitting underneath the
+        # lifted label.
+        self.setPlaceholderText("")
+
+        self._caption = caption
+        self._label = QLabel(caption, self)
+        self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._lifted = False
+
+        self._fly = QPropertyAnimation(self._label, b"pos", self)
+        self._fly.setDuration(150)
+        self._fly.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self.textChanged.connect(lambda _text: self._restack())
+        self._restack(animate=False)
+
+    def _restack(self, *, animate: bool = True) -> None:
+        """Put the label where it belongs for the current focus/text state."""
+        font = QFont(self.font())
+        font.setPixelSize(LABEL_LIFTED_PX if self._lifted else LABEL_REST_PX)
+        self._label.setFont(font)
+        self._label.setObjectName(
+            OBJ_LABEL_LIFTED if self._lifted else OBJ_LABEL_REST
+        )
+        # A stylesheet change only lands on a re-apply.
+        self._label.style().unpolish(self._label)
+        self._label.style().polish(self._label)
+
+        label_h = self._label.sizeHint().height()
+        if self._lifted:
+            y = LABEL_LIFT_Y
+        else:
+            # Centred in the text area, which is what is left between the
+            # reserved top band and the rule.
+            text_h = max(0, self.height() - FIELD_TOP - FIELD_BOTTOM)
+            y = FIELD_TOP + max(0, (text_h - label_h) // 2)
+        target = QPoint(1, y)
+
+        self._fly.stop()
+        if animate and self._label.pos() != target:
+            self._fly.setStartValue(self._label.pos())
+            self._fly.setEndValue(target)
+            self._fly.start()
+        else:
+            self._label.move(target)
+
+    def focusInEvent(self, event) -> None:
+        self._lifted = True
+        super().focusInEvent(event)
+        self._restack()
+
+    def focusOutEvent(self, event) -> None:
+        # A field that still holds text keeps its label up: the words are the
+        # answer now, so the caption is a label again rather than a prompt.
+        self._lifted = bool(self.text())
+        super().focusOutEvent(event)
+        self._restack()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Every resize, not just the resting state: a lifted label centred for
+        # a shorter field would sit in the wrong place, and skipping this while
+        # lifted is what left the label stranded mid-flight.
+        self._restack(animate=False)
 
 
 class LoginView(QWidget):
-    """Email and password, then a callback with the authenticated user."""
+    """Wordmark, caption, two fields, a button, then a callback with the user."""
 
     def __init__(
         self,
@@ -43,65 +159,64 @@ class LoginView(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setObjectName("loginRoot")
+        self.setObjectName(OBJ_LOGIN_ROOT)
         self.context = context
         self._on_signed_in = on_signed_in
 
-        self.title = QLabel("RentDesk Staff", self)
-        self.title.setObjectName("loginTitle")
-        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # The stylesheet names the bundled family by name, so the faces have to
+        # be registered before anything here is shown. Idempotent, and a failed
+        # load degrades the typography rather than stopping a sign-in.
+        load_fonts()
 
-        self.subtitle = QLabel("Sign in to run the branch.", self)
-        self.subtitle.setObjectName("loginSubtitle")
-        self.subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        wordmark = QLabel("Rent Desk", self)
+        wordmark.setObjectName(OBJ_LOGIN_WORDMARK)
 
-        self.email = QLineEdit(self)
-        self.email.setPlaceholderText("Email address")
-        self.email.setText("admin@rentdesk.local" if context.selection.is_demo else "")
-        self.email.returnPressed.connect(self._focus_password)
+        caption = QLabel("Staff Sign in", self)
+        caption.setObjectName(OBJ_LOGIN_CAPTION)
 
-        self.password = QLineEdit(self)
-        self.password.setPlaceholderText("Password")
+        self.email = FloatingField("Email", self)
+        if context.selection.is_demo:
+            self.email.setText("admin@rentdesk.local")
+            self.email._restack(animate=False)
+
+        self.password = FloatingField("Password", self)
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.returnPressed.connect(self.attempt_sign_in)
+        self.email.returnPressed.connect(self._focus_password)
 
         self.error = QLabel("", self)
-        self.error.setObjectName(OBJ_ERROR)
+        self.error.setObjectName(OBJ_LOGIN_ERROR)
         self.error.setWordWrap(True)
         self.error.setVisible(False)
 
         self.submit = QPushButton("Sign in", self)
-        self.submit.setObjectName("primaryButton")
+        self.submit.setObjectName(OBJ_LOGIN_BUTTON)
         self.submit.setDefault(True)
+        self.submit.setMinimumHeight(44)
         self.submit.clicked.connect(self.attempt_sign_in)
 
-        self.hint = QLabel("", self)
-        self.hint.setObjectName("loginSubtitle")
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint = QLabel(self._foot_text(), self)
+        self.hint.setObjectName(OBJ_LOGIN_FOOT)
         self.hint.setWordWrap(True)
-        if context.selection.is_demo:
-            # The demo credentials are printed by the seeder; repeating them
-            # here removes the most likely first-run stumble.
-            self.hint.setText(
-                "Demo database. Sign in as admin@rentdesk.local\n"
-                "with the password printed by the seeder."
-            )
 
-        card = QFrame(self)
-        card.setStyleSheet(
-            "QFrame { background: #FFFFFF; border: 1px solid #D8CCBB; border-radius: 8px; }"
-        )
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(32, 30, 32, 26)
-        card_layout.setSpacing(10)
-        card_layout.addWidget(self.title)
-        card_layout.addWidget(self.subtitle)
-        card_layout.addSpacing(14)
-        card_layout.addWidget(self.email)
-        card_layout.addWidget(self.password)
-        card_layout.addWidget(self.error)
-        card_layout.addWidget(self.submit)
-        card_layout.addWidget(self.hint)
+        form = QWidget(self)
+        form.setFixedWidth(300)
+        form_layout = QVBoxLayout(form)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(0)
+        form_layout.addWidget(wordmark)
+        form_layout.addSpacing(6)
+        form_layout.addWidget(caption)
+        form_layout.addSpacing(30)
+        form_layout.addWidget(self.email)
+        form_layout.addSpacing(16)
+        form_layout.addWidget(self.password)
+        form_layout.addSpacing(10)
+        form_layout.addWidget(self.error)
+        form_layout.addSpacing(14)
+        form_layout.addWidget(self.submit)
+        form_layout.addSpacing(16)
+        form_layout.addWidget(self.hint)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -109,12 +224,22 @@ class LoginView(QWidget):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addStretch(1)
-        row.addWidget(card)
+        row.addWidget(form)
         row.addStretch(1)
         outer.addLayout(row)
         outer.addStretch(1)
 
-        self.email.setFocus()
+        self._focus_password()
+
+    def _foot_text(self) -> str:
+        if self.context.selection.is_demo:
+            # State the credentials rather than pointing at the seeder. On the
+            # demo database there is nothing to protect, and "the password
+            # printed by the seeder" sends the first-time user to a terminal.
+            return "Demo data, not the live branch.\ndemo-password"
+        return "Accounts come from your branch administrator."
+
+    # -- behaviour -----------------------------------------------------------
 
     def _focus_password(self) -> None:
         self.password.setFocus()

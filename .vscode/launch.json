@@ -2,6 +2,25 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Staff: Demo (RentDesk)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.staff",
+            "args": ["--demo"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Staff: Live (RentDesk)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.staff",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "Dashboard",
             "type": "debugpy",
             "request": "launch",
