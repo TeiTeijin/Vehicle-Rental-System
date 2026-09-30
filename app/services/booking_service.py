@@ -51,6 +51,10 @@ from app.utils.money import ZERO, money
 #: cancelled booking releases the vehicle.
 BLOCKING_STATUSES = ("pending", "confirmed", "ongoing")
 
+#: How a rental reached the branch. Walk-in means somebody came to the counter;
+#: online means they started without talking to anyone.
+CHANNELS = ("walk_in", "online")
+
 #: Statuses a rental may be checked in from. `confirmed` is allowed because a
 #: walk-in is often taken straight from enquiry to keys.
 CHECK_IN_STATUSES = ("pending", "confirmed")
@@ -167,12 +171,23 @@ def create_booking(
     end_date: date,
     *,
     created_by: int | None = None,
+    channel: str | None = None,
 ) -> Booking:
     """Reserve a vehicle for a customer.
 
     `created_by` records which member of staff took the booking. The customer
     app leaves it None; the staff app passes the signed-in user.
+
+    `channel` records where the customer found us -- walked in at the counter,
+    or taken online. It is optional because the column is nullable and because
+    a caller with no reason to know the answer (a migration, a test) should not
+    be made to invent one.
     """
+    if channel is not None and channel not in CHANNELS:
+        raise ValidationError(
+            f"Unknown channel: {channel}. Choose one of {', '.join(CHANNELS)}.",
+            field="channel",
+        )
     assert_available(session, vehicle, start_date, end_date)
     check_licence(session, user, start_date)
 
@@ -191,6 +206,7 @@ def create_booking(
         status="pending",
         created_at=datetime.now(),
         created_by=created_by,
+        channel=channel,
     )
     session.add(booking)
     session.flush()

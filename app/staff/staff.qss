@@ -480,3 +480,43 @@ QScrollBar::handle:horizontal {
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0;
 }
+
+/* DASHBOARD
+   The card system. Radius and padding are the numbers in app/staff/metrics.py;
+   tests/test_staff_dashboard.py asserts this file agrees with them, because a
+   QSS value cannot be read back at runtime and a mismatch is invisible until
+   two cards sit next to each other.
+
+   Two variants off one selector, selected by the `dark` property rather than
+   an object name: a dark card is still a card, and the widgets are built the
+   same way either way.
+*/
+
+QFrame[class="card"] {
+    border-radius: 28px;
+    border: 1px solid #D8CCBB;
+    background: #FFFFFF;
+}
+
+QFrame[class="card"][dark="true"] {
+    border-radius: 28px;
+    /* No border on the dark cards. A one-pixel outline the same family as the
+       ink reads as a hairline of lighter grey around the edge, which is the
+       thing that makes a flat dark panel look like a UI element rather than a
+       hole; the brief's own flat cards have none. */
+    border: none;
+    background: #171717;
+}
+
+QFrame[class="card"][hover="true"] {
+    background: #302F2D;
+}
+
+QLabel#rowName {
+    background: transparent;
+}
+
+QLabel#sectionLabel {
+    background: transparent;
+    letter-spacing: 0.2px;
+}

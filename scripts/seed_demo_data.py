@@ -63,6 +63,12 @@ DEMO_STAFF_EMAIL = "counter@rentdesk.local"
 #: random booking walk, so a car is never both in the workshop and out on rent.
 WORKSHOP_CARS = 2
 
+#: The online share of new bookings today, and how far it has risen over the
+#: 180-day window. `days_ago / 180` runs 1 -> 0 as history approaches the
+#: present, so the ramp climbs towards the present. See `_channel`.
+_ONLINE_SHARE_NOW = 0.45
+_ONLINE_RAMP = 0.18
+
 #: The rentals forced onto the Today screen, as
 #: (days since it was due back, length in days). A day count of 0 means due
 #: back today; a positive one means it should have come back already, which is
@@ -354,6 +360,22 @@ def rental_total(rate, days: int) -> Decimal:
     return total.quantize(Decimal("0.01"))
 
 
+def _channel(rng: random.Random, days_ago: int) -> str:
+    """Whether a booking was walked in or taken online.
+
+    Not a coin flip. The counter still does most of the volume -- walk-ins are
+    a rental with no planning involved, and a car is usually needed the same
+    day -- but the online share climbs over the eighteen months, because that
+    is the direction a real branch moves in once it has a booking page.
+
+    The trend is a linear ramp across the window rather than a curve, so it
+    stays smooth and obvious on the dashboard's channel chart without making
+    any claim about a real market that this fixture cannot support.
+    """
+    online_share = _ONLINE_SHARE_NOW + _ONLINE_RAMP * (days_ago / 180)
+    return "online" if rng.random() < online_share else "walk_in"
+
+
 def _make_maintenance(
     session: Session,
     rng: random.Random,
@@ -511,6 +533,7 @@ def _make_bookings(
                 status=status,
                 created_at=created,
                 created_by=taker.user_id,
+                channel=_channel(rng, offset),
             )
             {"completed": completed, "ongoing": ongoing}.get(status, pending).append(
                 booking
@@ -578,6 +601,9 @@ def _force_todays_work(
                 )
                 + timedelta(hours=9),
                 created_by=rng.choice(staff).user_id,
+                # Overdue rentals are overwhelmingly walk-ins: nobody books
+                # online for a car they are not going to collect.
+                channel=_channel(rng, (today - start).days),
             )
         )
 
@@ -587,6 +613,7 @@ def _settle_completed(
     rng: random.Random,
     completed: list[Booking],
     staff: list[Users],
+    today: date,
 ) -> None:
     """Give each completed rental a payment history.
 
@@ -612,19 +639,19 @@ def _settle_completed(
             # Paid in full, sometimes in two parts.
             if rng.random() < 0.45:
                 deposit = (balance_due * Decimal("0.4")).quantize(CENT)
-                _pay(session, booking, deposit, taker, rng, days_late=-rng.randint(0, 2))
-                _pay(session, booking, balance_due - deposit, taker, rng, days_late=-rng.randint(0, 1))
+                _pay(session, booking, deposit, taker, rng, days_late=rng.randint(0, 2), today=today)
+                _pay(session, booking, balance_due - deposit, taker, rng, days_late=rng.randint(0, 1), today=today)
             else:
-                _pay(session, booking, balance_due, taker, rng, days_late=-rng.randint(0, 2))
+                _pay(session, booking, balance_due, taker, rng, days_late=rng.randint(0, 2), today=today)
         elif roll < 0.83:
             # Part-paid: leaves a balance, so Outstanding is not always zero.
             half = (balance_due * Decimal("0.5")).quantize(CENT)
-            _pay(session, booking, half, taker, rng, days_late=-rng.randint(0, 2))
+            _pay(session, booking, half, taker, rng, days_late=rng.randint(0, 2), today=today)
         elif roll < 0.91:
             # Paid then refunded. `paid_at` stays set on purpose: the money did
             # arrive before it left again, and `refund_payment` only flips the
             # status, so a refund that blanked it would contradict the service.
-            payment = _pay(session, booking, balance_due, taker, rng, days_late=-rng.randint(1, 3))
+            payment = _pay(session, booking, balance_due, taker, rng, days_late=rng.randint(1, 3), today=today)
             payment.status = "refunded"
             payment.note = "REFUNDED: rental cancelled by customer, deposit returned."
         elif roll < 0.96:
@@ -637,6 +664,7 @@ def _settle_completed(
                 taker,
                 rng,
                 days_late=0,
+                today=today,
                 status="pending",
             )
         elif roll < 0.99:
@@ -648,6 +676,7 @@ def _settle_completed(
                 taker,
                 rng,
                 days_late=0,
+                today=today,
                 status="failed",
                 method="card",
                 note="DECLINED: insufficient funds. Customer settled in cash.",
@@ -664,6 +693,55 @@ def _owing(booking: Booking) -> Decimal:
     return total.quantize(CENT)
 
 
+def _settle_ongoing(
+    session: Session,
+    rng: random.Random,
+    ongoing: list[Booking],
+    staff: list[Users],
+    today: date,
+) -> None:
+    """Take a deposit on each rental that is currently out.
+
+    `_settle_completed` only looks at finished rentals, which left the demo with
+    no money taken on the current day at all -- a rental collected from the shelf
+    this morning is paid for this morning, and without that the dashboard's
+    revenue card read zero on the one day anyone looks at it.
+
+    It also left every live rental at zero on the Outstanding tile, which is not
+    how a branch works: a car is handed over against a deposit and the balance is
+    settled on return.
+
+    The deposit is a fraction of what is owed, never all of it, so the balance
+    genuinely remains. One in eight is still in flight, which is the case that
+    gives `paid_at IS NULL` something to be about.
+    """
+    for booking in ongoing:
+        taker = rng.choice(staff)
+        owed = _owing(booking)
+        deposit = (owed * Decimal("0.4")).quantize(CENT)
+        # Taken on the day the car was collected, or the day before when it was
+        # booked online and collected in the morning.
+        taken = booking.start_date - (
+            timedelta(days=1) if rng.random() < 0.45 else timedelta()
+        )
+        if rng.random() < 0.86:
+            _pay(session, booking, deposit, taker, rng, taken_on=taken, today=today)
+        else:
+            # In flight: a GCash transfer that has not cleared. The balance
+            # still counts as owed, which is what `booking_balance` assumes.
+            _pay(
+                session,
+                booking,
+                deposit,
+                taker,
+                rng,
+                taken_on=taken,
+                today=today,
+                status="pending",
+                note="GCash transfer sent, awaiting confirmation.",
+            )
+
+
 def _pay(
     session,
     booking,
@@ -671,22 +749,54 @@ def _pay(
     taker,
     rng,
     *,
-    days_late: int,
+    days_late: int = 0,
+    taken_on: date | None = None,
+    today: date | None = None,
     status: str = "paid",
     method: str | None = None,
     note: str | None = None,
 ):
     """Write one payment row against `booking`.
 
-    `days_late` is days before the return date that the money was taken; it is
-    negative, and the name is historical. Only a `paid` row gets a `paid_at`:
-    that NULL is what distinguishes an in-flight transfer from money in the
-    drawer, so it is set from the status rather than from the clock.
+    Two ways to say when the money changed hands:
+
+    ``days_late``
+        Offset from the return date. Negative is *early* -- the deposit taken
+        when the car was collected. So `days_late=-2` lands two days before the
+        booking ends, and the seeder's "paid late" cases use a small positive
+        value, which lands after it.
+
+    ``taken_on``
+        An exact date, for when the answer is "the day it started" rather than
+        anything relative to the return.
+
+    Only a `paid` row gets a `paid_at`: that NULL is what distinguishes an
+    in-flight transfer from money in the drawer, so it is set from the status
+    rather than from the clock.
+
+    ``today`` clamps the result. Without it the fixture invents payments dated
+    in the future -- a rental due back today and paid three days late is
+    stamped three days ahead -- and a dashboard then reports takings that have
+    not happened yet and lists tomorrow's receipts as the most recent ones.
     """
-    received = datetime.combine(
-        booking.end_date - timedelta(days=days_late if days_late < 0 else 0),
-        datetime.min.time(),
-    ) + timedelta(hours=rng.randint(8, 19))
+    if taken_on is not None:
+        received = datetime.combine(taken_on, datetime.min.time())
+    elif days_late < 0:
+        received = datetime.combine(
+            booking.end_date + timedelta(days=-days_late), datetime.min.time()
+        )
+    else:
+        received = datetime.combine(booking.end_date, datetime.min.time())
+
+    if today is not None and received.date() > today:
+        received = datetime.combine(today, datetime.max.time())
+
+    received += timedelta(hours=rng.randint(8, 19))
+    # The clamp can land on `today` exactly, and adding hours could push it over
+    # midnight again. Cap the clock rather than trusting the sum.
+    if today is not None:
+        received = min(received, datetime.combine(today, datetime.max.time()))
+
     method = method or rng.choices(
         ["cash", "gcash", "card"], weights=[0.45, 0.4, 0.15]
     )[0]
@@ -883,7 +993,8 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
         session.flush()
 
         _add_penalties_and_inspections(session, rng, completed, ongoing, staff)
-        _settle_completed(session, rng, completed, staff)
+        _settle_completed(session, rng, completed, staff, today)
+        _settle_ongoing(session, rng, ongoing, staff, today)
 
         # Vehicles out on rent right now should say so, or the Fleet tab will
         # show cars as available that are physically gone.

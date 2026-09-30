@@ -1,23 +1,37 @@
-"""The dashboard: the numbers, and the role split.
+"""The dashboard: the branch at a glance, as five cards.
 
-Staff and admins see the same operational tiles -- what is out, what is late,
-what is owed -- because both need them to run a counter. Admins additionally
-see the trend charts, which are about the branch rather than about the next
-customer.
+Replaces the older six-tile layout, which answered "where is everything" --
+useful for running a counter, and not what a manager opens the app to see. The
+new layout answers "how is the branch doing": what came in today, where the
+orders came from, when they were placed, what was just paid, and how the year
+is tracking.
 
-The split is enforced in two places. `admin_only` on the chart block means
-staff never get the widgets built at all, and the numbers themselves are
-derived from the same service functions the working screens use, so a tile can
-never disagree with the table it summarises. That is the failure that matters
-on a dashboard: two figures for the same thing that quietly differ.
+**The five tiles are not gone.** Out / due back / overdue / free / owed are the
+questions a member of staff asks while standing at the counter, and this page is
+still the first thing they see. They are kept in a compact strip along the top,
+restyled rather than replaced, so nothing that was on screen has been lost.
+
+**The cards are admin-only, and the widgets are built lazily.** The revenue
+figure, the channel split and the year-to-date line are the branch's
+performance rather than the next customer's. Staff see the operational strip and
+the transaction list; admins see all of it. The gate is on construction, not
+just visibility, so a counter member's thirty-second refresh does not run four
+queries for numbers they will never see.
+
+**Every figure comes from `app.services.dashboard_service`, in one call.** Two
+figures for the same thing that quietly differ is the specific failure a
+dashboard exists to prevent, and that happens when each card runs its own query
+and a refresh straddles midnight. One `collect()` per refresh, one `today`, and
+the cards cannot disagree.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from decimal import Decimal
 
-from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -29,233 +43,509 @@ from PySide6.QtWidgets import (
 
 from sqlalchemy import func, select
 
-from app.models import Booking, Payment, Vehicle
-from app.services import booking_service, payment_service
+from app.models import Booking, Vehicle
+from app.services import booking_service, dashboard_service, payment_service
 from app.staff import theme
-from app.staff.charts import HandDrawnBars, HandDrawnChart, daily_series
+from app.staff.cards import (
+    Caption,
+    Card,
+    HeroNumber,
+    IconButton,
+    Pill,
+    SectionLabel,
+    TrendLabel,
+)
+from app.staff.dashboard_charts import (
+    ActivityHeatmap,
+    ChannelCurves,
+    SalesTargetChart,
+)
+from app.staff.metrics import (
+    CARD_GUTTER,
+    CARD_PADDING,
+    HERO_SIZE,
+)
 from app.staff.pages.base import StaffPage
 
-#: How long a count-up takes. Long enough to be noticed, short enough that
-#: someone glancing at the screen mid-animation still reads the right number
-#: within a moment.
-COUNT_UP_MS = 550
 
+class MetricTile(QWidget):
+    """One of the small operational figures in the strip along the top.
 
-class Tile(QWidget):
-    """One number, its label, and a 14-day sparkline.
-
-    The number is the tile. The sparkline is a hint of direction, and it is
-    deliberately unlabelled -- a full axis on a 34-pixel strip is noise.
+    A plain widget rather than a `Card`: at 96px tall there is no room for a
+    border and a shadow, and the strip reads better as a row of numbers than as
+    a row of boxes. The value is tabular so the strip does not jitter when the
+    numbers change width.
     """
 
-    def __init__(self, label: str, colour: str = theme.INK, parent=None) -> None:
+    def __init__(self, label: str, colour: str, parent=None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(96)
         self._colour = colour
-        self._count = 0.0
 
-        self.value_label = QLabel("0", self)
-        self.value_label.setStyleSheet(
-            f"background: transparent; color: {colour}; font-size: 26px; font-weight: 700;"
-        )
-
-        self.caption = QLabel(label, self)
-        self.caption.setObjectName("pageSubtitle")
-
-        self.sparkline_host = QVBoxLayout()
-        self.sparkline_host.setContentsMargins(0, 0, 0, 0)
-        self._sparkline = None
-        self._animation: QPropertyAnimation | None = None
-        self._current = 0.0
-        #: False until the first `set_value`. Without it, a tile whose value
-        #: starts at zero returns early on that first call and never renders --
-        #: so a money tile shows a bare "0" instead of "PHP 0", and the prefix
-        #: is missing only for the tiles that happen to be nil.
-        self._rendered = False
+        self.value = HeroNumber("0", size=28, colour=colour)
+        self.caption = Caption(label, size=12)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(2, 0, 2, 0)
         layout.setSpacing(2)
-        layout.addWidget(self.value_label)
+        layout.addWidget(self.value)
         layout.addWidget(self.caption)
-        layout.addLayout(self.sparkline_host)
 
-    #: The animated property. Declared in the class body because
-    #: `QPropertyAnimation` resolves a real Qt property by name; attaching one
-    #: after the fact would not register it with the meta-object system.
-    def _get_count(self) -> float:
-        return self._count
+    def set_value(self, value, *, prefix: str = "", decimals: int | None = None) -> None:
+        if decimals is not None:
+            self.value.setText(f"{prefix}{value:,.{decimals}f}")
+        else:
+            self.value.setText(f"{prefix}{value:,.0f}")
 
-    def _set_count(self, value: float) -> None:
-        self._count = value
 
-    countValue = Property(float, _get_count, _set_count)
+class _CardGrid(QWidget):
+    """The five cards, in a grid that reflows as the window narrows.
 
-    def set_value(
-        self,
-        value: float,
-        *,
-        animate: bool = True,
-        prefix: str = "",
-        suffix: str = "",
-        decimals: int | None = None,
-    ) -> None:
-        """Set the number, counting up from the previous one.
+    Three columns at the 1440px reference, two below `TWO_COL_W`, one below
+    `NARROW_W`. The reflow is on a `resizeEvent` rather than a `QGridLayout`
+    with stretch factors, because a grid cannot move a widget from one cell to
+    another after it has been added -- the layout would need to be rebuilt, and
+    rebuilding it on every resize frame is a visible stutter.
+    """
 
-        `decimals` forces the number of decimal places. Left as None, a whole
-        number renders without any: right for a count of cars, wrong for a
-        balance, where PHP 15,000 and PHP 15,000.90 are different sums and the
-        second one has to be visible.
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._cards: list[Card] = []
+        self._columns = 3
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(CARD_GUTTER)
 
-        The animation is skipped when the value did not change, so a 30-second
-        refresh of an unchanged number does not make the tile twitch.
+    def add(self, card: Card) -> None:
+        self._cards.append(card)
+        self._relayout()
+
+    def _relayout(self) -> None:
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            if item.widget() is not None:
+                item.widget().setParent(None)
+        for index, card in enumerate(self._cards):
+            self._grid.addWidget(card, index // self._columns, index % self._columns)
+        for column in range(3):
+            self._grid.setColumnStretch(column, 1 if column < self._columns else 0)
+        # Rows share the leftover height evenly, so a short card and a tall one
+        # still meet on the same baseline.
+        for row in range((len(self._cards) + self._columns - 1) // self._columns):
+            self._grid.setRowStretch(row, 1)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._apply_columns()
+        super().resizeEvent(event)
+
+    def _apply_columns(self, width: int | None = None) -> None:
+        """Choose a column count for `width` and reflow if it changed."""
+        from app.staff.metrics import NARROW_W, TWO_COL_W
+
+        available = self.width() if width is None else width
+        columns = 3
+        if available < NARROW_W:
+            columns = 1
+        elif available < TWO_COL_W:
+            columns = 2
+        if columns != self._columns:
+            self._columns = columns
+            self._relayout()
+
+    def reflow_to(self, width: int) -> None:
+        """Lay out as though the grid were `width` across.
+
+        For tests and for the screenshot script, which need a deterministic
+        column count without depending on when Qt happens to deliver a resize.
         """
-        target = float(value)
-
-        def render(number: float) -> None:
-            if decimals is not None:
-                shown = f"{number:,.{decimals}f}"
-            elif abs(number - round(number)) < 0.5:
-                shown = f"{number:,.0f}"
-            else:
-                shown = f"{number:,.2f}"
-            self.value_label.setText(f"{prefix}{shown}{suffix}")
-            self._rendered = True
-
-        if not animate:
-            self._current = target
-            render(target)
-            return
-
-        # Skipped only once the tile has actually shown something. Skipping on
-        # the first call would leave the label showing the placeholder "0"
-        # without its prefix or its formatting.
-        if self._rendered and abs(target - self._current) < 1e-9 and self._animation is None:
-            return
-
-        self._animation = QPropertyAnimation(self, b"countValue", self)
-        self._animation.setDuration(COUNT_UP_MS)
-        self._animation.setStartValue(self._current)
-        self._animation.setEndValue(target)
-        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        def on_value_changed(number: float) -> None:
-            self._current = number
-            render(number)
-
-        self._animation.valueChanged.connect(on_value_changed)
-        self._animation.finished.connect(lambda: setattr(self, "_current", target))
-        # Skipped animations leave the count mid-way; the finished handler puts
-        # the exact target back so the next comparison is against the real
-        # value and not a rounded frame.
-        self._animation.start()
-
-    def set_sparkline(self, widget) -> None:
-        if self._sparkline is not None:
-            self.sparkline_host.removeWidget(self._sparkline)
-            self._sparkline.deleteLater()
-        self._sparkline = widget
-        if widget is not None:
-            self.sparkline_host.addWidget(widget)
+        self._apply_columns(width)
 
 
 class DashboardPage(StaffPage):
-    #: Set False to land every value immediately instead of counting up. A
-    #: test cannot read a number out of a label mid-animation, and anything
-    #: embedding this page as a widget may well want the same.
     def __init__(self, shell, *, animate: bool = True) -> None:
         super().__init__(shell, "Dashboard", "The branch at a glance.")
+
+        #: Set False to land every value and every chart immediately. Tests read
+        #: numbers out of labels and cannot see a half-drawn curve, so they
+        #: turn this off; anything embedding the page may want the same.
         self.animate = animate
 
-        self.tiles = QGridLayout()
-        self.tiles.setContentsMargins(0, 0, 0, 0)
-        self.tiles.setSpacing(14)
-
-        # The six tiles, in a plain dict rather than the layout. `QGridLayout`
-        # is not a mapping, so `self.tiles["out"] = tile` would fail at
-        # runtime with a bare AttributeError.
-        #
-        # "Available" counts `available` minus what is already promised: a car
-        # whose status says available can still have a confirmed booking for
-        # tomorrow, and counting it as free is how the number ends up
-        # disagreeing with the Fleet screen.
-        tile_widgets = {
-            "out": Tile("Out on rent now", theme.WARN),
-            "due_back": Tile("Due back today", theme.TEXT),
-            "overdue": Tile("Overdue", theme.DANGER),
-            "available": Tile("Free to rent today", theme.OK),
-            "outstanding": Tile("Owed to the branch", theme.DANGER),
-            "takings": Tile("Takings this month", theme.OK),
+        # -- the operational strip ------------------------------------------
+        # Kept from the old dashboard. Every one of these is a question a member
+        # of staff asks while standing at the counter, and they are the numbers
+        # a counter member should see -- unlike the cards below, which are the
+        # branch's performance.
+        self.strip = QWidget(self)
+        strip_layout = QHBoxLayout(self.strip)
+        strip_layout.setContentsMargins(0, 0, 0, 0)
+        strip_layout.setSpacing(38)
+        self._strip_tiles = {
+            "out": MetricTile("Out now", theme.WARN),
+            "due_back": MetricTile("Due back today", theme.TEXT),
+            "overdue": MetricTile("Overdue", theme.DANGER),
+            "available": MetricTile("Free to rent", theme.OK),
+            "outstanding": MetricTile("Owed to the branch", theme.DANGER),
         }
-        for index, key in enumerate(
-            ("out", "due_back", "overdue", "available", "outstanding", "takings")
+        for tile in self._strip_tiles.values():
+            strip_layout.addWidget(tile)
+        strip_layout.addStretch(1)
+        self.body.addWidget(self.strip)
+
+        # -- the cards ------------------------------------------------------
+        self.grid = _CardGrid(self)
+        self.body.addWidget(self.grid, 1)
+
+        self.revenue_card = self._build_revenue_card()
+        self.channels_card = self._build_channels_card()
+        self.activity_card = self._build_activity_card()
+        self.transactions_card = self._build_transactions_card()
+        self.target_card = self._build_target_card()
+
+        # Order matters: the brief reads left-to-right, top-to-bottom, with the
+        # dark revenue card anchoring the top left and the two dark cards
+        # balancing it across the row.
+        for card in (
+            self.revenue_card,
+            self.channels_card,
+            self.activity_card,
+            self.transactions_card,
+            self.target_card,
         ):
-            self.tiles.addWidget(tile_widgets[key], index // 3, index % 3)
-        self._tile = tile_widgets
-
-        self.body.addLayout(self.tiles)
-
-        # Charts are admin-only, and are *constructed* on the admin branch of
-        # `refresh` rather than here. Building them in `__init__` and hiding the
-        # host would work visually but would still run the three series queries
-        # for a staff member, who is not shown any of it.
-        self.charts_host = QWidget(self)
-        self.charts_layout = QVBoxLayout(self.charts_host)
-        self.charts_layout.setContentsMargins(0, 14, 0, 0)
-        self.charts_layout.setSpacing(12)
-        self.body.addWidget(self.charts_host)
-        self.charts_host.setVisible(False)
-
-        self.bookings_chart = None
-        self.takings_chart = None
-        self.status_chart = None
+            self.grid.add(card)
 
         self._first_load = True
+        self._animations_pending = False
 
-    def _ensure_charts(self) -> None:
-        """Build the chart widgets once, the first time an admin looks."""
-        if self.bookings_chart is not None:
-            return
-        self.bookings_chart = HandDrawnChart("Bookings started, last 14 days", [])
-        self.takings_chart = HandDrawnChart("Takings, last 14 days", [])
-        self.status_chart = HandDrawnBars(
-            "Where the fleet is", [("Available", 0), ("Out", 0), ("Workshop", 0)]
+    # -- card construction -------------------------------------------------
+
+    def _card_header(
+        self,
+        card: Card,
+        title: str,
+        *,
+        dark: bool,
+        subtitle: str = "",
+        buttons: tuple = (),
+    ) -> QVBoxLayout:
+        """A card's title row. Returns the layout to add the body into."""
+        body = QVBoxLayout()
+        body.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
+        body.setSpacing(14)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(10)
+        head.addWidget(
+            SectionLabel(
+                title,
+                colour=theme.PAPER if dark else theme.TEXT,
+            )
         )
-        for chart in (self.bookings_chart, self.takings_chart, self.status_chart):
-            self.charts_layout.addWidget(chart)
+        head.addStretch(1)
+        for button in buttons:
+            head.addWidget(button)
+        body.addLayout(head)
+
+        if subtitle:
+            body.addWidget(
+                Caption(
+                    subtitle,
+                    colour=theme.INK_LINE if dark else theme.MUTED,
+                )
+            )
+        return body
+
+    def _build_revenue_card(self) -> Card:
+        """Today's takings, dark, with the three counter actions."""
+        card = Card(dark=True)
+        card.setMinimumHeight(210)
+
+        self.revenue_value = HeroNumber(
+            "₱0.00", size=HERO_SIZE, colour=theme.PAPER
+        )
+        self.revenue_trend = TrendLabel()
+        self.revenue_pill = Pill(
+            "Today",
+            colour=theme.PAPER,
+            background=theme.INK_RAISED,
+            height=26,
+        )
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(8)
+        self.btn_new_rental = self._pill_button(
+            "New Rental", "plus", theme.INK, theme.TAN, tooltip="Start a new rental"
+        )
+        self.btn_log_return = self._pill_button(
+            "Log Return", "history", theme.PAPER, theme.INK_RAISED,
+            tooltip="Record a returned car",
+        )
+        self.btn_more = IconButton(
+            "dots",
+            colour=theme.MUTED,
+            background=theme.INK_RAISED,
+            tooltip="More",
+        )
+        actions.addWidget(self.btn_new_rental)
+        actions.addWidget(self.btn_log_return)
+        actions.addStretch(1)
+        actions.addWidget(self.btn_more)
+
+        body = self._card_header(card, "Total Revenue", dark=True)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(10)
+        title_row.addWidget(self.revenue_value)
+        title_row.addStretch(1)
+        title_row.addWidget(self.revenue_trend, 0, Qt.AlignmentFlag.AlignTop)
+        body.addLayout(title_row)
+
+        foot = QHBoxLayout()
+        foot.setContentsMargins(0, 0, 0, 0)
+        foot.addWidget(self.revenue_pill)
+        foot.addStretch(1)
+        foot.addLayout(actions)
+        body.addLayout(foot)
+        body.addStretch(1)
+
+        card.layout().addLayout(body)
+        return card
+
+    def _pill_button(
+        self,
+        text: str,
+        icon_name: str,
+        colour: str,
+        background: str,
+        *,
+        tooltip: str = "",
+    ) -> QWidget:
+        """A filled action chip: an icon and a word, 44px tall."""
+        from app.staff.metrics import BTN_HEIGHT, BTN_RADIUS
+
+        holder = QWidget()
+        holder.setFixedHeight(BTN_HEIGHT)
+        holder.setCursor(Qt.CursorShape.PointingHandCursor)
+        holder.setToolTip(tooltip or text)
+
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(7)
+        layout.addWidget(IconButton(icon_name, colour=colour, size=20, icon_size=18))
+        label = QLabel(text)
+        font = QFont("Inter")
+        font.setPixelSize(14)
+        font.setWeight(QFont.Weight.DemiBold)
+        label.setFont(font)
+        label.setStyleSheet(f"color: {colour}; background: transparent;")
+        layout.addWidget(label)
+
+        holder.setStyleSheet(
+            f"QWidget {{ background: {background}; border-radius: {BTN_RADIUS}px; }}"
+        )
+
+        def click(event) -> None:
+            from app.staff.widgets import toast
+
+            toast(self.window(), f"{text}  Enot wired up in this build")
+
+        holder.mousePressEvent = click  # type: ignore[method-assign]
+        return holder
+
+    def _build_channels_card(self) -> Card:
+        """The walk-in / online split, light."""
+        card = Card(dark=False)
+        card.setMinimumHeight(210)
+
+        self.channels_curves = ChannelCurves()
+        self.channels_curves.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.channel_tiles: dict[str, tuple[HeroNumber, Pill]] = {}
+
+        body = self._card_header(
+            card,
+            "Rental Channels",
+            dark=False,
+            subtitle="Orders placed, last 16 weeks",
+        )
+        tiles = QHBoxLayout()
+        tiles.setContentsMargins(0, 0, 0, 0)
+        tiles.setSpacing(30)
+        for key in ("walk_in", "online"):
+            column = QVBoxLayout()
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(2)
+            label = HeroNumber(
+                "0",
+                size=30,
+                colour=theme.CHANNEL_COLOURS[key],
+            )
+            pill = Pill(
+                theme.CHANNEL_LABELS[key],
+                colour=theme.CHANNEL_COLOURS[key],
+                background=_tint(theme.CHANNEL_COLOURS[key], 0.14),
+                height=24,
+                font_size=11,
+            )
+            column.addWidget(label)
+            column.addWidget(pill)
+            tiles.addLayout(column)
+            self.channel_tiles[key] = (label, pill)
+        tiles.addStretch(1)
+        body.addLayout(tiles)
+        body.addWidget(self.channels_curves, 1)
+
+        card.layout().addLayout(body)
+        return card
+
+    def _build_activity_card(self) -> Card:
+        """Orders per day, dark, as a sixteen-week grid."""
+        card = Card(dark=True)
+        card.setMinimumHeight(210)
+
+        self.activity_heatmap = ActivityHeatmap()
+        self.activity_heatmap.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.activity_caption = Caption(
+            "Sixteen weeks of orders", colour=theme.INK_LINE, size=12
+        )
+
+        body = self._card_header(card, "Order Activity", dark=True)
+        body.addWidget(self.activity_heatmap, 1)
+        body.addWidget(self.activity_caption)
+        card.layout().addLayout(body)
+        return card
+
+    def _build_transactions_card(self) -> Card:
+        """The five most recent payments, dark."""
+        card = Card(dark=True)
+        card.setMinimumHeight(210)
+
+        self.transactions_list = QVBoxLayout()
+        self.transactions_list.setContentsMargins(0, 0, 0, 0)
+        self.transactions_list.setSpacing(0)
+        self._transaction_rows: list[QWidget] = []
+
+        body = self._card_header(
+            card,
+            "Recent Transactions",
+            dark=True,
+            buttons=(
+                IconButton(
+                    "search",
+                    colour=theme.MUTED,
+                    background=theme.INK_RAISED,
+                    tooltip="Search transactions",
+                ),
+                IconButton(
+                    "sliders",
+                    colour=theme.MUTED,
+                    background=theme.INK_RAISED,
+                    tooltip="Filter",
+                ),
+            ),
+        )
+        body.addLayout(self.transactions_list, 1)
+        card.layout().addLayout(body)
+        return card
+
+    def _build_target_card(self) -> Card:
+        """Year-to-date against the annual target, light."""
+        card = Card(dark=False)
+        card.setMinimumHeight(210)
+
+        self.target_value = HeroNumber("₱0", size=30, colour=theme.TEXT)
+        self.target_pill = Pill(
+            "0% of target",
+            colour=theme.TEXT,
+            background=theme.SURFACE,
+            height=24,
+            font_size=11,
+        )
+        self.target_chart = SalesTargetChart()
+        self.target_chart.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(10)
+        head.addWidget(self.target_value)
+        head.addStretch(1)
+        head.addWidget(self.target_pill, 0, Qt.AlignmentFlag.AlignTop)
+
+        body = self._card_header(card, "Sales Target", dark=False)
+        body.addLayout(head)
+        body.addWidget(self.target_chart, 1)
+        card.layout().addLayout(body)
+        return card
+
+    # -- data -------------------------------------------------------------
 
     def refresh(self) -> None:
         super().refresh()
-        # Charts are admin-only; a staff member's refresh must not query for
-        # figures they are not shown.
-        self.charts_host.setVisible(self.context.is_admin)
 
         today = date.today()
-        show_charts = self.context.is_admin
-        if show_charts:
-            self._ensure_charts()
-        else:
-            self.charts_host.setVisible(False)
-
+        show_figures = self.context.is_admin
         with self.context.reading() as session:
-            # `active_bookings` is the *availability* question -- it includes
-            # pending and confirmed, which still hold a car for their dates.
-            # "Out on rent now" is a different question: physically gone. Only
-            # `ongoing` counts, and the tile is labelled accordingly.
-            out_now = session.query(func.count(Booking.booking_id)).filter(
+            figures = dashboard_service.collect(
+                session,
+                today=today,
+                # The cards are the branch's performance, not the next
+                # customer's. A counter member is not shown them, so their
+                # refresh must not pay for the channel, heatmap or year queries.
+                # `collect` is told to skip them rather than being handed a
+                # session it is not allowed to use -- the alternative is
+                # computing them and throwing them away.
+                weeks=dashboard_service.HEATMAP_WEEKS if show_figures else 0,
+                recent=5 if show_figures else 0,
+                monthly=show_figures,
+            )
+            operational = self._operational(session, today)
+
+        self._fill_strip(operational)
+        if not show_figures:
+            # Staff get the operational strip and nothing else. The cards are
+            # hidden rather than left showing zeroes: an empty revenue card
+            # invites someone to ask why the branch has taken nothing, and the
+            # answer would be "because you are not an admin", which is a worse
+            # answer than not asking.
+            self.grid.setVisible(False)
+            self._first_load = False
+            return
+
+        self.grid.setVisible(True)
+        self._fill_revenue(figures)
+        self._fill_channels(figures)
+        self._fill_activity(figures)
+        self._fill_transactions(figures)
+        self._fill_target(figures)
+
+        self._first_load = False
+
+    def _operational(self, session, today: date) -> dict:
+        """The counter's five numbers.
+
+        Unchanged from the previous dashboard, including the decision to count
+        "free to rent" against committed bookings rather than the raw
+        `Vehicle.status` -- which is what keeps this row agreeing with the
+        Fleet screen.
+        """
+        out_now = session.execute(
+            select(func.count(Booking.booking_id)).where(
                 Booking.status == "ongoing"
-            ).scalar()
-            due_back = session.query(Booking).filter(
+            )
+        ).scalar_one()
+        due_back = session.execute(
+            select(func.count(Booking.booking_id)).where(
                 Booking.status == "ongoing", Booking.end_date == today
-            ).count()
-            overdue = len(booking_service.overdue_returns(session, today))
-            # A car whose `status` says available can still have a confirmed
-            # booking starting today or later -- the status column tracks where
-            # the car physically is, not what it is promised to. Counting the
-            # raw status is how the tile ends up disagreeing with the Fleet
-            # screen, which does apply the commitment.
-            free_now = session.query(func.count(Vehicle.vehicle_id)).filter(
+            )
+        ).scalar_one()
+        overdue = len(booking_service.overdue_returns(session, today))
+        free_now = session.execute(
+            select(func.count(Vehicle.vehicle_id)).where(
                 Vehicle.status == "available",
                 ~Vehicle.vehicle_id.in_(
                     select(Booking.vehicle_id).where(
@@ -264,99 +554,239 @@ class DashboardPage(StaffPage):
                         Booking.end_date > today,
                     )
                 ),
-            ).scalar()
-
-            takings = payment_service.takings(
-                session,
-                from_date=self._month_start(today),
             )
-            outstanding = self._outstanding(session)
+        ).scalar_one()
 
-            # Queried on the admin branch only, and only for the chart
-            # lines -- which is why the two tiles with sparklines are admin
-            # tiles too. A staff member's refresh issues no series query at all.
-            booking_series = (
-                daily_series(session, 14, Booking.created_at) if show_charts else []
+        outstanding = Decimal("0.00")
+        for booking in session.execute(
+            select(Booking).where(
+                Booking.status.in_(("confirmed", "ongoing", "completed"))
             )
-            takings_series = self._daily_takings(session, today) if show_charts else []
-            fleet_pairs = self._fleet_split(session) if show_charts else []
-
-        animate = self.animate and not self._first_load
-        self._tile["out"].set_value(out_now, animate=animate)
-        self._tile["due_back"].set_value(due_back, animate=animate)
-        self._tile["overdue"].set_value(overdue, animate=animate)
-        self._tile["available"].set_value(free_now, animate=animate)
-        # Money keeps its centavos; a balance that rounds away pesos is the
-        # sort of thing a customer notices and an auditor finds.
-        self._tile["outstanding"].set_value(
-            outstanding, animate=animate, prefix="PHP ", decimals=2
-        )
-        self._tile["takings"].set_value(
-            takings, animate=animate, prefix="PHP ", decimals=2
-        )
-
-        if show_charts:
-            from app.staff.charts import Sparkline
-
-            self._tile["out"].set_sparkline(Sparkline(booking_series, colour=theme.WARN))
-            self._tile["overdue"].set_sparkline(Sparkline(booking_series, colour=theme.DANGER))
-            self.charts_host.setVisible(True)
-            self.bookings_chart.set_values(booking_series)
-            self.takings_chart.set_values(takings_series)
-            self.status_chart.set_pairs(fleet_pairs)
-
-        self._first_load = False
-
-    # -- helpers ----------------------------------------------------------
-
-    @staticmethod
-    def _month_start(today: date) -> datetime:
-        return datetime(today.year, today.month, 1)
-
-    @staticmethod
-    def _outstanding(session) -> Decimal:
-        """What customers still owe, across everything not yet settled.
-
-        Only `paid` rows count as received, and the arithmetic is done in
-        Decimal. Summing floats here would show a total that disagrees with
-        the Payments tab by a centavo, which is exactly the kind of thing that
-        destroys trust in a dashboard.
-        """
-        total = Decimal("0.00")
-        bookings = session.query(Booking).filter(
-            Booking.status.in_(("confirmed", "ongoing", "completed"))
-        ).all()
-        for booking in bookings:
+        ).scalars():
             balance = payment_service.booking_balance(session, booking)
-            if balance.balance > Decimal("0.00"):
-                total += balance.balance
-        return total
+            if balance.balance > 0:
+                outstanding += balance.balance
 
-    @staticmethod
-    def _daily_takings(session, today: date) -> list[float]:
-        """Takings per day for the last 14 days, gaps filled with zero."""
-        first = today - timedelta(days=13)
-        buckets = {first + timedelta(days=i): Decimal("0.00") for i in range(14)}
-        payments = session.query(Payment).filter(Payment.paid_at >= first).all()
-        for payment in payments:
-            if payment.status != "paid" or payment.paid_at is None:
-                continue
-            day = payment.paid_at.date()
-            if day in buckets:
-                buckets[day] += Decimal(payment.amount)
-        return [float(buckets[first + timedelta(days=i)]) for i in range(14)]
+        return {
+            "out": out_now,
+            "due_back": due_back,
+            "overdue": overdue,
+            "available": free_now,
+            "outstanding": outstanding,
+        }
 
-    @staticmethod
-    def _fleet_split(session) -> list[tuple[str, float]]:
-        counts = {"Available": 0, "Out": 0, "Workshop": 0}
-        for vehicle in session.query(Vehicle).all():
-            if vehicle.status == "available":
-                counts["Available"] += 1
-            elif vehicle.status == "maintenance":
-                counts["Workshop"] += 1
-            else:
-                counts["Out"] += 1
-        return list(counts.items())
+    def _fill_strip(self, operational: dict) -> None:
+        self._strip_tiles["out"].set_value(operational["out"])
+        self._strip_tiles["due_back"].set_value(operational["due_back"])
+        self._strip_tiles["overdue"].set_value(operational["overdue"])
+        self._strip_tiles["available"].set_value(operational["available"])
+        self._strip_tiles["outstanding"].set_value(
+            operational["outstanding"], prefix="₱", decimals=2
+        )
+
+    def _fill_revenue(self, figures) -> None:
+        self.revenue_value.setText(pesos(figures.revenue_today))
+        self.revenue_trend.set_change(figures.revenue_change_pct, up_is_good=True)
+
+    def _fill_channels(self, figures) -> None:
+        totals = figures.channels
+        series = []
+        for key, count in totals.as_rows():
+            label, _pill = self.channel_tiles[key]
+            label.setText(f"{count:,}")
+            series.append(
+                (theme.CHANNEL_LABELS[key], count, theme.CHANNEL_COLOURS[key])
+            )
+        self.channels_curves.set_series(series)
+
+        # If any booking predates the channel column, say so rather than letting
+        # the two curves quietly total less than the branch's real order count.
+        if totals.unattributed:
+            self.channels_curves.setToolTip(
+                f"{totals.unattributed} booking(s) predate channel tracking "
+                "and are not in either curve."
+            )
+        else:
+            self.channels_curves.setToolTip("")
+
+    def _fill_activity(self, figures) -> None:
+        counts = figures.orders_per_day
+        if not counts:
+            return
+        self.activity_heatmap.set_counts(counts, min(counts))
+        self.activity_caption.setText(
+            f"{sum(counts.values())} orders over the last {len(counts)} days"
+        )
+
+    def _clear_transactions(self) -> None:
+        """Empty the list's layout completely.
+
+        `removeWidget` on its own is not enough here: it takes the widget out of
+        the layout but leaves the layout item, and `addStretch` returns `None`
+        in PySide6 so a trailing spacer cannot be tracked and removed
+        individually. Draining through `takeAt` handles rows and spacers with
+        one loop and leaves nothing for the next refresh to accumulate on.
+        """
+        while self.transactions_list.count():
+            item = self.transactions_list.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+            # The layout's ownership moved into Python here; dropping the last
+            # reference is what actually deletes the C++ item.
+            del item
+        self._transaction_rows.clear()
+
+    def _fill_transactions(self, figures) -> None:
+        self._clear_transactions()
+
+        rows = list(figures.recent)
+        if not rows:
+            empty = QLabel("No payments recorded yet.")
+            font = QFont("Inter")
+            font.setPixelSize(13)
+            empty.setFont(font)
+            empty.setStyleSheet(
+                f"color: {theme.INK_LINE}; background: transparent;"
+            )
+            self.transactions_list.addWidget(empty)
+            self._transaction_rows.append(empty)
+            return
+
+        for entry in rows:
+            self.transactions_list.addWidget(self._transaction_row(entry))
+        self.transactions_list.addStretch(1)
+
+    def _transaction_row(self, entry) -> QWidget:
+        """One payment: who, how, which channel, how much."""
+        holder = QWidget()
+        holder.setFixedHeight(46)
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        name = QLabel(entry.customer)
+        name_font = QFont("Inter")
+        name_font.setPixelSize(14)
+        name_font.setWeight(QFont.Weight.Medium)
+        name.setFont(name_font)
+        name.setStyleSheet(f"color: {theme.PAPER}; background: transparent;")
+
+        method = Caption(
+            theme.METHOD_LABELS.get(entry.method, entry.method.title()),
+            colour=theme.INK_LINE,
+            size=12,
+        )
+
+        channel = Pill(
+            theme.CHANNEL_LABELS.get(entry.channel, "Unrecorded"),
+            colour=theme.INK_LINE,
+            background=theme.INK_RAISED,
+            height=22,
+            font_size=11,
+            dot=bool(entry.channel),
+        )
+
+        amount = QLabel(_signed_pesos(entry.amount, entry.refunded))
+        amount_font = QFont("Inter")
+        amount_font.setPixelSize(15)
+        amount_font.setWeight(QFont.Weight.DemiBold)
+        amount_font.setFeature(QFont.Tag("tnum"), 1)
+        amount.setFont(amount_font)
+        # A refund is red and carries a minus sign. The sign alone would be
+        # ambiguous next to a discount, and the amount column holds positive
+        # values by design.
+        amount.setStyleSheet(
+            "background: transparent; color: "
+            f"{theme.DANGER if entry.refunded else theme.PAPER};"
+        )
+        amount.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        layout.addWidget(name)
+        layout.addWidget(method)
+        layout.addStretch(1)
+        layout.addWidget(channel)
+        layout.addWidget(amount)
+        self._transaction_rows.append(holder)
+        return holder
+
+    def _fill_target(self, figures) -> None:
+        target = theme.SALES_TARGET
+        achieved = figures.revenue_ytd
+        self.target_value.setText(pesos(achieved, decimals=0))
+
+        pct = float(achieved / target * 100) if target else Decimal(0)
+        self.target_pill.set_text(f"{pct:.0f}% of ₱{float(target) / 1_000_000:.0f}M")
+        # Behind pace is amber, on pace is green. A single threshold at 100% would
+        # show a branch two thirds of the way through September at 50% as "fine",
+        # which is the reading the bar exists to prevent.
+        on_pace = _pace(achieved, target, figures.today)
+        self.target_pill.set_text_colour(
+            theme.OK if on_pace else theme.WARN
+        )
+        self.target_chart.set_months(figures.month_sales, target, achieved)
+
+    # -- motion -----------------------------------------------------------
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Draw the charts in, once, the first time the page appears.
+
+        On the thirty-second refresh the curves are already at full progress:
+        re-drawing them every thirty seconds would make a live screen flicker
+        constantly, which is worse than no animation at all.
+        """
+        super().showEvent(event)
+        if self.animate and not self._animations_played:
+            self._animations_played = True
+            self.channels_curves.animate_in()
+            self.activity_heatmap.animate_in()
+            self.target_chart.animate_in()
+
+    _animations_played = False
+
+
+def _pace(achieved: Decimal, target: Decimal, today: date) -> bool:
+    """Whether revenue is tracking at or above a straight-line pace.
+
+    Compares against the share of the year elapsed rather than against the full
+    target, so a branch in April is not told it is behind for having sold less
+    than a whole year. The last day is pulled back to include today.
+    """
+    if not target:
+        return False
+    year_start = date(today.year, 1, 1)
+    days_elapsed = (today - year_start).days + 1
+    expected = target * Decimal(days_elapsed) / Decimal(365)
+    return achieved >= expected
+
+
+def _tint(colour: str, alpha: float) -> str:
+    """A translucent version of `colour`, as `#RRGGBB` for a QSS background."""
+    from PySide6.QtGui import QColor
+
+    c = QColor(colour)
+    c.setAlphaF(alpha)
+    return c.name(QColor.NameFormat.HexArgb)
+
+
+def pesos(amount: Decimal | float, *, decimals: int = 2) -> str:
+    """Money as ₱1,234.50.
+
+    The staff app used to render `PHP ` because the old tile font did not
+    reliably carry the sign glyph; Inter does, so the dashboard uses the same
+    helper as the rest of the app and the two stop disagreeing about what a peso
+    looks like.
+    """
+    return f"₱{amount:,.{decimals}f}"
+
+
+def _signed_pesos(amount: Decimal, refunded: bool) -> str:
+    if refunded:
+        return f"−₱{abs(float(amount)):,.2f}"
+    return f"₱{abs(float(amount)):,.2f}"
 
 
 def build_dashboard_page(shell, *, animate: bool = True) -> DashboardPage:

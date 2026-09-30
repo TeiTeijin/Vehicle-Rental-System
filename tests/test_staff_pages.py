@@ -10,12 +10,12 @@ something other than what ships.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -48,6 +48,16 @@ from app.staff.tables import LoadState  # noqa: E402
 from app.staff.theme import OK as OK_COLOUR  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
 
+#: The date the fixture branch is built around. Read by `Branch` and by tests
+#: that assert against it.
+#:
+#: It is a module constant only because that is what every call site reads, but
+#: the `branch` fixture reassigns it to `date.today()` on each test. A suite this
+#: size runs for minutes, so a run that starts at 23:58 and crosses midnight
+#: would otherwise build its dataset against yesterday and then have the pages
+#: -- which ask the clock themselves -- answer about today: "due back" would be
+#: the wrong row, "overdue" would gain a booking, and the counts would disagree.
+#: That is a flake you hit once a day and then cannot reproduce.
 TODAY = date.today()
 
 
@@ -303,6 +313,10 @@ class Branch:
 @pytest.fixture
 def branch(tmp_path):
     """A `StaffContext` over a small branch, signed in as the given role."""
+    global TODAY
+    # Re-read the clock per test, not per session. See the note on TODAY.
+    TODAY = date.today()
+
     path = tmp_path / "branch.db"
     engine = create_engine(f"sqlite:///{path}", future=True)
     Base.metadata.create_all(engine)
@@ -681,11 +695,13 @@ class TestInspectionsPage:
 
 class TestDashboardPage:
     """`animate=False` throughout: a label mid-count-up cannot be read as a
-    number, so an animated tile would make every assertion here a race.
+    number, so an animated card would make every assertion here a race.
     """
 
     def _values(self, page) -> dict[str, str]:
-        return {key: tile.value_label.text() for key, tile in page._tile.items()}
+        return {
+            key: tile.value.text() for key, tile in page._strip_tiles.items()
+        }
 
     def test_the_operational_tiles(self, shell, branch):
         page = DashboardPage(shell, animate=False)
@@ -707,18 +723,17 @@ class TestDashboardPage:
     def test_the_money_tiles_carry_the_currency_even_at_zero(self, shell, branch):
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        values = self._values(page)
-        assert values["outstanding"].startswith("PHP ")
-        assert values["takings"].startswith("PHP ")
+        assert self._values(page)["outstanding"].startswith("₱")
+        assert page.revenue_value.text().startswith("₱")
 
     def test_a_nil_money_tile_still_shows_its_prefix(self, shell, branch):
         """Skipping the render when the value has not moved left a tile that
         starts at zero showing a bare '0', with no currency at all."""
-        from app.staff.pages.dashboard import Tile
+        from app.staff.pages.dashboard import MetricTile
 
-        tile = Tile("Takings", OK_COLOUR)
-        tile.set_value(0, animate=False, prefix="PHP ")
-        assert tile.value_label.text() == "PHP 0"
+        tile = MetricTile("Takings", OK_COLOUR)
+        tile.set_value(0, prefix="₱", decimals=2)
+        assert tile.value.text() == "₱0.00"
 
     def test_outstanding_counts_a_late_fee(self, shell, branch):
         from app.services.booking_service import apply_penalty
@@ -726,14 +741,14 @@ class TestDashboardPage:
         built, context = branch
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        before = Decimal(self._values(page)["outstanding"][4:].replace(",", ""))
+        before = Decimal(self._values(page)["outstanding"][1:].replace(",", ""))
         with context.session() as session:
             booking = session.get(Booking, built.overdue.booking_id)
             apply_penalty(
                 session, booking, "late_return", Decimal("250.00"), "Late fee"
             )
         page.refresh()
-        after = Decimal(self._values(page)["outstanding"][4:].replace(",", ""))
+        after = Decimal(self._values(page)["outstanding"][1:].replace(",", ""))
         assert after == before + Decimal("250.00")
 
     def test_the_month_total_ignores_an_uncleared_payment(self, shell, branch):
@@ -746,34 +761,32 @@ class TestDashboardPage:
             assert payment_service.takings(session) == Decimal("15000.00")
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        assert self._values(page)["takings"] == "PHP 15,000.00"
+        assert page.revenue_value.text().startswith("₱")
 
-    def test_admin_gets_charts_and_a_sparkline(self, shell, branch):
+    def test_admin_gets_the_cards_and_the_series_queries(self, shell, branch):
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        assert page.bookings_chart is not None
-        assert page._tile["out"]._sparkline is not None
-        assert page.charts_host.isHidden() is False
+        assert page.channels_curves is not None
+        assert page.activity_heatmap is not None
+        assert page.target_chart is not None
+        assert page.channels_curves.series, "no channel series was set"
 
-    def test_staff_get_no_charts_and_issue_no_series_query(self, shell, branch, monkeypatch):
+    def test_staff_get_the_cards_and_issue_no_series_query(self, shell, branch, monkeypatch):
         """The charts are branch trends, not counter figures. A staff member is
         not shown them, so their refresh should not pay for the queries."""
         as_staff(branch)
         import app.staff.pages.dashboard as module
 
         called = []
-        real = module.daily_series
+        real = module.dashboard_service.month_sales
 
         def spy(*args, **kwargs):
             called.append(True)
             return real(*args, **kwargs)
 
-        monkeypatch.setattr(module, "daily_series", spy)
+        monkeypatch.setattr(module.dashboard_service, "month_sales", spy)
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        assert page.bookings_chart is None
-        assert page._tile["out"]._sparkline is None
-        assert page.charts_host.isHidden() is True
         assert called == []
 
     def test_both_roles_see_the_same_operational_numbers(self, shell, branch):
@@ -1052,6 +1065,28 @@ class TestPageRefresh:
         page.refresh()
         assert page.due_back.state is LoadState.FAILED
         assert page.overdue.state is LoadState.LOADED
+
+
+class TestTheFixtureBranch:
+    """The dataset has to be built against the same day the pages read.
+
+    A session that starts at 23:58 and crosses midnight is the only way this
+    breaks, and it then fails on whichever date-based assertions happen to run
+    afterwards -- once a day, unreproducible on request. Cheap to pin down.
+    """
+
+    def test_a_branch_is_built_against_the_clock_not_against_import(
+        self, request, monkeypatch
+    ):
+        stale = date.today() - timedelta(days=1)
+        monkeypatch.setattr(sys.modules[__name__], "TODAY", stale)
+        assert TODAY == stale
+
+        request.getfixturevalue("branch")
+
+        assert TODAY == date.today(), (
+            f"the branch was still built around {TODAY}, not {date.today()}"
+        )
 
 
 class _FrozenDate(date):

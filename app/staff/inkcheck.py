@@ -1,0 +1,75 @@
+"""Ink coverage for a rendered widget. Not part of the app.
+
+    python -m app.staff.inkcheck path/to/widget.png
+
+Reports, for each of a few named colours, how many pixels are close to it. The
+charts are painted rather than styled, so the only way to know a curve actually
+drew is to look for its colour in the output -- and since nobody can look at a
+screenshot in CI, the check has to be numeric.
+
+Usage is deliberately crude and deliberately loud: it answers "is there any of
+this colour in the image", which is the question that catches an empty
+paintEvent, an off-by-one that puts everything outside the clip rect, and a
+gradient that collapsed to transparent.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import Counter
+from pathlib import Path
+
+from PIL import Image
+
+#: Colours to count, with the tolerance for "close enough to be this colour".
+#: 28 is about the largest gap antialiasing leaves between two distinct fills,
+#: wide enough to catch a curve and tight enough not to count its own glow.
+WATCH = {
+    "tan": ((184, 166, 138), 28),
+    "brown": ((138, 111, 78), 28),
+    "ink": ((23, 23, 23), 10),
+    "ink_raised": ((35, 34, 32), 8),
+    "cream": ((241, 232, 216), 6),
+    "paper": ((255, 255, 255), 3),
+}
+
+NEAR_BLACK = 40
+
+
+def close(a: tuple[int, int, int], b: tuple[int, int, int], tol: int) -> bool:
+    return all(abs(x - y) <= tol for x, y in zip(a, b))
+
+
+def report(path: Path) -> int:
+    image = Image.open(path).convert("RGB")
+    counts: Counter[str] = Counter()
+    dark = 0
+    for pixel in image.convert("RGB").get_flattened_data():
+        for name, (target, tol) in WATCH.items():
+            if close(pixel, target, tol):
+                counts[name] += 1
+                break
+        if max(pixel) < NEAR_BLACK:
+            dark += 1
+
+    total = image.width * image.height
+    print(f"{path.name}  {image.width}x{image.height}  {total:,} px")
+    for name in WATCH:
+        n = counts[name]
+        print(f"  {name:<11}{n:>9,}  {100 * n / total:>6.2f}%")
+    print(f"  {'near-black':<11}{dark:>9,}  {100 * dark / total:>6.2f}%")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(__doc__)
+        return 2
+    for target in argv[1:]:
+        report(Path(target))
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
