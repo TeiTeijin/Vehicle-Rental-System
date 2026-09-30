@@ -26,6 +26,7 @@ import re
 from collections import Counter
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -35,7 +36,13 @@ from app.staff.context import (  # noqa: E402
     DatabaseTarget,
     StaffContext,
 )
-from app.staff.login import LOGIN_SIZE, LoginView  # noqa: E402
+from app.staff.login import (  # noqa: E402
+    FIELD_BOTTOM,
+    FIELD_TOP,
+    LOGIN_SIZE,
+    MASK_CHAR,
+    LoginView,
+)
 
 #: The page cream from the blanket rule. Nothing on this screen may be it.
 PAGE_CREAM = "#f1e8d8"
@@ -364,6 +371,86 @@ class TestTheFloatingLabel:
         field.clear()
         _settle(field)
         assert not field._lifted
+
+
+class TestTheMaskedField:
+    """The mask is drawn, not stored.
+
+    Qt's password dot is a fixed 11x11px decoration at any font size, and
+    PySide6 does not bind `QLineEdit::setEchoChar`, so the character cannot be
+    changed the supported way either. The field therefore keeps the genuine
+    text and swaps in a run of bullets for the duration of the paint.
+    """
+
+    def test_the_field_holds_the_real_password_not_bullets(self, view):
+        field = view.password
+        field.setText("hunter2")
+        view.repaint()
+        assert field.text() == "hunter2", "the mask leaked into the value"
+
+    def test_the_value_survives_a_paint(self, view):
+        field = view.password
+        field.setText("correct horse")
+        view.grab()  # force a paint, which is when the swap happens
+        view.grab()
+        assert field.text() == "correct horse"
+
+    def test_typing_and_deleting_still_work(self, view):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+
+        field = view.password
+        _focus(view, field)
+        field.setText("")
+        for ch in "abc":
+            event = QKeyEvent(
+                QKeyEvent.Type.KeyPress,
+                0,
+                Qt.KeyboardModifier.NoModifier,
+                ch,
+            )
+            QApplication.sendEvent(field, event)
+        assert field.text() == "abc", field.text()
+        field.backspace()
+        assert field.text() == "ab", field.text()
+
+    def test_the_drawn_dot_is_a_bullet_not_qts_circle(self, view):
+        from PySide6.QtGui import QFontMetrics
+
+        field = view.password
+        _focus(view, field)
+        field.setText("abcdefgh")
+        view.repaint()
+
+        image = view.grab().toImage()
+        top = field.mapTo(view, field.rect().topLeft()).y()
+        xs = set()
+        for y in range(top + FIELD_TOP + 3, top + field.height() - FIELD_BOTTOM - 3):
+            for x in range(2, 240):
+                c = image.pixelColor(x, y)
+                if c.red() + c.green() + c.blue() < 600:
+                    xs.add(x)
+        ordered = sorted(xs)
+        groups, cur = [], [ordered[0]]
+        for a, b in zip(ordered, ordered[1:]):
+            if b - a > 1:
+                groups.append(cur)
+                cur = []
+            cur.append(b)
+        groups.append(cur)
+
+        metrics = QFontMetrics(field.font())
+        expected_advance = metrics.horizontalAdvance(MASK_CHAR)
+        actual_advance = groups[1][0] - groups[0][0]
+        assert actual_advance == expected_advance, (
+            f"dots are {actual_advance}px apart, but a bullet at this font is "
+            f"{expected_advance}px apart -- Qt's own dot is 14px"
+        )
+
+    def test_an_unmasked_field_is_untouched(self, view):
+        view.email.setText("someone@rentdesk.local")
+        view.repaint()
+        assert view.email.text() == "someone@rentdesk.local"
 
 
 # --------------------------------------------------------------------------
