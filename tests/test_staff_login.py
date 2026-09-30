@@ -238,12 +238,68 @@ class TestTheFloatingLabel:
         assert not field._lifted
         assert field._label.pos().y() > FIELD_TOP, "should sit in the text area"
 
+    def test_the_fields_start_empty(self, view):
+        """The demo pre-filled the email, which made the sign-in look like it
+        had remembered a login nobody asked it to."""
+        assert view.email.text() == "", "the email field is pre-filled"
+        assert view.password.text() == "", "the password field is pre-filled"
+
     def test_a_prefilled_field_keeps_its_caption_lifted(self, view):
         field = view.email
-        assert field.text(), "precondition: the demo email is pre-filled"
+        _focus(view, field)
+        field.setText("someone@rentdesk.local")
         _blur(view, field)
         assert field._lifted
         assert field._label.objectName() == theme.OBJ_LABEL_LIFTED
+
+    @pytest.mark.parametrize("field_name", ["email", "password"])
+    @pytest.mark.parametrize("lifted", [False, True])
+    def test_the_caption_is_never_clipped(self, view, field_name, lifted):
+        """The caption is a bare child of the line edit, moved by hand and not
+        in a layout, so nothing sizes it but `_restack`. Left to its own
+        devices it kept whatever geometry it happened to have, and the line
+        edit clipped letters off the end of it."""
+        from PySide6.QtGui import QFontMetrics
+
+        field = getattr(view, field_name)
+        if lifted:
+            _focus(view, field)
+        else:
+            _blur(view, field)
+            assert field.text() == "", "precondition: empty, so the caption rests"
+
+        self._assert_fits(field)
+
+    @pytest.mark.parametrize("field_name", ["email", "password"])
+    def test_the_caption_resizes_itself_to_the_font_in_use(self, view, field_name):
+        """The same invariant, but reached the way it was actually broken.
+
+        Squeezing the label is not something a person can do, but it stands in
+        for the real cause: the font changed underneath a label whose size
+        nothing was maintaining. A caption lifted while the label was narrow
+        kept that narrow geometry when it dropped back, and the line edit --
+        which is a scroll area -- cut the letters off.
+        """
+        field = getattr(view, field_name)
+        field._label.resize(5, 5)
+        field._restack(animate=False)
+        self._assert_fits(field)
+
+    @staticmethod
+    def _assert_fits(field) -> None:
+        from PySide6.QtGui import QFontMetrics
+
+        label = field._label
+        metrics = QFontMetrics(label.font())
+        needed_w = metrics.horizontalAdvance(label.text())
+        assert label.width() >= needed_w, (
+            f"{label.objectName()} is {label.width()}px wide and "
+            f"{label.text()!r} needs {needed_w}px"
+        )
+        assert label.height() >= metrics.height(), (
+            f"{label.objectName()} is {label.height()}px tall and "
+            f"{label.text()!r} needs {metrics.height()}px"
+        )
 
     def test_focusing_lifts_the_label_above_the_rule(self, view):
         field = view.password

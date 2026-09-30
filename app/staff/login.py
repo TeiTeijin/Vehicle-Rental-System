@@ -118,7 +118,16 @@ class FloatingField(QLineEdit):
         self._label.style().unpolish(self._label)
         self._label.style().polish(self._label)
 
-        label_h = self._label.sizeHint().height()
+        # The label is a bare child of the line edit, moved by hand and not in
+        # a layout, so nothing else will ever size it: it keeps whatever
+        # geometry it had when it was built. That geometry was measured with
+        # the fallback font, before Inter was registered, so it came out
+        # narrower and shorter than the caption needs and the line edit
+        # clipped the letters off the end. This is the only place that knows
+        # which font is in play, so it is the only place that can size it.
+        self._label.adjustSize()
+
+        label_h = self._label.height()
         if self._lifted:
             y = LABEL_LIFT_Y
         else:
@@ -192,10 +201,6 @@ class LoginView(QWidget):
         # The two together also behave if the form is ever made wider.
 
         self.email = FloatingField("Email", self)
-        if context.selection.is_demo:
-            self.email.setText("admin@rentdesk.local")
-            self.email._restack(animate=False)
-
         self.password = FloatingField("Password", self)
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.returnPressed.connect(self.attempt_sign_in)
