@@ -160,6 +160,12 @@ class LoginView(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName(OBJ_LOGIN_ROOT)
+        # A bare QWidget ignores `background` in a stylesheet unless this is
+        # set, because it has no paintEvent of its own to draw one. Without it
+        # the rule is accepted and silently discarded, and the window behind
+        # shows through -- which is what left the sign-in showing the page's
+        # cream whatever colour was asked for here.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.context = context
         self._on_signed_in = on_signed_in
 
@@ -175,6 +181,12 @@ class LoginView(QWidget):
         caption = QLabel("Staff Sign in", self)
         caption.setObjectName(OBJ_LOGIN_CAPTION)
         caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Both labels also get centred in the layout below. `setAlignment`
+        # alone does nothing here: a QLabel with word wrap off reports a
+        # maximum width equal to its text, so the layout hands it exactly the
+        # width of the words and there is nothing left for the alignment to
+        # distribute. Centring the widget in its row does the actual work.
+        # The two together also behave if the form is ever made wider.
 
         self.email = FloatingField("Email", self)
         if context.selection.is_demo:
@@ -206,9 +218,9 @@ class LoginView(QWidget):
         form_layout = QVBoxLayout(form)
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(0)
-        form_layout.addWidget(wordmark)
+        form_layout.addWidget(wordmark, 0, Qt.AlignmentFlag.AlignHCenter)
         form_layout.addSpacing(6)
-        form_layout.addWidget(caption)
+        form_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignHCenter)
         form_layout.addSpacing(30)
         form_layout.addWidget(self.email)
         form_layout.addSpacing(16)
