@@ -294,7 +294,7 @@ QPushButton#dangerButton:hover {
    The wordmark is the only large type on the screen. */
 
 QWidget#loginRoot {
-    background: #F1E8D8;
+    background: #FFFFFF;
 }
 
 QLabel#loginWordmark {
