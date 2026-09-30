@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase
 
 #: The single copy of the bundled faces, shared by both windows.
 FONTS_DIR = Path(__file__).resolve().parent.parent / "ui" / "fonts"
@@ -28,19 +28,31 @@ _loaded = False
 
 
 def load_fonts() -> bool:
-    """Register every bundled ``.ttf``. Returns whether the family is usable.
+    """Register every bundled ``.ttf`` and make it the application font.
+
+    Returns whether the family is usable.
 
     Requires a ``QApplication`` to already exist -- ``QFontDatabase`` is not
     available before one does. Returns False rather than raising when the
     files are missing, because a missing font should degrade the typography,
     not stop the app from starting.
+
+    Setting the application font is the belt to the stylesheet's braces. A
+    ``font-family`` rule is a *request*: register the faces but leave the app
+    font alone and anything the stylesheet does not reach -- a context menu, a
+    native-drawn tooltip, a widget created before ``setStyleSheet`` -- quietly
+    renders in the system default. With the app font set, Inter is what the
+    process draws with even if a rule is missing or mistyped.
     """
     global _loaded
-    if _loaded:
-        return BUNDLED_FAMILY in QFontDatabase.families()
+    if not _loaded:
+        for font_file in sorted(FONTS_DIR.glob("*.ttf")):
+            QFontDatabase.addApplicationFont(str(font_file))
+        _loaded = True
 
-    for font_file in sorted(FONTS_DIR.glob("*.ttf")):
-        QFontDatabase.addApplicationFont(str(font_file))
-    _loaded = True
+    usable = BUNDLED_FAMILY in QFontDatabase.families()
+    if usable:
+        from PySide6.QtWidgets import QApplication
 
-    return BUNDLED_FAMILY in QFontDatabase.families()
+        QApplication.setFont(QFont(BUNDLED_FAMILY))
+    return usable

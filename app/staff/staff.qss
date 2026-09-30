@@ -330,13 +330,26 @@ QLineEdit#loginField {
     color: #171717;
     font-size: 15px;
     padding: 6px 1px;
-    selection-background-color: #1F4E5F;
-    selection-color: #FFFFFF;
+    /* Selected text is ink on sand. The sand is far too light to carry white
+       text -- that pairing measures 1.42:1 -- so the ink flips instead. */
+    selection-background-color: #E5D7BE;
+    selection-color: #171717;
 }
 
 QLineEdit#loginField:focus {
-    border-bottom: 2px solid #1F4E5F;
+    border-bottom: 2px solid #E5D7BE;
     padding-bottom: 5px;
+}
+
+/* The eye inside the field. It paints its own icon and nothing else, so it is
+   told outright not to take a background. Today the custom paintEvent never
+   calls up to QStyle, so nothing would fill it anyway -- but the global
+   QWidget rule fills this page with cream, and the moment anyone adds
+   `super().paintEvent()` for a hover background this becomes a cream square
+   behind the icon. The same trap took the form column out earlier. */
+QAbstractButton#loginReveal {
+    background: transparent;
+    border: none;
 }
 
 /* Down, this is the placeholder sitting in the field. */
@@ -347,10 +360,14 @@ QLabel#loginLabel {
     font-weight: 400;
 }
 
-/* Up, it has become a label, so it is smaller and takes the accent. */
+/* Up, it has become a label, so it is smaller and takes the accent.
+
+   A darker shade of the button's sand rather than the sand itself: at 12px
+   this has to clear 4.5:1, and #E5D7BE on white is 1.42:1 -- invisible. This
+   is 4.84:1 and still reads as the same colour. */
 QLabel#loginLabelLifted {
     background: transparent;
-    color: #1F4E5F;
+    color: #8A6D3F;
     font-size: 12px;
     font-weight: 600;
 }

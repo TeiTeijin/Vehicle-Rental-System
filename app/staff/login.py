@@ -19,14 +19,19 @@ Three details worth keeping:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import (
     QEasingCurve,
     QPoint,
     QPropertyAnimation,
+    QRect,
     Qt,
+    QVariantAnimation,
 )
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -46,6 +51,7 @@ from app.staff.theme import (
     OBJ_LOGIN_ERROR,
     OBJ_LOGIN_FIELD,
     OBJ_LOGIN_FOOT,
+    OBJ_LOGIN_REVEAL,
     OBJ_LOGIN_ROOT,
     OBJ_LOGIN_FORM,
     OBJ_LOGIN_WORDMARK,
@@ -72,11 +78,197 @@ LABEL_LIFTED_PX = 12
 LABEL_LIFT_Y = 3
 
 
+#: Shared icon folder, next to the bundled faces.
+ICONS_DIR = Path(__file__).resolve().parent.parent / "ui" / "icons"
+
 #: Drawn over a masked field. Qt's own password dot is a fixed-size
 #: decoration -- it stays 11x11px whatever the field's font size, so it
 #: cannot be tuned -- and PySide6 does not bind `QLineEdit::setEchoChar`, so
 #: the character cannot be swapped either.
 MASK_CHAR = "\u2022"
+
+#: The reveal toggle. Two 512px downloads cropped and fitted into a 64px
+#: square, and drawn at this size.
+REVEAL_ICON_PX = 19
+REVEAL_BUTTON_PX = 30
+#: The eye that means "the password is on screen, click to hide it".
+REVEAL_ICON_SHOWN = "eye_shown.png"
+#: The struck-through eye that means "the password is masked".
+REVEAL_ICON_HIDDEN = "eye_hidden.png"
+#: Icon tint at rest and under the cursor. The artwork is black; a black glyph
+#: on a white sign-in outweighs every other mark on the page, so it is tinted
+#: down to the palette's muted ink instead.
+REVEAL_TINT = "#8A8175"
+REVEAL_TINT_HOVER = "#171717"
+#: Cross-fade length for the swap.
+REVEAL_FADE_MS = 180
+
+
+def _tinted(source: QPixmap, colour: str) -> QPixmap:
+    """A copy of `source` recoloured to `colour`, keeping its alpha.
+
+    The tint is baked into a pixmap rather than done with a painter
+    composition on the widget, because `CompositionMode_SourceIn` intersects
+    with everything already on the device and would erase the rest of the
+    button along with the icon.
+    """
+    out = QPixmap(source.size())
+    out.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(out)
+    painter.drawPixmap(0, 0, source)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    painter.fillRect(out.rect(), QColor(colour))
+    painter.end()
+    return out
+
+
+class RevealToggle(QAbstractButton):
+    """The eye in the password field: masked by default, one click to show.
+
+    The two icons cross-fade rather than snapping, because a hard swap while
+    the caret is blinking reads as a glitch. The incoming eye also eases up
+    from 88% so the change has somewhere to happen.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName(OBJ_LOGIN_REVEAL)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(REVEAL_BUTTON_PX, REVEAL_BUTTON_PX)
+        # Screen readers and tooltips get the plain wording.
+        self.setToolTip("Show the password")
+        self.setCheckable(True)
+        self.setChecked(False)
+
+        self._source = {
+            REVEAL_ICON_HIDDEN: QPixmap(str(ICONS_DIR / REVEAL_ICON_HIDDEN)),
+            REVEAL_ICON_SHOWN: QPixmap(str(ICONS_DIR / REVEAL_ICON_SHOWN)),
+        }
+        self._tints: dict[str, QPixmap] = {}
+
+        self._revealed = False
+        #: 0.0 is the hidden eye, 1.0 the shown one. Animate rather than swap.
+        #: This tracks the *state*, so the eye says what is on screen now: the
+        #: crossed-out eye while masked, the open one once revealed.
+        self._progress = 0.0
+        self._fade = QVariantAnimation(self)
+        self._fade.setDuration(REVEAL_FADE_MS)
+        self._fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._fade.valueChanged.connect(self._on_progress)
+        self._fade.finished.connect(self._on_finished)
+
+    # -- state ---------------------------------------------------------------
+
+    @property
+    def revealed(self) -> bool:
+        return self._revealed
+
+    @property
+    def dominant_icon(self) -> str:
+        """Which eye the fade is mostly showing, for tests to pin the mapping.
+
+        Mid-fade both are painted at partial opacity, so there is no single
+        answer; this reports the one that has the larger share.
+        """
+        if self._progress >= 0.5:
+            return REVEAL_ICON_SHOWN
+        return REVEAL_ICON_HIDDEN
+
+    def nextCheckState(self) -> None:
+        """Qt calls this on a click; the button is the single source of truth.
+
+        Deriving the fade from the same flag that drives the check state is
+        what keeps the eye and the field from drifting apart -- they used to
+        carry their own copies of "is it showing".
+        """
+        revealed = not self._revealed
+        self._revealed = revealed
+        self.setChecked(revealed)
+        self.setToolTip("Hide the password" if revealed else "Show the password")
+
+        target = 1.0 if revealed else 0.0
+        self._fade.stop()
+        self._fade.setStartValue(self._progress)
+        self._fade.setEndValue(target)
+        self._fade.start()
+
+    def set_revealed(self, revealed: bool, *, animated: bool = True) -> None:
+        """Set the state without waiting for a click."""
+        if revealed == self._revealed:
+            return
+        self._revealed = revealed
+        self.setChecked(revealed)
+        self.setToolTip("Hide the password" if revealed else "Show the password")
+        target = 1.0 if revealed else 0.0
+        self._fade.stop()
+        if not animated:
+            self._progress = target
+            self.update()
+            return
+        self._fade.setStartValue(self._progress)
+        self._fade.setEndValue(target)
+        self._fade.start()
+
+    # -- animation -----------------------------------------------------------
+
+    def _on_progress(self, value) -> None:
+        self._progress = float(value)
+        self.update()
+
+    def _on_finished(self) -> None:
+        # Snap to the end value: an eased curve can stop a hair short, which
+        # would leave a ghost of the other eye at low opacity forever.
+        self._progress = 1.0 if self._revealed else 0.0
+        self.update()
+
+    def stop_animation(self) -> None:
+        self._fade.stop()
+
+    # -- painting ------------------------------------------------------------
+
+    def _pixmap(self, filename: str) -> QPixmap:
+        tint = REVEAL_TINT_HOVER if self.underMouse() else REVEAL_TINT
+        key = f"{filename}|{tint}"
+        if key not in self._tints:
+            self._tints[key] = _tinted(self._source[filename], tint)
+        return self._tints[key]
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        size = REVEAL_ICON_PX
+        box = QRect(
+            (self.width() - size) // 2,
+            (self.height() - size) // 2,
+            size,
+            size,
+        )
+
+        hidden, shown = 1.0 - self._progress, self._progress
+        if hidden > 0.0:
+            painter.setOpacity(hidden)
+            painter.drawPixmap(box, self._pixmap(REVEAL_ICON_HIDDEN))
+        if shown > 0.0:
+            # The incoming eye comes up from 88% of full size.
+            grow = 0.88 + 0.12 * shown
+            grown = QRect(
+                (self.width() - int(size * grow)) // 2,
+                (self.height() - int(size * grow)) // 2,
+                int(size * grow),
+                int(size * grow),
+            )
+            painter.setOpacity(shown)
+            painter.drawPixmap(grown, self._pixmap(REVEAL_ICON_SHOWN))
+        painter.end()
+
+    def enterEvent(self, event) -> None:
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        self.update()
 
 
 class FloatingField(QLineEdit):
@@ -88,7 +280,12 @@ class FloatingField(QLineEdit):
     """
 
     def __init__(
-        self, caption: str, parent: QWidget | None = None, *, masked: bool = False
+        self,
+        caption: str,
+        parent: QWidget | None = None,
+        *,
+        masked: bool = False,
+        trailing: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName(OBJ_LOGIN_FIELD)
@@ -102,6 +299,15 @@ class FloatingField(QLineEdit):
         self._label = QLabel(caption, self)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._lifted = False
+
+        # A control parked at the right end of the field, kept clear of the
+        # typed text by an extra text margin.
+        self._trailing = trailing
+        if trailing is not None:
+            trailing.setParent(self)
+            trailing.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            trailing.show()
+            self.setTextMargins(0, 0, trailing.width() + 8, 0)
 
         self._fly = QPropertyAnimation(self._label, b"pos", self)
         self._fly.setDuration(150)
@@ -148,12 +354,18 @@ class FloatingField(QLineEdit):
         target = QPoint(1, y)
 
         self._fly.stop()
-        if animate and self._label.pos() != target:
+        if animate:
             self._fly.setStartValue(self._label.pos())
             self._fly.setEndValue(target)
             self._fly.start()
         else:
             self._label.move(target)
+
+        if self._trailing is not None:
+            self._trailing.move(
+                self.width() - self._trailing.width() - 6,
+                (self.height() - self._trailing.height()) // 2,
+            )
 
     def paintEvent(self, event) -> None:
         """Draw a masked field's own dots instead of Qt's oversized ones.
@@ -231,20 +443,24 @@ class LoginView(QWidget):
 
         wordmark = QLabel("Rent Desk", self)
         wordmark.setObjectName(OBJ_LOGIN_WORDMARK)
-        wordmark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        wordmark.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         caption = QLabel("Staff Sign in", self)
         caption.setObjectName(OBJ_LOGIN_CAPTION)
-        caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Both labels also get centred in the layout below. `setAlignment`
-        # alone does nothing here: a QLabel with word wrap off reports a
-        # maximum width equal to its text, so the layout hands it exactly the
-        # width of the words and there is nothing left for the alignment to
-        # distribute. Centring the widget in its row does the actual work.
-        # The two together also behave if the form is ever made wider.
+        caption.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        # Both labels are pinned to the left of the form column, level with the
+        # fields below them. `setAlignment` alone is not enough: a QLabel with
+        # word wrap off reports a maximum width equal to its text, so the layout
+        # hands it exactly the width of the words and there is nothing left for
+        # the alignment to distribute. `AlignLeft` in the row below is what
+        # actually puts it there, and the two together also behave if the form
+        # is ever made wider.
+
+        self.reveal = RevealToggle()
+        self.reveal.toggled.connect(self._on_reveal_toggled)
 
         self.email = FloatingField("Email", self)
-        self.password = FloatingField("Password", self, masked=True)
+        self.password = FloatingField("Password", self, masked=True, trailing=self.reveal)
         self.password.returnPressed.connect(self.attempt_sign_in)
         self.email.returnPressed.connect(self._focus_password)
 
@@ -269,9 +485,9 @@ class LoginView(QWidget):
         form_layout = QVBoxLayout(form)
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(0)
-        form_layout.addWidget(wordmark, 0, Qt.AlignmentFlag.AlignHCenter)
+        form_layout.addWidget(wordmark, 0, Qt.AlignmentFlag.AlignLeft)
         form_layout.addSpacing(6)
-        form_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignHCenter)
+        form_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
         form_layout.addSpacing(30)
         form_layout.addWidget(self.email)
         form_layout.addSpacing(16)
@@ -305,6 +521,16 @@ class LoginView(QWidget):
         return "Accounts come from your branch administrator."
 
     # -- behaviour -----------------------------------------------------------
+
+    def _on_reveal_toggled(self, checked: bool) -> None:
+        """Show the password, or mask it again.
+
+        Clicking the control, not the field, is what shows it -- the field
+        keeps its own click behaviour so a click inside it still just places
+        the caret.
+        """
+        self.password._masked = not checked
+        self.password.update()
 
     def _focus_password(self) -> None:
         self.password.setFocus()
