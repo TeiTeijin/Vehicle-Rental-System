@@ -287,32 +287,107 @@ QPushButton#dangerButton:hover {
     color: #FFFFFF;
 }
 
-/* LOGIN */
+/* LOGIN
+
+   Flat: no panel, no shadow, no card. The window behind this is already one
+   surface, and a card on it read as a different object dropped in the middle.
+   The wordmark is the only large type on the screen. */
 
 QWidget#loginRoot {
-    background: #EEEAE1;
+    background: #F1E8D8;
 }
 
-QLabel#loginTitle {
+QLabel#loginWordmark {
     background: transparent;
-    font-size: 26px;
+    color: #171717;
+    font-size: 32px;
     font-weight: 700;
 }
 
-QLabel#loginSubtitle {
+QLabel#loginCaption {
     background: transparent;
-    color: #8A8175;
-    font-size: 13px;
+    color: #9B978F;
+    font-size: 16px;
+    font-weight: 400;
+}
+
+/* A field is a rule, not a box. The label floats above the rule when the field
+   is in use, so the rule carries the whole affordance and gets heavier on
+   focus. Padding is asymmetric on purpose: the lifted label needs the room. */
+QLineEdit#loginField {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid #CFC6B5;
+    border-top: 20px solid transparent;
+    color: #171717;
+    font-size: 15px;
+    padding: 6px 1px;
+    selection-background-color: #1F4E5F;
+    selection-color: #FFFFFF;
+}
+
+QLineEdit#loginField:focus {
+    border-bottom: 2px solid #1F4E5F;
+    padding-bottom: 5px;
+}
+
+/* Down, this is the placeholder sitting in the field. */
+QLabel#loginLabel {
+    background: transparent;
+    color: #9B978F;
+    font-size: 16px;
+    font-weight: 400;
+}
+
+/* Up, it has become a label, so it is smaller and takes the accent. */
+QLabel#loginLabelLifted {
+    background: transparent;
+    color: #1F4E5F;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QPushButton#loginButton {
+    background: #E5D7BE;
+    border: 1px solid #E5D7BE;
+    border-radius: 6px;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 10px 18px;
+}
+
+QPushButton#loginButton:hover {
+    background: #DCCBAE;
+    border-color: #DCCBAE;
+}
+
+QPushButton#loginButton:pressed {
+    background: #CDB994;
+    border-color: #CDB994;
+}
+
+QPushButton#loginButton:disabled {
+    background: #E6DFD2;
+    border-color: #E6DFD2;
+    color: #A9A296;
 }
 
 QLabel#loginError {
-    background: #FBEDEA;
-    border: 1px solid #A8452F;
-    border-radius: 6px;
-    color: #A8452F;
+    background: #FDF0ED;
+    border: 1px solid #C0563A;
+    border-left: 3px solid #A8452F;
+    border-radius: 4px;
+    color: #8E3A28;
     font-size: 13px;
-    font-weight: 600;
-    padding: 9px 12px;
+    font-weight: 500;
+    padding: 9px 11px;
+}
+
+QLabel#loginFoot {
+    background: transparent;
+    color: #9B978F;
+    font-size: 12px;
 }
 
 /* TOAST

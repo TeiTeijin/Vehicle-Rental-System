@@ -66,6 +66,40 @@ OBJ_STATUS = "statusPill"
 OBJ_EMPTY = "emptyState"
 OBJ_ERROR = "errorState"
 
+# -- sign in ----------------------------------------------------------------
+# The sign-in sits on the app's own background, with no panel behind it. A
+# card on a differently-coloured field read as a separate object dropped into
+# the middle of a window that is otherwise one flat surface.
+#
+# The accent is petrol rather than the amber that automotive work suggests on
+# purpose -- amber already means WARN in STATUS_COLOURS, and a brand colour
+# that looks like an alert is a trap for anyone reading this app quickly.
+
+#: Petrol. The brand colour, and the only non-semantic colour on the screen.
+PETROL = "#1F4E5F"
+PETROL_DEEP = "#16333F"
+#: The field caption, and the placeholder that floats over an empty field.
+#: Used by the sign-in, which is the only screen that needs it.
+CAPTION = "#9B978F"
+#: The sign-in button: a warm sand, deliberately not the petrol primary, so it
+#: does not read as the most important control in the app.
+BUTTON = "#E5D7BE"
+BUTTON_HOVER = "#DCCBAE"
+#: The rule under a field. Weightens to PETROL on focus.
+RULE = "#CFC6B5"
+#: Keyboard focus ring on the entry itself.
+FIELD_FOCUS = "#1F4E5F"
+
+OBJ_LOGIN_ROOT = "loginRoot"
+OBJ_LOGIN_WORDMARK = "loginWordmark"
+OBJ_LOGIN_CAPTION = "loginCaption"
+OBJ_LOGIN_FIELD = "loginField"
+OBJ_LABEL_REST = "loginLabel"
+OBJ_LABEL_LIFTED = "loginLabelLifted"
+OBJ_LOGIN_BUTTON = "loginButton"
+OBJ_LOGIN_ERROR = "loginError"
+OBJ_LOGIN_FOOT = "loginFoot"
+
 
 def colour_for(status: str | None) -> QColor:
     """The colour for a status string, never ``None``."""

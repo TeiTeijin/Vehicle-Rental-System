@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from app.staff import theme
 from app.staff.context import AccessDenied, StaffContext
-from app.staff.login import LoginView
+from app.staff.login import LOGIN_SIZE, LoginView
 from app.staff.widgets import blocking_error, confirm, toast
 
 #: How often the dashboard re-reads the database. 30 seconds is short enough
@@ -69,7 +69,10 @@ class StaffShell(QMainWindow):
         self._current_key: str | None = None
 
         self.setWindowTitle("RentDesk Staff")
-        self.resize(1180, 760)
+        #: The working size, for tables of bookings. Re-applied on sign-in and
+        #: released from the fixed size the login imposes.
+        self._windowed_size = (1180, 760)
+        self.setFixedSize(*LOGIN_SIZE)
         self.setStyleSheet(theme.load_stylesheet())
 
         self.stack = QStackedWidget(self)
@@ -228,6 +231,12 @@ class StaffShell(QMainWindow):
 
     def _on_signed_in(self, user) -> None:
         """Build the pages and go to the first one."""
+        # The login pins the window to a small fixed size. A sign-in form is
+        # not something to hand someone at 1180x760, and letting the window be
+        # dragged wider just stretches two fields and a button.
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        self.resize(*self._windowed_size)
         self._clear_chrome()
         if self.context.selection.is_demo:
             self._banner = self._build_demo_banner()
@@ -271,6 +280,9 @@ class StaffShell(QMainWindow):
         self._clear_chrome()
         self.setWindowTitle(self._title)
         self.stack.setCurrentWidget(self.login_view)
+        # Back to the fixed sign-in box, and clear it -- a half-typed password
+        # must not be waiting there for whoever signs in next.
+        self.setFixedSize(*LOGIN_SIZE)
         self.login_view.password.clear()
         self.login_view.error.setVisible(False)
 
