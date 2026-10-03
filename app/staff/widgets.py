@@ -30,12 +30,10 @@ from PySide6.QtWidgets import (
 from app.staff import theme
 from app.staff.feedback import describe, kind_colour
 
-#: How long a toast stays up. Long enough to read, short enough that a burst
-#: of confirmations does not paper over the screen.
+#: How long a toast stays up.
 TOAST_MS = 3200
 
-#: Toast travel distance. Small on purpose: a toast that slides across half
-#: the window is more disruptive than the message it is delivering.
+#: Toast travel distance.
 TOAST_SLIDE_PX = 14
 
 
@@ -54,9 +52,6 @@ class Toast(QFrame):
         self._label = QLabel(message, self)
         self._label.setObjectName("toastText")
         self._label.setProperty("kind", kind)
-        # The border is the only way to signal severity on a dark toast, and a
-        # stylesheet cannot key off a property set after the fact, so the
-        # colour is applied directly.
         border = kind_colour(kind)
         self.setStyleSheet(
             f"QFrame#toast {{ border-left: 3px solid {border}; "
@@ -81,9 +76,6 @@ class Toast(QFrame):
         self.show()
         self.raise_()
 
-        # Fade in, then hold. A single animation would be simpler but the
-        # message needs to arrive before the wait starts, or a short toast
-        # spends its whole life half-transparent.
         self._fade = QPropertyAnimation(self, b"windowOpacity", self)
         self._fade.setDuration(140)
         self._fade.setStartValue(0.0)

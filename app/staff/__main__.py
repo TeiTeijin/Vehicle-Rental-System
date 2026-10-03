@@ -40,8 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    # `--demo-file path` is the same intent as `--demo`, spelled out. Accepting
-    # both means nobody has to remember which one carries the path.
     try:
         selection = select_database(
             demo=args.demo or bool(args.demo_file),
@@ -57,20 +55,17 @@ def main(argv: list[str] | None = None) -> int:
     from app.utils.fonts import load_fonts
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    app.setApplicationName("RentDesk Staff")
+    app.setApplicationName("RentWheels Staff")
 
-    # The stylesheet names the bundled family; without this the widgets render
-    # in whatever Qt picks instead. Needs the QApplication above to exist.
+    # Needs the QApplication above to exist.
     load_fonts()
 
     context = StaffContext(selection)
     try:
         shell = StaffShell(context)
     except Exception as exc:
-        # A bad DATABASE_URL, or a schema that has not been migrated, fails
-        # here -- before any window exists. Say so plainly rather than
-        # showing a window that errors on every page.
-        print(f"Could not start RentDesk Staff: {exc}", file=sys.stderr)
+        # Fails before any window exists: report rather than show a broken shell.
+        print(f"Could not start RentWheels Staff: {exc}", file=sys.stderr)
         if not selection.is_demo:
             print(
                 "\nIf this is the staff schema migration:\n"

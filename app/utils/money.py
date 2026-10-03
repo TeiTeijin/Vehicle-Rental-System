@@ -26,18 +26,9 @@ MONEY_QUANTUM = CENT
 
 ZERO = Decimal("0.00")
 
-#: Python's default for money formatting. Formatting a Decimal with ``,``
-#: would be fine, but the Peso sign belongs in one place so every screen and
-#: every PDF agrees on where it goes.
 PESO_SIGN = "₱"
 
 #: Spelled-out alternative to PESO_SIGN, for output that cannot carry the glyph.
-#:
-#: The receipt uses this. U+20B1 is not in the WinAnsi character set that
-#: reportlab's built-in Helvetica uses, so drawing "₱1,250.00" with the default
-#: font emits a blank box -- the figure the customer is meant to read, and the
-#: one number on the receipt that must never be the one that breaks. "PHP " is
-#: ASCII, unambiguous, and universally used on receipts printed this way.
 PESO_SIGN_ASCII = "PHP "
 
 
@@ -67,8 +58,7 @@ def to_decimal(value: object, *, field: str = "amount") -> Decimal:
         return Decimal(value)
 
     if isinstance(value, float):
-        # str() first, so 0.1 becomes Decimal("0.1") rather than the binary
-        # expansion of 0.1.
+        # str() first: Decimal(0.1) is the binary expansion of 0.1.
         return Decimal(str(value))
 
     if isinstance(value, str):

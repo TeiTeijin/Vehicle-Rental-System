@@ -52,7 +52,6 @@ class TestCreateBooking:
             booking_service.create_booking(session, customer, vehicle, D6, D1)
 
     def test_total_cost_is_decimal_not_text(self, session, customer, vehicle):
-        # The old code wrote str(total_cost) into a DECIMAL column.
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         assert booking.total_cost == 12500
         assert booking.total_cost.as_tuple().exponent == -2
@@ -91,7 +90,6 @@ class TestCreateBooking:
         assert booking_service.is_reserved_between(session, vehicle, D1, D6) is False
 
     def test_does_not_write_a_reserved_status(self, session, customer, vehicle):
-        # `reserved` is derived, never stored -- see fleet_service.
         booking_service.create_booking(session, customer, vehicle, D1, D6)
         assert vehicle.status == "available"
 
@@ -105,16 +103,11 @@ class TestBookingRefusals:
     def test_refuses_a_vehicle_out_on_rent(self, session, customer, vehicle, staff):
         first = booking_service.create_booking(session, customer, vehicle, D1, D6)
         booking_service.check_in(session, first, staff, 42000, "full")
-        # The car is physically out. A later booking is fine if it starts after
-        # the return, but the vehicle is `rented` and unavailable to promise.
         assert vehicle.status == "rented"
         with pytest.raises(ConflictError, match="rented"):
             booking_service.create_booking(session, customer, vehicle, D6, D8)
 
     def test_refuses_a_vehicle_in_the_workshop(self, session, vehicle):
-        # Regression: the original check looked only at bookings and ignored
-        # maintenance entirely, so a car booked in for a brake job could still
-        # be promised to a customer.
         fleet_service.schedule_maintenance(
             session, vehicle, "Brake pads", D1, D5, 4500
         )
@@ -133,9 +126,6 @@ class TestBookingRefusals:
             booking_service.assert_available(session, vehicle, D1, D5)
 
     def test_a_workshop_date_range_is_free_again_once_the_car_is_out_of_it(self, session, vehicle):
-        # The booking guard only refuses dates that actually collide. Beyond
-        # the workshop window the guard stops complaining; the vehicle's
-        # `maintenance` status is what stops it being taken today.
         fleet_service.schedule_maintenance(session, vehicle, "Brake pads", D1, D5, 4500)
         with pytest.raises(ConflictError, match="currently maintenance"):
             booking_service.assert_available(session, vehicle, D5, D8)
@@ -153,7 +143,6 @@ class TestBookingRefusals:
             booking_service.create_booking(session, customer, vehicle, D6, D8)
 
     def test_licence_expiry_is_judged_against_the_start_date(self, session, customer, vehicle):
-        # Valid when the rental begins, expiring mid-term: still allowed.
         customer.license_expiry = D6
         booking_service.create_booking(session, customer, vehicle, D1, D8)
 
@@ -208,8 +197,6 @@ class TestConfirmAndCancel:
 
 class TestCheckIn:
     def test_marks_the_vehicle_rented(self, session, customer, vehicle, staff):
-        # The single most important line in the file. Without it, a car that
-        # was physically out was still advertised as available.
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         report = booking_service.check_in(session, booking, staff, 42000, "full")
         assert vehicle.status == "rented"
@@ -260,8 +247,6 @@ class TestCheckIn:
             booking_service.check_in(session, booking, staff, 42000, "full")
 
     def test_photo_is_optional(self, session, customer, vehicle, staff):
-        # photo_url was NOT NULL, so the old code wrote "" for every rental
-        # that was never photographed.
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         report = booking_service.check_in(session, booking, staff, 42000, "full")
         assert report.photo_url is None
@@ -304,8 +289,6 @@ class TestCheckOut:
         assert report.inspection_type == "post-rental"
 
     def test_charges_a_damage_cost(self, session, ongoing, staff):
-        # Regression: the old signature had no damage_charge at all and wrote
-        # a Penalty with amount=0.0.
         booking_service.check_out(
             session,
             ongoing,
@@ -365,7 +348,6 @@ class TestCheckOut:
         assert ongoing.status == "completed"
 
     def test_damage_charge_counts_toward_the_balance(self, session, settled_ongoing, staff):
-        # Paid in full, then damaged: the damage is what is now owed.
         with pytest.raises(ConflictError, match="outstanding"):
             booking_service.check_out(
                 session, settled_ongoing, staff, D6, 42100, "full", damage_charge=1500
@@ -378,8 +360,6 @@ class TestCheckOut:
         booking_service.check_out(
             session, ongoing, staff, D6, 42100, "full", require_settlement=False
         )
-        # mark_available must not return a car that is in the workshop to the
-        # bookable pool.
         assert vehicle.status == "maintenance"
 
     def test_cannot_check_out_a_booking_never_checked_in(
@@ -446,7 +426,6 @@ class TestPenalties:
             booking_service.apply_penalty(session, booking, "damage", -100, "?")
 
     def test_rejects_a_zero_late_fee(self, session, customer, vehicle):
-        # A zero late fee is indistinguishable from no late fee.
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         with pytest.raises(ValidationError, match="needs an amount"):
             booking_service.apply_penalty(session, booking, "late_return", 0, "?")
@@ -469,8 +448,6 @@ class TestTodayQueries:
         assert booking_service.expected_vehicles_today(session, TODAY) == [booking]
 
     def test_a_booking_ending_today_is_not_still_out(self, session, customer, vehicle):
-        # Half-open, so this is the same rule that allows same-day turnaround:
-        # [start, end) means the car is back on the end date.
         booking = booking_service.create_booking(session, customer, vehicle, TODAY - timedelta(days=2), TODAY)
         booking_service.confirm_booking(session, booking)
         assert booking_service.expected_vehicles_today(session, TODAY) == []
@@ -651,8 +628,6 @@ class TestStaleCollections:
     def test_fees_added_during_check_out_reach_the_balance(
         self, session, customer, vehicle, staff
     ):
-        # The end-to-end ordering: read the balance, then check out with a late
-        # fee and damage, then read the balance again.
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         payment_service.record_payment(session, booking, 12500, "cash")
         booking_service.check_in(session, booking, staff, 42000, "full")
@@ -663,7 +638,7 @@ class TestStaleCollections:
             damage_notes="Scratch", damage_charge=1500, require_settlement=False,
         )
         balance = payment_service.booking_balance(session, booking)
-        assert balance.total_due == 16000   # 12,500 + 2,000 late + 1,500 damage
+        assert balance.total_due == 16000
         assert balance.balance == 3500
 
 

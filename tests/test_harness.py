@@ -42,11 +42,6 @@ def test_factories_build_usable_rows(
     assert vehicle.status == "available"
     assert booking.vehicle_id == vehicle.vehicle_id
 
-    # Only a DB round-trip coerces a DECIMAL column to Decimal. Whatever a
-    # factory assigns stays put in memory until then, so a value written as a
-    # str reads back as a str -- which is why services must assign Decimal to
-    # money columns rather than str, and never do arithmetic on an attribute
-    # that has not been flushed and re-read.
     session.commit()
     session.expire(booking)
     assert booking.total_cost == Decimal("7500.00")
@@ -61,4 +56,3 @@ def test_rollback_fixture_discards_writes(
     vehicle_factory(car_category, plate_number="ZZZ-999")
     session.flush()
     assert session.query(Vehicle).count() == 1
-    # The fixture rolls back on teardown, so nothing leaks into the next test.

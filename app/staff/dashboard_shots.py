@@ -1,11 +1,12 @@
 """Render the dashboard to PNGs for review. Not part of the app.
 
-    python -m app.staff.dashboard_shots
+    python -m app.staff.dashboard_shots [role] [out-dir]
 
-Writes one full-window shot and one per card at the 1440x900 reference, so the
-grid and each card can be looked at separately. Signs in against `demo.db` as
-the admin by default; pass `staff` for the counter view, which is the one that
-proves the role gate hides the cards.
+Writes the full window at each of the three shapes the brief asks for -- wide,
+medium and narrow -- plus one PNG per card at the 1440x900 reference, so the
+grid and each card can be looked at separately. Signs in against `demo.db`. The
+default role is `admin`; pass `staff` for the counter view, which shows the same
+five cards without the admin-only actions.
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.staff import theme
@@ -24,9 +24,16 @@ from app.utils.fonts import load_fonts
 DEFAULT_OUT = Path(r"C:\Users\Lily Ann\Desktop")
 DEMO = "sqlite:///demo.db"
 EMAIL = {
-    "admin": "admin@rentdesk.local",
-    "staff": "counter@rentdesk.local",
+    "admin": "admin@rentwheels.local",
+    "staff": "counter@rentwheels.local",
 }
+
+#: (tag, width, height)
+SHAPES = (
+    ("wide", REFERENCE_W, REFERENCE_H),
+    ("medium", 1000, REFERENCE_H),
+    ("narrow", 800, REFERENCE_H),
+)
 
 
 def build(role: str, out_dir: Path, tag: str) -> None:
@@ -41,9 +48,7 @@ def build(role: str, out_dir: Path, tag: str) -> None:
     from app.services.auth_service import sign_in
     from app.staff.context import StaffUser
 
-    # Snapshot inside the session, exactly as `LoginView.attempt_sign_in` does.
-    # Reading the row after the read session closes raises DetachedInstanceError
-    # because `reading()` rolls back, and rollback expires every attribute.
+    # Snapshot inside the session: reading() rolls back and expires the row.
     with context.reading() as session:
         row = sign_in(session, EMAIL[role], "demo-password")
         identity = StaffUser.from_row(row)
@@ -59,22 +64,23 @@ def build(role: str, out_dir: Path, tag: str) -> None:
     page = DashboardPage(_Shell(context), animate=False)
     page.resize(REFERENCE_W, REFERENCE_H)
     page.show()
-    # The shell owns the refresh, and this script stands in for the shell rather
-    # than subclassing it -- so the shot has to ask for the data explicitly. A
-    # page that has only been `show()`n renders its empty widgets, which is how
-    # an admin and a staff shot of the same build can come out byte-identical.
+    # The shell owns the refresh, so ask explicitly before grabbing.
     page.refresh()
-    QTest.qWait(400)
-    app.processEvents()
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    page.grab().save(str(out_dir / f"dash_{tag}_full.png"))
 
-    print(
-        f"{tag}: {identity.role}, cards visible={page.grid.isVisible()}, "
-        f"strip visible={page.strip.isVisible()}"
-    )
+    for shape, width, height in SHAPES:
+        page.resize(width, height)
+        # Two pumps: the grid reflows from its own resizeEvent.
+        app.processEvents()
+        app.processEvents()
+        page.grab().save(str(out_dir / f"dash_{tag}_{shape}.png"))
+        print(f"{tag}/{shape}: grid shape={page.grid.shape}, width={page.grid.width()}")
 
+    # Per-card shots are taken at the reference width.
+    page.resize(REFERENCE_W, REFERENCE_H)
+    app.processEvents()
+    app.processEvents()
     for name, card in (
         ("revenue", page.revenue_card),
         ("channels", page.channels_card),

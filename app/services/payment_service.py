@@ -32,8 +32,7 @@ from app.utils.money import ZERO, money, sum_money
 #: The only statuses that mean money actually arrived.
 SETTLED_STATUSES = ("paid",)
 
-#: Statuses a new payment record may be created with. `paid` is the normal one
-#; `pending` covers a GCash transfer still in flight.
+#: `pending` covers a GCash transfer still in flight.
 RECORDABLE_STATUSES = ("pending", "paid", "failed")
 
 METHODS = ("cash", "card", "gcash")

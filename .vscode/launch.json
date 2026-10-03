@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Staff: Demo (RentDesk)",
+            "name": "Staff: Demo (RentWheels)",
             "type": "debugpy",
             "request": "launch",
             "module": "app.staff",
@@ -12,7 +12,7 @@
             "justMyCode": true
         },
         {
-            "name": "Staff: Live (RentDesk)",
+            "name": "Staff: Live (RentWheels)",
             "type": "debugpy",
             "request": "launch",
             "module": "app.staff",

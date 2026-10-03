@@ -20,9 +20,6 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 
-# The pre-staff-rebuild schema, transcribed from the models as they were.
-# Kept as literal DDL on purpose: if it were built from the current models it
-# would contain the very columns the migration adds.
 OLD_SCHEMA = [
     """
     CREATE TABLE VEHICLE_CATEGORY (
@@ -76,8 +73,6 @@ OLD_SCHEMA = [
         created_at DATETIME NOT NULL
     )
     """,
-    # paid_at NOT NULL, created_at absent entirely: the two contradictions the
-    # migration exists to resolve.
     """
     CREATE TABLE PAYMENT (
         payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +84,6 @@ OLD_SCHEMA = [
         FOREIGN KEY(booking_id) REFERENCES BOOKING(booking_id)
     )
     """,
-    # photo_url NOT NULL: forcing '' for every unphotographed rental.
     """
     CREATE TABLE INSPECTION_REPORT (
         inspection_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,10 +118,6 @@ OLD_SCHEMA = [
         status VARCHAR(20)
     )
     """,
-    # VEHICLE_MEDIA is not touched by the staff migration and already matches
-    # the model on the live database, so it is transcribed in its current form.
-    # The columns here embed CarImages signed URLs and are treated as
-    # credential data by the model -- do not print their contents in a failure.
     """
     CREATE TABLE VEHICLE_MEDIA (
         media_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,7 +197,6 @@ class TestAddsColumns:
             assert name in cols, f"BOOKING.{name} was not added"
 
     def test_new_columns_are_nullable(self, old_db):
-        # NOT NULL with no default would fail every existing INSERT.
         engine, run = old_db
         run()
         for table, name in [
@@ -308,7 +297,7 @@ class TestIdempotent:
         engine, run = old_db
         run()
         before = columns(engine, "PAYMENT")
-        run()  # second time
+        run()
         after = columns(engine, "PAYMENT")
         assert set(before) == set(after)
 
@@ -318,8 +307,6 @@ class TestIdempotent:
         first = len(inspect(engine).get_indexes("BOOKING"))
         run()
         run()
-        # An index created twice would either raise or be listed twice; either
-        # way the count must not move.
         assert len(inspect(engine).get_indexes("BOOKING")) == first
 
     def test_dry_run_changes_nothing(self, old_db):
@@ -403,12 +390,10 @@ class TestResultMatchesModels:
             session.add(booking)
             session.flush()
 
-            # A GCash transfer that has not landed: no paid_at.
             pending = Payment(
                 booking=booking, amount="2000.00", method="gcash", status="pending",
                 paid_at=None, recorded_by=staff.user_id, reference_no="GC-X",
             )
-            # An inspection of a rental that was never photographed: no photo.
             report = Inspection_Report(
                 booking=booking, inspected_by=staff.user_id,
                 inspection_type="pre-rental", mileage_reading=100, fuel_level="full",
@@ -421,4 +406,4 @@ class TestResultMatchesModels:
             assert report.photo_url is None
             assert booking.created_by == staff.user_id
             assert pending.recorded_by == staff.user_id
-            assert pending.created_at is not None  # defaulted, not required
+            assert pending.created_at is not None

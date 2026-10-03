@@ -58,46 +58,33 @@ from app.staff.theme import (
 )
 from app.utils.fonts import load_fonts
 
-#: The sign-in window is exactly this size and no other. Chosen so the form
-#: sits comfortably at 16px type without the fields stretching, and so the
-#: error line has room to appear without the window jumping.
 LOGIN_SIZE = 432, 512
 
-#: Reserved clear space at the top of a field, matched to the transparent
-#: `border-top` in the stylesheet. The lifted label flies up *into* this band
-#: rather than above the widget: a QLineEdit is a QAbstractScrollArea, so a
-#: child positioned at a negative y is clipped by the viewport and never
-#: painted at all.
+#: Reserved top band the lifted label flies up into.
 FIELD_TOP = 20
 #: The rule under the field.
 FIELD_BOTTOM = 1
-#: Label type sizes, and where it sits in each state.
+#: Label type sizes.
 LABEL_REST_PX = 16
 LABEL_LIFTED_PX = 12
-#: The lifted label sits just inside the reserved band.
+#: Lift offset inside the reserved band.
 LABEL_LIFT_Y = 3
 
 
-#: Shared icon folder, next to the bundled faces.
+#: Shared icon folder.
 ICONS_DIR = Path(__file__).resolve().parent.parent / "ui" / "icons"
 
-#: Drawn over a masked field. Qt's own password dot is a fixed-size
-#: decoration -- it stays 11x11px whatever the field's font size, so it
-#: cannot be tuned -- and PySide6 does not bind `QLineEdit::setEchoChar`, so
-#: the character cannot be swapped either.
+#: Fixed-size dot char; PySide6 does not bind `setEchoChar`.
 MASK_CHAR = "\u2022"
 
-#: The reveal toggle. Two 512px downloads cropped and fitted into a 64px
-#: square, and drawn at this size.
+#: The reveal toggle, drawn at this size.
 REVEAL_ICON_PX = 19
 REVEAL_BUTTON_PX = 30
-#: The eye that means "the password is on screen, click to hide it".
+#: The eye meaning the password is on screen.
 REVEAL_ICON_SHOWN = "eye_shown.png"
-#: The struck-through eye that means "the password is masked".
+#: The eye meaning the password is masked.
 REVEAL_ICON_HIDDEN = "eye_hidden.png"
-#: Icon tint at rest and under the cursor. The artwork is black; a black glyph
-#: on a white sign-in outweighs every other mark on the page, so it is tinted
-#: down to the palette's muted ink instead.
+#: Icon tint at rest and under the cursor.
 REVEAL_TINT = "#8A8175"
 REVEAL_TINT_HOVER = "#171717"
 #: Cross-fade length for the swap.
@@ -136,7 +123,6 @@ class RevealToggle(QAbstractButton):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(REVEAL_BUTTON_PX, REVEAL_BUTTON_PX)
-        # Screen readers and tooltips get the plain wording.
         self.setToolTip("Show the password")
         self.setCheckable(True)
         self.setChecked(False)
@@ -148,9 +134,7 @@ class RevealToggle(QAbstractButton):
         self._tints: dict[str, QPixmap] = {}
 
         self._revealed = False
-        #: 0.0 is the hidden eye, 1.0 the shown one. Animate rather than swap.
-        #: This tracks the *state*, so the eye says what is on screen now: the
-        #: crossed-out eye while masked, the open one once revealed.
+        #: 0.0 hidden eye, 1.0 shown.
         self._progress = 0.0
         self._fade = QVariantAnimation(self)
         self._fade.setDuration(REVEAL_FADE_MS)
@@ -217,8 +201,7 @@ class RevealToggle(QAbstractButton):
         self.update()
 
     def _on_finished(self) -> None:
-        # Snap to the end value: an eased curve can stop a hair short, which
-        # would leave a ghost of the other eye at low opacity forever.
+        # An eased curve can stop just short of the end value.
         self._progress = 1.0 if self._revealed else 0.0
         self.update()
 
@@ -252,7 +235,6 @@ class RevealToggle(QAbstractButton):
             painter.setOpacity(hidden)
             painter.drawPixmap(box, self._pixmap(REVEAL_ICON_HIDDEN))
         if shown > 0.0:
-            # The incoming eye comes up from 88% of full size.
             grow = 0.88 + 0.12 * shown
             grown = QRect(
                 (self.width() - int(size * grow)) // 2,
@@ -289,9 +271,6 @@ class FloatingField(QLineEdit):
     ) -> None:
         super().__init__(parent)
         self.setObjectName(OBJ_LOGIN_FIELD)
-        # The floating label does the placeholder's job. Leaving Qt's own
-        # placeholder set as well would leave the word sitting underneath the
-        # lifted label.
         self.setPlaceholderText("")
 
         self._caption = caption
@@ -300,8 +279,6 @@ class FloatingField(QLineEdit):
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._lifted = False
 
-        # A control parked at the right end of the field, kept clear of the
-        # typed text by an extra text margin.
         self._trailing = trailing
         if trailing is not None:
             trailing.setParent(self)
@@ -318,11 +295,6 @@ class FloatingField(QLineEdit):
 
     def _restack(self, *, animate: bool = True) -> None:
         """Put the label where it belongs for the current focus/text state."""
-        # Derived, not remembered. Caching this in the focus handlers left it
-        # stale whenever the text changed without a focus change -- clearing
-        # the field, which is exactly what sign-out does to the password.
-        # A field holding text keeps its label up: the words are the answer
-        # now, so the caption is a label again rather than a prompt.
         self._lifted = self.hasFocus() or bool(self.text())
         font = QFont(self.font())
         font.setPixelSize(LABEL_LIFTED_PX if self._lifted else LABEL_REST_PX)
@@ -334,21 +306,13 @@ class FloatingField(QLineEdit):
         self._label.style().unpolish(self._label)
         self._label.style().polish(self._label)
 
-        # The label is a bare child of the line edit, moved by hand and not in
-        # a layout, so nothing else will ever size it: it keeps whatever
-        # geometry it had when it was built. That geometry was measured with
-        # the fallback font, before Inter was registered, so it came out
-        # narrower and shorter than the caption needs and the line edit
-        # clipped the letters off the end. This is the only place that knows
-        # which font is in play, so it is the only place that can size it.
+        # No layout manages this child, so it must be sized by hand.
         self._label.adjustSize()
 
         label_h = self._label.height()
         if self._lifted:
             y = LABEL_LIFT_Y
         else:
-            # Centred in the text area, which is what is left between the
-            # reserved top band and the rule.
             text_h = max(0, self.height() - FIELD_TOP - FIELD_BOTTOM)
             y = FIELD_TOP + max(0, (text_h - label_h) // 2)
         target = QPoint(1, y)
@@ -410,9 +374,6 @@ class FloatingField(QLineEdit):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        # Every resize, not just the resting state: a lifted label centred for
-        # a shorter field would sit in the wrong place, and skipping this while
-        # lifted is what left the label stranded mid-flight.
         self._restack(animate=False)
 
 
@@ -427,34 +388,21 @@ class LoginView(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName(OBJ_LOGIN_ROOT)
-        # A bare QWidget ignores `background` in a stylesheet unless this is
-        # set, because it has no paintEvent of its own to draw one. Without it
-        # the rule is accepted and silently discarded, and the window behind
-        # shows through -- which is what left the sign-in showing the page's
-        # cream whatever colour was asked for here.
+        # Required or a bare QWidget silently discards `background`.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.context = context
         self._on_signed_in = on_signed_in
 
-        # The stylesheet names the bundled family by name, so the faces have to
-        # be registered before anything here is shown. Idempotent, and a failed
-        # load degrades the typography rather than stopping a sign-in.
+        # Must be registered before anything here is shown.
         load_fonts()
 
-        wordmark = QLabel("Rent Desk", self)
+        wordmark = QLabel("rentwheels", self)
         wordmark.setObjectName(OBJ_LOGIN_WORDMARK)
         wordmark.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         caption = QLabel("Staff Sign in", self)
         caption.setObjectName(OBJ_LOGIN_CAPTION)
         caption.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        # Both labels are pinned to the left of the form column, level with the
-        # fields below them. `setAlignment` alone is not enough: a QLabel with
-        # word wrap off reports a maximum width equal to its text, so the layout
-        # hands it exactly the width of the words and there is nothing left for
-        # the alignment to distribute. `AlignLeft` in the row below is what
-        # actually puts it there, and the two together also behave if the form
-        # is ever made wider.
 
         self.reveal = RevealToggle()
         self.reveal.toggled.connect(self._on_reveal_toggled)
@@ -514,9 +462,6 @@ class LoginView(QWidget):
 
     def _foot_text(self) -> str:
         if self.context.selection.is_demo:
-            # State the credentials rather than pointing at the seeder. On the
-            # demo database there is nothing to protect, and "the password
-            # printed by the seeder" sends the first-time user to a terminal.
             return "Demo data, not the live branch.\ndemo-password"
         return "Accounts come from your branch administrator."
 
@@ -549,14 +494,10 @@ class LoginView(QWidget):
         password = self.password.text()
 
         if not email or not password:
-            # Checked here so an empty field does not spend a bcrypt round.
             self._show_error("Enter your email address and password.")
             return None
 
-        # The snapshot is taken *inside* the session. `sign_in` returns a
-        # `Users` row, and the `rollback()` that ends a read session expires
-        # every attribute on it, so the fields have to be copied out before the
-        # context manager closes.
+        # Snapshot inside the session: read-session rollback expires attributes.
         try:
             with self.context.reading() as session:
                 row = sign_in(session, email, password)
@@ -575,10 +516,6 @@ class LoginView(QWidget):
 
         user = identity
         if user.role not in ("staff", "admin"):
-            # A valid account, wrong door. Deliberately not "no such user":
-            # this branch is only reachable after a correct password, so
-            # hiding it would tell a legitimate customer nothing useful while
-            # helping nobody.
             self._show_error(
                 f"{user.email} is a customer account. Staff sign-in only."
             )

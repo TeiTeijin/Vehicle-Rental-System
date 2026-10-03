@@ -19,13 +19,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# VS Code's "Run Python File" button (and `python app/ui/dashboard.py`) runs
-# this file *by path*, which puts `app/ui` on sys.path instead of the project
-# root, and every `app.*` import below then fails with
-# `ModuleNotFoundError: No module named 'app'`. Running it as a module
-# (`python -m app.ui.dashboard`, which is what a launch.json with
-# "module": "app.ui.dashboard" does) has the root already in place. This puts
-# the root back for the by-path case only, so both ways of launching work.
 if __name__ == "__main__" and not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 

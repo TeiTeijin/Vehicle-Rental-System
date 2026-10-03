@@ -112,9 +112,7 @@ class LoadStateTable(QWidget):
         self._empty_message = empty_message
         self.state = LoadState.LOADING
         self.last_error: BaseException | None = None
-        #: How many times the user has pressed Retry. Surfaced so a screen that
-        #: fails on every refresh is obvious in a test rather than only in
-        #: production.
+        #: Retry presses; surfaced for tests.
         self.retry_count = 0
 
         self._columns = list(columns)
@@ -137,10 +135,6 @@ class LoadStateTable(QWidget):
 
         self._retry = QPushButton("Try again", self)
         self._retry.setObjectName("retryButton")
-        # `retry`, not `load`: `retry_count` is the record of how often a person
-        # pressed this button, and connecting to `load` would leave it at zero
-        # forever -- which is exactly when the count matters, on a screen that
-        # keeps failing.
         self._retry.clicked.connect(self.retry)
 
         error_row = QHBoxLayout()
@@ -242,11 +236,8 @@ class LoadStateTable(QWidget):
 
     def _make_item(self, row: int, column: int, value) -> QTableWidgetItem:
         column_spec = self._columns[column]
-        # A status column gets a pill. A cell widget is more code than a
-        # delegate, and these tables are a few hundred rows at most; if one
-        # ever gets large this is the line to revisit.
         if column_spec.title.lower() in ("status", "state") and isinstance(value, str):
-            pill = StatusPill(value.replace("_", " ").title(), value, self._table)
+            pill = StatusPill(value.replace("_", " ").title(), value)
             self._table.setCellWidget(row, column, pill)
             return QTableWidgetItem("")
         return QTableWidgetItem("" if value is None else str(value))
@@ -256,9 +247,6 @@ class LoadStateTable(QWidget):
             LoadState.LOADED: 0,
             LoadState.EMPTY: 1,
             LoadState.FAILED: 2,
-            # While loading, keep the table up rather than flashing the empty
-            # message. A refresh that blanks the screen every 30 seconds would
-            # be worse than showing slightly stale rows.
             LoadState.LOADING: 0,
         }[self.state]
         self._stack.setCurrentIndex(index)

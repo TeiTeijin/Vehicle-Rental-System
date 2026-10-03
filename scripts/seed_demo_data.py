@@ -51,13 +51,13 @@ from app.utils.security import hash_password
 #: Fixed so the demo is reproducible. Changing this changes every screenshot.
 SEED = 20260929
 
-DEMO_ADMIN_EMAIL = "admin@rentdesk.local"
+DEMO_ADMIN_EMAIL = "admin@rentwheels.local"
 
 #: A known counter-staff login. The role split is a headline feature -- a staff
 #: member may check a car out but not cancel a confirmed booking -- and it
 #: cannot be demonstrated without a known staff address. The other staff are
 #: generated, so their emails change with the seed.
-DEMO_STAFF_EMAIL = "counter@rentdesk.local"
+DEMO_STAFF_EMAIL = "counter@rentwheels.local"
 
 #: How many cars sit in the workshop in the demo. They are held out of the
 #: random booking walk, so a car is never both in the workshop and out on rent.
@@ -1101,8 +1101,8 @@ def main() -> None:
     for key, value in counts.items():
         print(f"  {key:<{width}}  {value:>6}")
     print("\nDone. Password for every demo login is 'demo-password'.")
-    print(f"  admin  {DEMO_ADMIN_EMAIL}     sees the dashboard charts")
-    print(f"  staff  {DEMO_STAFF_EMAIL}     counter actions only, no charts")
+    print(f"  admin  {DEMO_ADMIN_EMAIL}     full dashboard, admin actions")
+    print(f"  staff  {DEMO_STAFF_EMAIL}     counter actions, same dashboard")
 
 
 if __name__ == "__main__":

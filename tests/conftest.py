@@ -12,10 +12,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timedelta
 
-# Must happen before any `app.*` import: app/config.py reads DATABASE_URL at
-# import time and build_database_url() turns it into a live engine.
 os.environ["DATABASE_URL"] = "sqlite://"
-# Keep credentials out of any code path that inspects them.
 os.environ.setdefault("CI_API_KEY", "test-key")
 os.environ.setdefault("CI_API_SECRET", "test-secret")
 
@@ -60,9 +57,6 @@ def session(engine) -> Session:
 
 # --------------------------------------------------------------------------
 # Factories
-#
-# Defaults are chosen so a bare `make_vehicle(session, category)` produces a
-# usable, available car. Tests override only the fields they care about.
 # --------------------------------------------------------------------------
 
 
@@ -132,8 +126,6 @@ def vehicle_factory(session):
     counter = {"n": 0}
 
     def _make(category: Vehicle_Category, **overrides) -> Vehicle:
-        # plate_number is UNIQUE and only 7 characters wide, so the counter has
-        # to advance or the second vehicle in a test violates the constraint.
         counter["n"] += 1
         n = counter["n"]
         fields = {
@@ -185,10 +177,6 @@ def booking_factory(session):
 
 # --------------------------------------------------------------------------
 # Ready-made instances
-#
-# The factories above are for tests that need several rows. Most tests need
-# exactly one customer, one car and one member of staff, and spelling out
-# three factory calls in every signature is noise.
 # --------------------------------------------------------------------------
 
 

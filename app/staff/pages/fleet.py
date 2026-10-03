@@ -18,6 +18,7 @@ staff asks out loud at the counter:
 from __future__ import annotations
 
 from datetime import date, timedelta
+from functools import partial
 
 from sqlalchemy import select
 
@@ -44,13 +45,8 @@ def _fleet_rows(context):
         rows = []
         for vehicle in vehicles:
             open_bookings = booking_service.active_bookings(session, vehicle)
-            # "Due back" is the next end date, which is the question actually
-            # being asked at the counter. Overdue is separate, and louder.
             due = min((b.end_date for b in open_bookings), default=None)
 
-            # Maintenance is looked up for the next 30 days: a car in the
-            # workshop next month is not blocked today, but it is the thing
-            # someone needs to know when they are planning a long rental.
             blocked = fleet_service.maintenance_conflict(
                 session, vehicle, today, today + timedelta(days=30)
             )
@@ -95,7 +91,7 @@ class FleetPage(StaffPage):
                 Column("Overdue"),
                 Column("Blocked by", ALIGN_LEFT),
             ],
-            lambda: _fleet_rows(self.context),
+            partial(_fleet_rows, self.context),
             empty_message="No vehicles yet. Add one from the admin tools.",
         )
         self.body.addWidget(self.table, 1)

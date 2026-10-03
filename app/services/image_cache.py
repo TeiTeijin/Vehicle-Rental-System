@@ -67,7 +67,6 @@ def load(make: str, model: str, year: int) -> CachedImage | None:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         data = bytes_path.read_bytes()
     except (OSError, ValueError):
-        # Stale or corrupt sidecar: drop the pair and report a miss.
         _discard(bytes_path, meta_path)
         return None
 

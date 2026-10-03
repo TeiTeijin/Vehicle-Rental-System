@@ -53,8 +53,6 @@ from app.staff.login import (  # noqa: E402
 PAGE_CREAM = "#f1e8d8"
 #: The white the sign-in is supposed to be.
 PAGE_WHITE = "#ffffff"
-#: Anti-aliased edges blend towards these, so a near-match with a handful of
-#: pixels is a rounded corner rather than a panel.
 NEAR_WHITE_TOLERANCE = 3
 
 
@@ -178,7 +176,6 @@ class TestThePageIsActuallyWhite:
         assert PAGE_CREAM not in counts, (
             f"{counts[PAGE_CREAM]}px of page cream at the old panel's position"
         )
-        # And cream is not hiding under a near-miss spelling.
         for name, n in counts.items():
             r, g, b = int(name[1:3], 16), int(name[3:5], 16), int(name[5:7], 16)
             if abs(r - 0xF1) + abs(g - 0xE8) + abs(b - 0xD8) <= 12 and n > 40:
@@ -241,7 +238,7 @@ class TestTheHeadingIsLeftAligned:
         from PySide6.QtWidgets import QLabel
 
         by_name = {w.objectName(): w for w in view.findChildren(QLabel)}
-        assert by_name[theme.OBJ_LOGIN_WORDMARK].text() == "Rent Desk"
+        assert by_name[theme.OBJ_LOGIN_WORDMARK].text() == "rentwheels"
         assert by_name[theme.OBJ_LOGIN_CAPTION].text() == "Staff Sign in"
 
 
@@ -272,7 +269,7 @@ class TestTheFloatingLabel:
     def test_a_prefilled_field_keeps_its_caption_lifted(self, view):
         field = view.email
         _focus(view, field)
-        field.setText("someone@rentdesk.local")
+        field.setText("someone@rentwheels.local")
         _blur(view, field)
         assert field._lifted
         assert field._label.objectName() == theme.OBJ_LABEL_LIFTED
@@ -375,7 +372,7 @@ class TestTheFloatingLabel:
         """
         field = view.email
         _focus(view, field)
-        field.setText("someone@rentdesk.local")
+        field.setText("someone@rentwheels.local")
         _blur(view, field)
         assert field._lifted
         assert field._label.objectName() == theme.OBJ_LABEL_LIFTED
@@ -383,7 +380,7 @@ class TestTheFloatingLabel:
     def test_clearing_the_field_puts_the_label_back(self, view):
         field = view.email
         _focus(view, field)
-        field.setText("someone@rentdesk.local")
+        field.setText("someone@rentwheels.local")
         _blur(view, field)
         assert field._lifted, "precondition: the label is up while the text is there"
         field.clear()
@@ -466,9 +463,9 @@ class TestTheMaskedField:
         )
 
     def test_an_unmasked_field_is_untouched(self, view):
-        view.email.setText("someone@rentdesk.local")
+        view.email.setText("someone@rentwheels.local")
         view.repaint()
-        assert view.email.text() == "someone@rentdesk.local"
+        assert view.email.text() == "someone@rentwheels.local"
 
 
 class TestTheRevealToggle:
@@ -535,7 +532,6 @@ class TestTheRevealToggle:
         assert fade.state() == QPropertyAnimation.State.Running
         _settle(view.password)
         assert view.reveal._progress == 1.0
-        # Not left a hair short, which would keep a ghost of the other eye.
         view.reveal.click()
         _settle(view.password)
         assert view.reveal._progress == 0.0
@@ -609,9 +605,7 @@ class TestTheRevealToggle:
         )
 
 
-#: Summed RGB below which a pixel counts as ink. The artwork is tinted to
-#: #8A8175, which sums to 384, and antialiased edges land anywhere between that
-#: and white, so the cut has to sit close to white to catch a thin diagonal.
+#: Summed RGB below which a pixel counts as ink (the cut sits near white).
 INK_CUTOFF = 760
 
 
@@ -858,8 +852,7 @@ class TestNoDeadStylesheetRules:
                 theme.load_stylesheet(),
             )
         )
-        # These two are swapped onto a label at runtime, so at any instant one
-        # of them matches nothing. They are checked by state instead.
+        # Swapped at runtime, so one matches nothing at any instant.
         rules -= {theme.OBJ_LABEL_REST, theme.OBJ_LABEL_LIFTED}
         present = {view.objectName()} | {
             w.objectName() for w in view.findChildren(QWidget) if w.objectName()

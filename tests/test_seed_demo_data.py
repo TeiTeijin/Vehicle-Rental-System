@@ -44,8 +44,6 @@ from scripts.seed_demo_data import (
 #: Pinned so the generated data is byte-identical on every run of the suite.
 TODAY = date(2026, 9, 29)
 
-#: Captured before any fixture swaps it out, so the credential test below can
-#: put the real function back.
 REAL_HASH_PASSWORD = seed_demo_data.hash_password
 
 
@@ -106,8 +104,6 @@ class TestRefusesDangerousTargets:
         ],
     )
     def test_hosted_databases_are_refused(self, url):
-        # Even with both confirmations supplied. Aiven is where the real data
-        # lives, so no flag combination unlocks it.
         with pytest.raises(UnsafeTarget) as excinfo:
             seed_demo_data.assert_safe_target(url, acknowledged=True, forced=True)
         assert "looks like a hosted database" in str(excinfo.value)
@@ -136,8 +132,6 @@ class TestRefusesDangerousTargets:
             )
 
     def test_sqlite_never_needs_flags(self):
-        # The ordinary path: no ceremony, so nobody is tempted to pass a real
-        # URL just to get past the guard.
         seed_demo_data.assert_safe_target("sqlite:///demo.db", acknowledged=False, forced=False)
         seed_demo_data.assert_safe_target("sqlite://", acknowledged=False, forced=False)
 
@@ -203,8 +197,6 @@ def test_same_seed_and_date_produce_identical_rows(tmp_path):
     second = generate(tmp_path / "two.db", days_back=180, today=TODAY)
     assert first == second
 
-    # Sanity check that the fingerprint would actually notice a change,
-    # otherwise the equality above proves nothing.
     third = generate(tmp_path / "three.db", days_back=180, today=TODAY + timedelta(days=1))
     assert third != first
 
@@ -273,7 +265,7 @@ class TestGeneratedDataIsValid:
                 assert booking.actual_return_date is None, booking
             elif booking.start_date > TODAY:
                 assert booking.status in ("pending", "confirmed"), booking
-            else:  # started on or before today, and the window has closed
+            else:
                 overdue = booking.end_date <= TODAY and booking.status == "ongoing"
                 if not overdue:
                     assert booking.status == "completed", booking
@@ -453,7 +445,6 @@ class TestMoneyIsConsistent:
         """
         payments = rows_of(demo, Payment)
         statuses = {p.status for p in payments}
-        # `pending` and `failed` are what make a NULL `paid_at` visible.
         assert {"paid", "refunded", "pending", "failed"} <= statuses, statuses
 
         methods = {p.method for p in payments}
@@ -465,7 +456,6 @@ class TestMoneyIsConsistent:
             Decimal(p.amount) > 0 for p in rows_of(demo, Penalty)
         ), "no penalties recorded"
 
-        # Some rentals genuinely left unpaid, so Outstanding is not always zero.
         assert any(
             sum(
                 (Decimal(p.amount) for p in b.payments if p.status == "paid"), Decimal("0.00")
@@ -481,8 +471,6 @@ class TestMoneyIsConsistent:
 
 
 class TestNobodyRealIsContactable:
-    #: The two documented logins. `rentdesk.local` is not a resolvable domain,
-    #: so nothing in a demo database can reach a real person by email.
     KNOWN_LOGINS = frozenset({DEMO_ADMIN_EMAIL, DEMO_STAFF_EMAIL})
 
     def test_all_emails_are_fictional(self, demo):

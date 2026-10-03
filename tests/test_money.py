@@ -31,7 +31,6 @@ class TestToDecimal:
         assert to_decimal(1000) == Decimal(1000)
 
     def test_float_goes_through_str(self):
-        # Decimal(0.1) would be 0.1000000000000000055511151231257827...
         assert to_decimal(0.1) == Decimal("0.1")
         assert str(to_decimal(0.1)) == "0.1"
 
@@ -62,7 +61,7 @@ class TestMoney:
     @pytest.mark.parametrize(
         "raw, expected",
         [
-            ("1250.005", "1250.01"),   # half-up, not half-even
+            ("1250.005", "1250.01"),
             ("1250.015", "1250.02"),
             ("1250.004", "1250.00"),
             ("0.1", "0.10"),
@@ -73,8 +72,6 @@ class TestMoney:
         assert money(raw) == Decimal(expected)
 
     def test_half_even_would_have_given_a_different_answer(self):
-        # Decimal's default rounding is ROUND_HALF_EVEN, which rounds 1250.005
-        # to 1250.00. A person reading a receipt expects 1250.01.
         assert money("1250.005") == Decimal("1250.01")
         assert Decimal("1250.005").quantize(Decimal("0.01")) == Decimal("1250.00")
 
@@ -86,8 +83,6 @@ class TestPesos:
         assert pesos(Decimal("999.5")) == "₱999.50"
 
     def test_renders_exactly_what_was_stored(self):
-        # The string shown must equal money(), or a receipt and a screen can
-        # disagree by a cent.
         assert pesos("1250.005") == f"{PESO_SIGN}{money('1250.005'):,.2f}"
 
 
@@ -95,7 +90,7 @@ class TestCompactPesos:
     @pytest.mark.parametrize(
         "raw, expected",
         [
-            ("9999.00", "₱9,999.00"),      # below the threshold: exact
+            ("9999.00", "₱9,999.00"),
             ("10000.00", "₱10.0K"),
             ("18500.00", "₱18.5K"),
             ("1250000", "₱1.3M"),
@@ -107,7 +102,6 @@ class TestCompactPesos:
 
 class TestSumMoney:
     def test_sums_decimal_inputs_exactly(self):
-        # 0.1 + 0.2 != 0.3 in float. It must be exact here.
         assert sum_money([Decimal("0.10"), Decimal("0.20")]) == Decimal("0.30")
 
     def test_sums_mixed_inputs(self):

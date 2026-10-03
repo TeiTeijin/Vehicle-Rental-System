@@ -20,6 +20,7 @@ at check-out shows the fee.
 from __future__ import annotations
 
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import select
 
@@ -34,9 +35,7 @@ from app.staff.tables import (
     LoadStateTable,
 )
 
-#: Balances under this are treated as settled. Money is quantized to centavos,
-#: so a balance of 0.00 means settled; anything above a peso is a real
-#: discrepancy worth showing rather than rounding away.
+#: Balances at or below this count as settled.
 SETTLED_AT = Decimal("0.00")
 
 
@@ -117,7 +116,7 @@ class PaymentsPage(StaffPage):
                 Column("Reference", ALIGN_LEFT),
                 Column("Recorded by", ALIGN_LEFT),
             ],
-            lambda: _payment_rows(self.context),
+            partial(_payment_rows, self.context),
             empty_message="No payments recorded yet.",
         )
 
@@ -133,7 +132,7 @@ class PaymentsPage(StaffPage):
                 Column("Paid", ALIGN_RIGHT),
                 Column("Owed", ALIGN_RIGHT),
             ],
-            lambda: _outstanding_rows(self.context),
+            partial(_outstanding_rows, self.context),
             empty_message="Nothing outstanding. Every rental is settled.",
         )
 

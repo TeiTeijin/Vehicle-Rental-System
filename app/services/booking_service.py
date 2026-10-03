@@ -47,16 +47,13 @@ from app.services import fleet_service, payment_service
 from app.services.errors import ConflictError, StateError, ValidationError
 from app.utils.money import ZERO, money
 
-#: Statuses that still hold the vehicle for their dates. A completed or
-#: cancelled booking releases the vehicle.
+#: Statuses that still hold the vehicle for their dates.
 BLOCKING_STATUSES = ("pending", "confirmed", "ongoing")
 
-#: How a rental reached the branch. Walk-in means somebody came to the counter;
-#: online means they started without talking to anyone.
+#: How a rental reached the branch (walk-in or online).
 CHANNELS = ("walk_in", "online")
 
-#: Statuses a rental may be checked in from. `confirmed` is allowed because a
-#: walk-in is often taken straight from enquiry to keys.
+#: Statuses a rental may be checked in from.
 CHECK_IN_STATUSES = ("pending", "confirmed")
 
 #: Statuses that permit a cancellation.
@@ -211,10 +208,6 @@ def create_booking(
     session.add(booking)
     session.flush()
 
-    # The vehicle's `status` column is deliberately untouched. The car may be
-    # free today and booked next week, and the column cannot say both. What it
-    # is doing right now is unchanged; `is_reserved_between` answers the
-    # question the status column cannot.
     return booking
 
 
@@ -247,8 +240,6 @@ def cancel_booking(
     booking.cancel_reason = (reason or "").strip() or "No reason given"
     session.flush()
 
-    # `VEHICLE.status` is deliberately left alone: a cancelled booking did not
-    # change what the car is doing today, only released future dates.
     return booking
 
 
@@ -386,7 +377,6 @@ def check_out(
             description=damage_notes or "Damage charge applied at return.",
         )
     elif damage_notes:
-        # Noted but not charged -- still worth recording.
         apply_penalty(
             session,
             booking,

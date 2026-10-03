@@ -33,9 +33,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import BASE_DIR, DATABASE_URL
 from app.models import Users
 
-#: Roles the staff application will accept. A `customer` row is a valid row in
-#: the table and is *not* a staff member; refusing it is the whole point of
-#: the gate.
+#: Roles the staff application will accept; `customer` is refused.
 STAFF_ROLES = ("staff", "admin")
 ADMIN_ROLES = ("admin",)
 
@@ -102,8 +100,7 @@ class DatabaseSelection:
 
     url: str
     target: DatabaseTarget
-    #: A human-readable name for the banner and the window subtitle. Never
-    #: contains credentials.
+    #: On-screen database label; never contains credentials.
     label: str
 
     @property
@@ -138,9 +135,7 @@ def select_database(
             label=f"Demo data - {path.name}",
         )
 
-    # `app.config.DATABASE_URL` is already normalised. Re-running the builder
-    # on its own output would be a no-op for MySQL but would mangle a SQLite
-    # path, so it is used verbatim.
+    # Used verbatim: re-parsing would mangle a SQLite path.
     return DatabaseSelection(
         url=DATABASE_URL,
         target=DatabaseTarget.LIVE,
@@ -166,8 +161,7 @@ class StaffContext:
     def __init__(self, selection: DatabaseSelection) -> None:
         self.selection = selection
         self._user: StaffUser | None = None
-        # `pool_pre_ping` matters on the live MySQL instance: Aiven drops idle
-        # connections well inside the 30-minute recycle window.
+        # Aiven drops idle connections well inside the recycle window.
         self.engine: Engine = create_engine(
             selection.url,
             future=True,

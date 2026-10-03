@@ -78,32 +78,12 @@ ARROW_GAP = 16
 SECTION_GAP = 20
 PAGE_MARGIN = 24
 
-# The big name sits *behind* the photo and bleeds past both its edges, so it has
-# to be wider than the photo. Names differ hugely in width (FORTUNER is 714px at
-# 132px, VIOS only 320px), so a single pixel size cannot bleed them all: each
-# name is scaled to this target width instead. NAME_PX stays as the reference
-# size the ratio is measured from.
 NAME_PX = 132
 NAME_TARGET_WIDTH = 1460
-# Runaway guard only; no real vehicle name needs more than ~600px. See
-# `_name_font`.
 NAME_MAX_PX = 900
 
-# Distance from the navbar's bottom edge to the top of the eyebrow line. This is
-# the hero's own top margin, not an addition to the page margin, so "100px below
-# the navbar" means 100px and no arithmetic.
 HERO_TOP_OFFSET = 100
 
-# The gap between the eyebrow and the name is not a constant of its own. The name
-# is pinned by its ink to the photo's top edge, and the photo sits `SECTION_GAP`
-# below the eyebrow, so the visible gap is `SECTION_GAP` minus whatever descender
-# slack the eyebrow's 12px line box has. A constant here was the original bug: it
-# was measured from the name's line box, which is 60-140px taller than its own
-# glyphs, so the real gap came out at 85px for one vehicle and 161px for another.
-# See `_name_box` and `_name_top`.
-
-# Fixed skeleton widths, in px, sized to the real text that replaces them. There
-# is deliberately no "name" entry: the name has no loading block.
 SKELETON_WIDTHS = {
     "eyebrow": 220,
     "price": 150,
@@ -120,20 +100,13 @@ BUTTON_GAP = 16
 
 IMAGE_TIMEOUT = 30
 
-# How many photos to fetch at once. Four slides means "all of them", which is
-# the same as asking for one thread per slide, but this stays correct if the
-# carousel is ever filtered down to fewer vehicles.
+# Four slides means "all of them": one thread per slide.
 PREFETCH_THREADS = 4
 
-# Skeleton greys, in the same warm family as the #EEEAE1 hero background. These
-# are cosmetic only: they make the wait legible, they do not shorten it.
 SKELETON_BASE = "#DDD8CD"
 SKELETON_SHIMMER = "#F4F1E8"
 SKELETON_RADIUS = 6
 SKELETON_SHIMMER_MS = 1100
-# How much of the block's width the highlight band covers, and how opaque it
-# gets at its brightest. Both are what make the sweep readable rather than a
-# barely-there flicker.
 SKELETON_BAND = 0.55
 SKELETON_SHIMMER_ALPHA = 120
 SKELETON_FADE_MS = 150
@@ -196,9 +169,6 @@ class HeroLoader(QRunnable):
         try:
             rows = showcase_vehicle_rows(session)
 
-            # Cold path only: a vehicle with no usable URL at all needs one
-            # fetched. A vehicle that merely has a stale URL keeps it, because
-            # `image_cache` will usually serve the photo without HTTP anyway.
             resolved: list[str | None] = []
             for vehicle, url in rows:
                 resolved.append(url or self._fetch_url(session, vehicle))
@@ -299,13 +269,9 @@ class Skeleton(QWidget):
         self._animation = QVariantAnimation(self)
         self._animation.setDuration(SKELETON_SHIMMER_MS)
         self._animation.setLoopCount(-1)
-        # Linear, because an eased sweep visibly stalls at each end and reads as
-        # a stutter rather than as travel.
+        # Linear: an eased sweep stalls at each end and reads as a stutter.
         self._animation.setEasingCurve(QEasingCurve.Type.Linear)
-        # These two are not optional. Left unset, a QVariantAnimation advances
-        # its clock but never interpolates: currentValue() stays None and
-        # valueChanged never fires, so the band would sit off the block forever
-        # and nothing would even ask for a repaint.
+        # Required: without start/end values the animation never interpolates.
         self._animation.setStartValue(0.0)
         self._animation.setEndValue(1.0)
         self._animation.valueChanged.connect(self._on_value)
@@ -332,11 +298,8 @@ class Skeleton(QWidget):
         if self.width() <= 0 or self.height() <= 0:
             return
 
-        # The band travels from fully off the left edge to fully off the right,
-        # so the loop is seamless: at t=0 and t=1 it is off the block entirely.
         band = max(1.0, self.width() * SKELETON_BAND)
-        # `currentValue()` is None until the animation has run at least once, and
-        # returning None from paintEvent takes the process down with it.
+        # currentValue() is None until the first tick; float(None) would raise.
         value = self._animation.currentValue()
         t = 0.0 if value is None else float(value)
         start = -band + (self.width() + 2 * band) * t
@@ -348,8 +311,6 @@ class Skeleton(QWidget):
         gradient.setColorAt(0.5, highlight)
         gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
 
-        # Clipped to the same rounded path, or the band would square off the
-        # corners that the fill above just rounded.
         clip = QPainterPath()
         clip.addRoundedRect(self.rect(), self._radius, self._radius)
         painter.save()
@@ -358,7 +319,6 @@ class Skeleton(QWidget):
         painter.restore()
 
     def hideEvent(self, event) -> None:
-        # No point animating a block nobody can see.
         self._animation.stop()
         super().hideEvent(event)
 
@@ -398,9 +358,7 @@ class LabelSkeleton(Skeleton):
         line = max(1, host.fontMetrics().height())
         height = min(line, max(1, box.height()))
         width = min(self._width, max(1, box.width()))
-        # Follow the label's own alignment. The eyebrow centres its text across
-        # the full page width, so a block pinned to x=0 sits ~540px to the left
-        # of the text it is standing in for; this is what puts the two together.
+        # The eyebrow centres its text across the page, so the block must centre too.
         centred = bool(host.alignment() & Qt.AlignmentFlag.AlignHCenter)
         x = (box.width() - width) // 2 if centred else 0
         y = (box.height() - height) // 2
@@ -456,14 +414,9 @@ class HeroCarousel(QWidget):
 
         self.eyebrow = ElidedLabel()
         self.eyebrow.setObjectName("heroEyebrow")
-        # The name is not an `ElidedLabel`: it is positioned to the pixel and
-        # sized to its own measured text, so there is nothing left to elide and
-        # a centred label would only fight the manual geometry.
         self.name = QLabel()
         self.name.setObjectName("heroName")
         self.name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # A stacked layout lets the photo and its skeleton share one slot
-        # exactly, so the swap cannot move anything.
         self.media_stack = QStackedLayout()
         self.media_stack.setObjectName("heroMediaStack")
         self.media_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
@@ -488,12 +441,6 @@ class HeroCarousel(QWidget):
         self.specs = QLabel()
         self.specs.setObjectName("heroSpecs")
 
-        # The name deliberately has no loading block. It is the one field whose
-        # box cannot be known in advance: the display size is scaled from the
-        # name itself, so a placeholder would have to guess at a height between
-        # 327px and 728px and then resize the moment the text landed. An empty
-        # gap behind the photo reads better than a grey slab that jumps, and the
-        # photo's own block already covers the middle of that area.
         self.eyebrow_skeleton = LabelSkeleton(self.eyebrow, SKELETON_WIDTHS["eyebrow"])
         self.eyebrow_skeleton.setObjectName("heroEyebrowSkeleton")
         self.price_skeleton = LabelSkeleton(self.price, SKELETON_WIDTHS["price"])
@@ -501,11 +448,7 @@ class HeroCarousel(QWidget):
         self.specs_skeleton = LabelSkeleton(self.specs, SKELETON_WIDTHS["specs"])
         self.specs_skeleton.setObjectName("heroSpecsSkeleton")
 
-        # A `LabelSkeleton` is a child, so it is clipped to its label, and it
-        # sizes itself to the label's width. An empty price label is 16px wide
-        # and an empty specs label is 8px, so during the query both blocks were
-        # being crushed to nothing and the two fields simply showed no loading
-        # state at all. A floor on the label is what gives the block room.
+        # Empty price/specs labels are too narrow for the block, so set a floor.
         self.price.setMinimumWidth(SKELETON_WIDTHS["price"])
         self.specs.setMinimumWidth(SKELETON_WIDTHS["specs"])
 
@@ -519,9 +462,6 @@ class HeroCarousel(QWidget):
         self.view_details.clicked.connect(self._on_view_details)
         self.book_vehicle.clicked.connect(self._on_book)
 
-        # The buttons sit outside the text fields but load at the same time, so
-        # they shimmer too. Each block is a child of its own button, so it needs
-        # no positioning logic beyond mirroring the button's rect.
         self.view_details_skeleton = Skeleton(self.view_details)
         self.view_details_skeleton.setObjectName("heroViewDetailsSkeleton")
         self.book_vehicle_skeleton = Skeleton(self.book_vehicle)
@@ -543,11 +483,8 @@ class HeroCarousel(QWidget):
         root.addLayout(self._bottom_row())
         root.addWidget(self.status)
 
-        # Free children have to be added after the layout exists, and they are
-        # positioned by hand in `_position_floaters`.
         self.name.setParent(self)
-        # Placed before the first paint rather than waiting for the name to
-        # arrive, so the block is never seen at the default (0, 0, 100, 30).
+        # Positioned before the first paint, or the block shows at the default rect.
         self._position_name()
         self.set_skeletons_busy(True)
         self.reload()
@@ -583,9 +520,7 @@ class HeroCarousel(QWidget):
         if natural <= 0:
             return font
         size = round(NAME_PX * NAME_TARGET_WIDTH / natural)
-        # A guard, not a design choice: a bad measurement should not be able to
-        # produce a 6000px name and a 7000px hero. The longest real name needs
-        # ~280px and the shortest ~600px, so this never clamps a real vehicle.
+        # Runaway guard only; never clamps a real vehicle name.
         font.setPixelSize(max(1, min(size, NAME_MAX_PX)))
         return font
 
@@ -604,12 +539,7 @@ class HeroCarousel(QWidget):
         were specified as 20px.
         """
         metrics = QFontMetrics(self._name_font(text))
-        # tightBoundingRect is the ink-only bounds of the string, measured up from
-        # the baseline, so `ascent + top` is where the first pixel of the name
-        # sits inside its line box. boundingRect() looks like the right call here
-        # and is not: it returns the full line box, which puts the ink offset at
-        # exactly 0 and silently restores the original bug. Using the string
-        # rather than capHeight also keeps this correct for lowercase ascenders.
+        # Ink-only bounds; boundingRect() returns the full line box and zeroes it.
         ink_offset = metrics.ascent() + metrics.tightBoundingRect(text).top()
         return metrics.horizontalAdvance(text) + 2, metrics.height(), ink_offset
 
@@ -617,8 +547,7 @@ class HeroCarousel(QWidget):
         """Write the name and remember the box it needs."""
         self.name.setFont(self._name_font(text))
         self.name.setText(text)
-        # Two spare pixels in the width: a label narrower than its own text would
-        # start eliding, and this label has no elide path any more.
+        # Two spare px: a narrower label would start eliding.
         width, height, ink_offset = self._name_box(text)
         self._name_size = (width, height)
         self._name_ink_offset = ink_offset
@@ -647,21 +576,15 @@ class HeroCarousel(QWidget):
         """
         centre_x = self.image.x() + self.image.width() // 2
         if self._name_size is None:
-            # Still loading, and the name has no placeholder. It is a free child
-            # of the hero with nothing behind it, so it must be hidden outright
-            # rather than left sitting on an empty page.
             self.name.hide()
         else:
             width, height = self._name_size
             self.name.setGeometry(
                 centre_x - width // 2, self._name_top(), width, height
             )
-            # Shown explicitly, because hiding it above set a flag that
-            # setText() does not clear.
+            # Hidden above; setText() does not clear the flag.
             self.name.show()
-        # The photo, and the block standing in for it, both win the z-order
-        # fight, so the name reads as being behind the picture rather than on it.
-        # raise_() moves a widget *up*, so the deepest layer goes first.
+        # raise_() moves a widget up, so the deepest layer goes first.
         self.name.raise_()
         self.image_skeleton.raise_()
         self.image.raise_()
@@ -749,8 +672,7 @@ class HeroCarousel(QWidget):
         button.setObjectName(name)
         button.setFixedSize(size)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Kept so `set_skeletons_busy` can blank the caption for the shimmer and
-        # put the same caption back, rather than hardcoding it twice.
+        # Kept so the shimmer can blank the caption and put it back.
         button.setProperty("idle_text", label)
         return button
 
@@ -793,18 +715,13 @@ class HeroCarousel(QWidget):
         self.arrow_prev.setEnabled(True)
         self.arrow_next.setEnabled(True)
 
-        # Every name is measured up front so the photo row can be sized for the
-        # tallest one. Otherwise the hero would change height every time you
-        # arrow to a vehicle whose name renders taller.
+        # Measured up front so the photo row is sized for the tallest name.
         self._max_name_height = max(
             (self._name_box(s.vehicle.name)[1] for s in self._slides),
             default=0,
         )
         self._reserve_name_height()
 
-        # Paint the real text first, then start fetching. The text fields are
-        # the only writers of eyebrow/name/price/specs, so this must run before
-        # the photo fetch or the hero stays blank.
         self.set_skeletons_busy(False)
         self._apply()
 
@@ -833,9 +750,7 @@ class HeroCarousel(QWidget):
         """Show or hide the grey blocks, text ones and the photo one together."""
         for skeleton in self._all_skeletons():
             skeleton.set_busy(busy)
-        # A block painted over a labelled button would just hide the label behind
-        # a grey slab, so the caption steps aside while the shimmer runs and
-        # comes back when the real state is in.
+        # The block would cover the caption, so the caption steps aside.
         for button, skeleton in (
             (self.view_details, self.view_details_skeleton),
             (self.book_vehicle, self.book_vehicle_skeleton),
@@ -873,7 +788,6 @@ class HeroCarousel(QWidget):
     def _on_failed(self, message: str) -> None:
         self.status.setText(f"Could not load vehicles\n{message}")
         self.status.show()
-        # Nothing is coming, so stop pretending and clear the placeholders.
         self.set_skeletons_busy(False)
         self.media_stack.setCurrentWidget(self.image)
 
@@ -963,11 +877,8 @@ class HeroCarousel(QWidget):
             self.media_stack.setCurrentWidget(self.image_skeleton)
             self.image_skeleton.set_busy(True)
 
-        # The media row may have moved when its margins were reserved, so the
-        # hand-placed children have to be told.
         self._position_floaters()
 
-        # A slide changed, so its neighbours are worth warming again.
         self._prefetch(self._index)
 
     # ---------- placeholder ----------

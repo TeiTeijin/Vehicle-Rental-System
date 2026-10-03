@@ -103,7 +103,6 @@ class HandDrawnChart(QWidget):
         if self._fill:
             self._paint_fill(painter, rect, points)
 
-        # Two offset passes, thin, the way a pen doubles back.
         for offset, width, alpha in ((0.0, 2.0, 255), (1.4, 1.0, 110)):
             pen = QPen(QColor(self._colour))
             pen.setWidthF(width)
@@ -127,8 +126,7 @@ class HandDrawnChart(QWidget):
     def _bounds(self) -> tuple[float, float]:
         low, high = min(self._values), max(self._values)
         if low == high:
-            # A flat line would otherwise divide by zero and pin the path to the
-            # floor, which reads as "no data" rather than "steady".
+            # A flat line would divide by zero.
             return low - 1, high + 1
         pad = (high - low) * 0.15
         return low - pad, high + pad
@@ -173,8 +171,6 @@ class HandDrawnChart(QWidget):
 
         from PySide6.QtGui import QLinearGradient
 
-        # A vertical gradient rather than a flat tint, so a dense chart fades
-        # toward its baseline instead of turning into a solid block.
         gradient = QLinearGradient(QPointF(0, rect.top()), QPointF(0, rect.bottom()))
         gradient.setColorAt(0.0, top)
         gradient.setColorAt(1.0, bottom)
@@ -262,7 +258,6 @@ class HandDrawnBars(QWidget):
         for index, (label, value) in enumerate(self._pairs):
             centre = rect.left() + slot * (index + 0.5)
             height = (value / high) * rect.height()
-            # A hand-drawn bar is never quite square to the baseline.
             wobble = _jitter(label + self._title, index, 1.8)
             bar = QRectF(
                 centre - bar_width / 2,
@@ -303,7 +298,6 @@ class Sparkline(HandDrawnChart):
         self.setFixedHeight(34)
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        # No title, no axes, no padding: a sparkline's job is the shape.
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if not self._values:

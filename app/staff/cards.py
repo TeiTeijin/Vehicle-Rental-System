@@ -15,8 +15,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
@@ -30,7 +36,11 @@ from PySide6.QtWidgets import (
 from app.staff import icons
 from app.staff.metrics import (
     CARD_PADDING,
+    CARD_RADIUS,
+    HERO_MIN_SIZE,
+    HERO_SIZE,
     ICON_BUTTON,
+    ICON_BUTTON_RADIUS,
     PILL_HEIGHT,
     PILL_RADIUS,
 )
@@ -60,26 +70,15 @@ class Card(QFrame):
         self.setProperty(PROP_DARK, dark)
         self.setProperty("class", "card")
         self._dark = dark
-        # Horizontally the card's minimum is ignored on purpose. A card's
-        # `minimumSizeHint` comes from its children, so one card holding a long
-        # peso figure or a long customer name claims 468px while its
-        # neighbours get 444 and the row no longer lines up. Ignoring the
-        # minimum lets the grid divide the width evenly; the children elide.
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        # A QFrame has no layout of its own, and every caller here builds one.
-        # Created here rather than in each card so `card.layout()` is never
-        # None -- a caller that forgets gets an AttributeError on a card that
-        # renders as an empty box, which is a confusing way to find out.
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
 
     def body(self) -> QVBoxLayout:
         """The card's content layout, at the standard padding."""
-        from app.staff.metrics import CARD_PADDING
-
         out = QVBoxLayout()
         out.setContentsMargins(
             CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING
@@ -92,21 +91,11 @@ class Card(QFrame):
         return self._dark
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        """A soft shadow under the card, then leave the border to QSS.
-
-        Qt draws a styled border in `super().paintEvent`, so the shadow has to
-        go first and only where the border will not cover it. Painted on the
-        painter rather than with a QGraphicsEffect: a drop shadow on a widget
-        with children turns each label into its own cached pixmap, and on a page
-        that rebuilds every thirty seconds that is visible stutter.
-        """
+        radius = float(CARD_RADIUS)
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             if self._dark:
-                # Dark cards sit on cream, so their shadow is a warm grey rather
-                # than black: pure black at this alpha reads as a dirty halo on
-                # the light background.
                 shadow = QColor(0x1A, 0x14, 0x0A, 0x1F)
             else:
                 shadow = QColor(0x1A, 0x14, 0x0A, 0x14)
@@ -118,7 +107,9 @@ class Card(QFrame):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 inset = step
                 painter.drawRoundedRect(
-                    self.rect().adjusted(inset, inset, -inset, -inset), 28.0, 28.0
+                    self.rect().adjusted(inset, inset, -inset, -inset),
+                    radius,
+                    radius,
                 )
         finally:
             painter.end()
@@ -126,7 +117,7 @@ class Card(QFrame):
 
 
 class IconButton(QWidget):
-    """A 40x40 square that holds one icon.
+    """A square that holds one icon, 40x40 by default.
 
     A QWidget rather than a QPushButton so it never draws a text label or a
     default-button ring: at 40px with a 20px glyph, anything Qt adds on its own
@@ -146,12 +137,14 @@ class IconButton(QWidget):
         icon_size: int = 20,
         tooltip: str = "",
         background: str | None = None,
+        outline: str | None = None,
     ) -> None:
         super().__init__(parent)
         self._name = name
         self._colour = colour
         self._icon_size = icon_size
         self._background = background
+        self._outline = outline
         self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -166,10 +159,23 @@ class IconButton(QWidget):
             bg = self._background
             if bg is None:
                 bg = INK_HOVER if hovered else "transparent"
-            if bg != "transparent":
+            if self._outline is not None:
+                painter.setBrush(
+                    QColor(INK_HOVER if hovered else "#00000000")
+                )
+                painter.setPen(QPen(QColor(self._outline), 1))
+                radius = min(self.width(), self.height()) / 2
+                painter.drawRoundedRect(
+                    self.rect().adjusted(0, 0, -1, -1), radius, radius
+                )
+            elif bg != "transparent":
                 painter.setBrush(QColor(bg))
                 painter.setPen(Qt.PenStyle.NoPen)
-                radius = 12.0 if self.width() > 32 else self.width() / 2
+                radius = (
+                    float(self.width()) / 2
+                    if self.width() > 32
+                    else float(ICON_BUTTON_RADIUS)
+                )
                 painter.drawRoundedRect(self.rect(), radius, radius)
             colour = self._colour or (TEXT if not self._dark_parent() else PAPER)
             glyph = icons.pixmap(self._name, colour, self._icon_size)
@@ -182,12 +188,6 @@ class IconButton(QWidget):
             painter.end()
 
     def _dark_parent(self) -> bool:
-        """Whether this button sits on a dark card.
-
-        Walks up to the nearest `Card` rather than being told, so a button added
-        to a card in code does not also need its colour passed in. Defaults to
-        the light reading if it somehow has no card ancestor.
-        """
         node = self.parentWidget()
         while node is not None:
             if isinstance(node, Card):
@@ -209,9 +209,6 @@ class IconButton(QWidget):
         super().mousePressEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
-        # Keyboard parity with a button. A member of staff tabbing through the
-        # dashboard has to be able to open the period selector, and the only way
-        # to do that is if these are reachable.
         if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.clicked.emit()
         else:
@@ -235,6 +232,8 @@ class Pill(QWidget):
         colour: str = MUTED,
         background: str | None = None,
         dot: bool = True,
+        dot_colour: str | None = None,
+        border_colour: str | None = None,
         height: int = PILL_HEIGHT,
         radius: int = PILL_RADIUS,
         font_size: int = 12,
@@ -243,7 +242,9 @@ class Pill(QWidget):
         self._text = text
         self._colour = colour
         self._background = background
+        self._border_colour = border_colour
         self._dot = dot
+        self._dot_colour = dot_colour or colour
         self._height = height
         self._radius = radius
         self._font_size = font_size
@@ -262,14 +263,11 @@ class Pill(QWidget):
         self.update()
 
     def set_text_colour(self, colour: str) -> None:
-        """Recolour the label only, leaving the chip's background alone.
-
-        Used by the sales target, where one chip changes colour as the year
-        moves between on pace and behind. Repainting the whole pill would also
-        move the dot, and the dot's colour means "status" while the label's
-        means "emphasis" -- they are not the same thing.
-        """
         self._colour = colour
+        self.update()
+
+    def set_dot_colour(self, colour: str) -> None:
+        self._dot_colour = colour
         self.update()
 
     def sizeHint(self):  # noqa: N802
@@ -291,9 +289,17 @@ class Pill(QWidget):
                 painter.drawRoundedRect(
                     self.rect(), self._radius, self._radius
                 )
+            if self._border_colour:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor(self._border_colour), 1))
+                painter.drawRoundedRect(
+                    QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                    float(self._radius),
+                    float(self._radius),
+                )
             left = 11
             if self._dot:
-                painter.setBrush(QColor(self._colour))
+                painter.setBrush(QColor(self._dot_colour))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(left, self.height() // 2 - 4, 8, 8)
                 left += 12
@@ -308,7 +314,7 @@ class Pill(QWidget):
 
 
 class HeroNumber(QLabel):
-    """The big figure on a card: 52px, medium weight, tabular.
+    """The big figure on a card: 64px, medium weight, tabular.
 
     Tabular figures are not a nicety here. The dashboard refreshes every thirty
     seconds, and with proportional digits the peso value changes width as the
@@ -321,33 +327,145 @@ class HeroNumber(QLabel):
         text: str = "0",
         *,
         parent: QWidget | None = None,
-        size: int = 52,
+        size: int = HERO_SIZE,
         colour: str = TEXT,
         weight: QFont.Weight = QFont.Weight.Medium,
         suffix: str = "",
     ) -> None:
         super().__init__(text, parent)
+        #: Largest size the figure may use.
         self._size = size
+        self._min_size = HERO_MIN_SIZE
+        #: Full, un-elided text; `QLabel.text()` may hold an elided form.
+        self._full = text
         self._suffix = suffix
-        font = QFont("Inter")
-        font.setPixelSize(size)
-        font.setWeight(weight)
-        font.setFeature(QFont.Tag("tnum"), 1)
-        self.setFont(font)
+        self._weight = weight
+        self._font_size = -1
+        self._set_font(size)
         self.setStyleSheet(f"color: {colour}; background: transparent;")
 
     def set_colour(self, colour: str) -> None:
         self.setStyleSheet(f"color: {colour}; background: transparent;")
 
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt naming
+        self._full = text
+        self._apply_fit()
+
     def set_value(self, value: Decimal | float | int) -> None:
         self.setText(f"{value}{self._suffix}")
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._apply_fit()
+
+    def _set_font(self, size: int) -> None:
+        if size == self._font_size and self.font().pixelSize() == size:
+            return
+        self._font_size = size
+        font = QFont("Inter")
+        font.setPixelSize(size)
+        font.setWeight(self._weight)
+        font.setFeature(QFont.Tag("tnum"), 1)
+        self.setFont(font)
+
+    def _fits(self, text: str, size: int, width: int) -> bool:
+        font = QFont("Inter")
+        font.setPixelSize(size)
+        font.setWeight(self._weight)
+        font.setFeature(QFont.Tag("tnum"), 1)
+        return QFontMetrics(font).horizontalAdvance(text) <= width - 2
+
+    def _apply_fit(self) -> None:
+        width = self.width()
+        if width <= 0:
+            self._set_font(self._size)
+            super().setText(self._full)
+            self.setToolTip("")
+            return
+
+        size = self._size
+        while size > self._min_size and not self._fits(self._full, size, width):
+            size -= 1
+        self._set_font(size)
+
+        if self._fits(self._full, size, width):
+            super().setText(self._full)
+            self.setToolTip("")
+        else:
+            metrics = QFontMetrics(self.font())
+            super().setText(
+                metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, width)
+            )
+            self.setToolTip(self._full)
+
     @staticmethod
     def tabular(font: QFont) -> QFont:
-        """A copy of `font` with tabular figures on."""
         out = QFont(font)
         out.setFeature(QFont.Tag("tnum"), 1)
         return out
+
+
+class MoneyNumber(QLabel):
+    """A peso amount whose sign and cents are dimmed and whose digits are not.
+
+    The brief splits the hero three ways: `₱` and `.00` in MUTED, the digits in
+    PAPER, all at 64px. That reads as one number rather than three because the
+    dimming is subtle, and the eye picks up the magnitude first and the exact
+    cents second -- which is the right priority when the question is "how much
+    came in today", not "what is the exact figure".
+
+    Rich text rather than three adjacent labels: three labels put the `₱` and
+    the `.00` on their own baselines and the alignment goes wrong the moment the
+    integer part changes width, and this is a number that changes every thirty
+    seconds.
+    """
+
+    def __init__(
+        self,
+        *,
+        parent: QWidget | None = None,
+        size: int = HERO_SIZE,
+        dim: str = MUTED,
+        bright: str = PAPER,
+        weight: QFont.Weight = QFont.Weight.Medium,
+    ) -> None:
+        super().__init__(parent)
+        self._dim = dim
+        self._bright = bright
+        font = QFont("Inter")
+        font.setPixelSize(size)
+        font.setWeight(weight)
+        font.setFeature(QFont.Tag("tnum"), 1)
+        self.setFont(font)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setText(self._markup(0, 2))
+
+    def _markup(self, amount: Decimal | float, decimals: int) -> str:
+        value = abs(Decimal(str(amount)))
+        whole = f"{value:,.0f}"
+        body = f"{value:,.{decimals}f}"
+        sign = "−" if amount < 0 else ""
+        return (
+            f'<span style="color:{self._dim}">{sign}₱</span>'
+            f'<span style="color:{self._bright}">{whole}</span>'
+            f'<span style="color:{self._dim}">.{body.rsplit(".", 1)[1]}</span>'
+        )
+
+    def set_amount(self, amount: Decimal | float, *, decimals: int = 2) -> None:
+        self.setText(self._markup(amount, decimals))
+
+    def set_colours(self, *, dim: str, bright: str) -> None:
+        self._dim = dim
+        self._bright = bright
+        current = self.text()
+        self.setText(current.replace(self._dim, "\0").replace(self._bright, "\1")
+                     .replace("\0", dim).replace("\1", bright))
+
+    @property
+    def amount_text(self) -> str:
+        import re
+
+        return re.sub(r"<[^>]+>", "", self.text())
 
 
 class Caption(QLabel):
@@ -370,6 +488,65 @@ class Caption(QLabel):
         self.setStyleSheet(f"color: {colour}; background: transparent;")
 
 
+class ElidedLabel(QLabel):
+    """A left-aligned label that shortens its text instead of clipping it.
+
+    The recent-transactions list is four columns sharing the card's width on a
+    flexible name column, so a long name has to give way to the method, channel
+    and amount beside it. Clipping mid-letter reads as a rendering fault; an
+    ellipsis reads as a truncation. `Ignored` width lets the grid squeeze it
+    below its own size hint, which is what makes room for the ellipsis to appear.
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        *,
+        parent: QWidget | None = None,
+        colour: str = TEXT,
+        size: int = 14,
+        weight: QFont.Weight = QFont.Weight.Medium,
+    ) -> None:
+        super().__init__(parent)
+        self._full = text
+        font = QFont("Inter")
+        font.setPixelSize(size)
+        font.setWeight(weight)
+        self.setFont(font)
+        self.setStyleSheet(f"color: {colour}; background: transparent;")
+        self.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        self.setMinimumWidth(0)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full = text
+        self._refresh()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def _refresh(self) -> None:
+        available = self.width()
+        if available <= 0 or not self._full:
+            super().setText(self._full)
+            return
+        metrics = QFontMetrics(self.font())
+        super().setText(
+            metrics.elidedText(
+                self._full, Qt.TextElideMode.ElideRight, available
+            )
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh()
+
+
 class TrendLabel(QLabel):
     """A percentage with its arrow, green when up and red when down.
 
@@ -388,13 +565,11 @@ class TrendLabel(QLabel):
         self.setStyleSheet("background: transparent;")
 
     def set_change(self, pct: float | None, *, up_is_good: bool = True) -> None:
-        if pct is None:
-            # Yesterday was empty, so there is no percentage to report. Saying
-            # "0%" would claim revenue was unchanged, which is not what happened.
-            self.setText("no change to compare")
-            self.setStyleSheet("color: #8A8175; background: transparent;")
+        if not pct:
+            self.setText("0.00%")
+            self.setStyleSheet(f"color: {MUTED}; background: transparent;")
             return
-        rising = pct >= 0
+        rising = pct > 0
         good = rising == up_is_good
         arrow = "↑" if rising else "↓"
         self.setText(f"{arrow} {abs(pct):.2f}%")

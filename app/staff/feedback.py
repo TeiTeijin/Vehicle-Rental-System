@@ -31,9 +31,7 @@ from app.services.errors import (
 from app.staff.context import AccessDenied, NotSignedIn
 from app.staff.theme import DANGER, OK, WARN
 
-#: What the user is told when the underlying failure is not ours to explain.
-#: Deliberately generic: a stack trace or a driver message in a dialog is noise
-#: that hides the one thing they needed to know.
+#: Generic failure text when the cause is not ours to explain.
 GENERIC_FAILURE = "Something went wrong loading this. Try again."
 GENERIC_SAVE_FAILURE = "That could not be saved. Nothing was changed."
 
@@ -58,9 +56,6 @@ def describe(error: BaseException) -> tuple[str, str | None, str]:
         return error.message, error.field, "error"
 
     if isinstance(error, (ConflictError, StateError)):
-        # These are refusals, not faults. "You can't do that" is information,
-        # and colouring it as a failure would make a normal part of the domain
-        # look like a bug.
         return _text_of(error), None, "warn"
 
     if isinstance(error, NotFoundError):
@@ -69,8 +64,6 @@ def describe(error: BaseException) -> tuple[str, str | None, str]:
     if isinstance(error, ServiceError):
         return _text_of(error), None, "error"
 
-    # Not ours. A dropped MySQL connection is the common case, and it is worth
-    # naming because it is the one failure that is fixed by clicking Retry.
     if _looks_like_a_connection_problem(error):
         return (
             "Lost the connection to the database. Check the network and try again.",
