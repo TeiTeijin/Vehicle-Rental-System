@@ -70,13 +70,11 @@ def test_a_full_rental_life(tmp_path):
         session.add_all([customer, staff, vehicle])
         session.flush()
 
-        # 1. Book it. A future booking must not change what the car is doing
-        #    today, so the vehicle is still `available` afterwards.
         booking = booking_service.create_booking(
             session, customer, vehicle, START, END, created_by=staff.user_id
         )
         assert booking.status == "pending"
-        assert booking.total_cost == 10000       # 4 days x 2,500
+        assert booking.total_cost == 10000
         assert vehicle.status == "available"
         assert booking_service.is_reserved_between(session, vehicle, START, END)
 
@@ -130,14 +128,9 @@ def test_a_full_rental_life(tmp_path):
 
         session.commit()
 
-        # Plain values, because the ORM objects expire when the session closes
-        # and cannot be touched from the verification block below.
         staff_id = staff.user_id
         vehicle_id = vehicle.vehicle_id
 
-    # Everything above is gone once the session closes unless it was really
-    # written, so a fresh session reading it back is the actual assertion that
-    # the rows landed.
     with Session(engine, future=True) as verify:
         stored = verify.execute(
             select(Booking).order_by(Booking.booking_id)

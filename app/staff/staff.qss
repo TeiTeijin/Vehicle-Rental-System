@@ -15,45 +15,84 @@ QWidget#page {
     background: #F1E8D8;
 }
 
-/* NAVBAR */
-
-QFrame#navbar {
+/* THE PAGE SHEET
+   The dashboard lays its title and its five cards on one white rounded sheet
+   over the cream page. The radius is PAGE_PANEL_RADIUS, deliberately larger
+   than a card's, so the sheet and the cards on it read as nested shapes rather
+   than the same box twice. The scroll area and its content have to be told to
+   paint nothing: the blanket `QWidget { background: #F1E8D8 }` above matches
+   them too and would otherwise draw a cream block inside the white sheet. */
+QFrame#pagePanel {
     background: #FFFFFF;
-    border-bottom: 1px solid #D8CCBB;
+    border: 1px solid #D8CCBB;
+    border-radius: 36px;
 }
 
-QLabel#logo {
+QScrollArea, #pageViewport, #pageContent {
     background: transparent;
-    font-size: 16px;
-    font-weight: 600;
 }
 
-QLabel#navUser {
+/* The header is a plain `QWidget`, so the blanket cream above would paint a
+   cream band across the top of the white sheet. Its two labels are already
+   transparent from Python. Harmless on the unpanelled pages, whose page is
+   cream anyway. */
+QWidget#pageHeader {
     background: transparent;
-    color: #8A8175;
-    font-size: 13px;
-    font-weight: 400;
 }
 
-QPushButton#navItem {
+
+/* SIDEBAR
+   The floating navigation panel. Each row (icon, label, hover tint and the
+   active leading bar) is painted by `NavItem`, so this dresses only the panel
+   and its two labels -- a background or border on the row would fight the
+   painted hover tint. The radius matches SIDEBAR_RADIUS in metrics.py.
+
+   `#sidebarList` has to be told to paint nothing, for the same reason
+   `#loginForm` below is: the blanket `QWidget { background: #F1E8D8 }` at the
+   top of this file matches it and draws a cream panel straight over the white
+   sidebar. The scrollbar is hidden outright rather than merely left unstyled,
+   because a bar down the edge of a floating panel reads as an unfinished
+   frame; the wheel still scrolls it. */
+
+QFrame#sidebar {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 28px;
+}
+
+QFrame#sidebar QScrollBar:vertical {
+    width: 0px;
+    background: transparent;
+    margin: 0;
+}
+
+QFrame#sidebar QScrollBar::handle:vertical {
+    background: transparent;
+}
+
+QLabel#sidebarWordmark {
+    background: transparent;
+    color: #171717;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+QLabel#sidebarGroup {
+    background: transparent;
+    color: #6F6759;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+#sidebarList {
+    background: transparent;
+}
+
+#sidebarItem {
     background: transparent;
     border: none;
-    border-bottom: 2px solid transparent;
-    padding: 10px 2px;
-    font-size: 14px;
-    font-weight: 700;
-}
-
-QPushButton#navItem:hover {
-    border-bottom: 2px solid #171717;
-}
-
-QPushButton#navItem:checked {
-    border-bottom: 2px solid #171717;
-}
-
-QPushButton#navItem:disabled {
-    color: #C4BBA9;
 }
 
 QPushButton#ghostButton {
@@ -511,6 +550,41 @@ QFrame[class="card"][dark="true"] {
 QFrame[class="card"][hover="true"] {
     background: #302F2D;
 }
+
+/* The revenue card's day picker. A combo so every day is reachable, dressed as
+   a pill so it still reads as one control rather than a form field dropped into
+   the card. The radius and min-height set the pill, and the drop-down keeps the
+   platform arrow so it is obvious it opens. */
+QComboBox#revenuePeriod {
+    background: #EEEAE1;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 2px 6px 2px 12px;
+    min-height: 24px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #171717;
+}
+
+QComboBox#revenuePeriod:hover {
+    background: #E6E1D6;
+}
+
+QComboBox#revenuePeriod::drop-down {
+    border: none;
+    width: 22px;
+}
+
+QComboBox#revenuePeriod QAbstractItemView {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    padding: 4px;
+    selection-background-color: #EDE6D9;
+    selection-color: #171717;
+    outline: none;
+}
+
 
 QLabel#rowName {
     background: transparent;

@@ -27,18 +27,11 @@ def _build_database_url(raw: str | None) -> str:
     if parts.netloc:
         return urlunsplit((scheme, parts.netloc, parts.path, search, ""))
 
-    # urlunsplit() drops the "//" authority marker whenever netloc is empty, so
-    # rebuilding a SQLite URL through it turns "sqlite:///rental.db" into
-    # "sqlite:/rental.db" -- a string SQLAlchemy refuses to parse. SQLite URLs
-    # carry everything in the path with no authority, so emit them by hand.
     return f"{scheme}://{parts.path}{'?' + search if search else ''}"
 
 
 DATABASE_URL = _build_database_url(os.getenv("DATABASE_URL"))
 
-#: Public alias for callers outside this module. The underscore name predates
-#: the staff app and is imported as-is by ``tests/test_config.py``; both names
-#: refer to the same function, so nothing has to be updated in lockstep.
 build_database_url = _build_database_url
 
 CI_API_KEY = os.getenv("CI_API_KEY", "")

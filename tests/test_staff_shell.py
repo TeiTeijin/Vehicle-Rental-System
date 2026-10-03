@@ -13,9 +13,7 @@ import os
 import pytest
 from sqlalchemy import create_engine
 
-# Set before any Qt widget is built. `conftest.py` has already set
-# DATABASE_URL by the time this module is imported, so the live Aiven instance
-# cannot be reached from here.
+# Must be set before any Qt widget is built.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.database import Base  # noqa: E402
@@ -80,7 +78,7 @@ class TestDatabaseSelection:
         """The staff app is a branch tool. A demo that silently won the
         argument would mean someone reconciling against fiction."""
         monkeypatch.setattr(
-            "app.staff.context.DATABASE_URL", "mysql://u:p@db.example.com/rentdesk"
+            "app.staff.context.DATABASE_URL", "mysql://u:p@db.example.com/rentwheels"
         )
         live = select_database()
         assert live.target is DatabaseTarget.LIVE
@@ -100,19 +98,17 @@ class TestDatabaseSelection:
         monkeypatch.setattr("app.staff.context.BASE_DIR", tmp_path)
         with pytest.raises(FileNotFoundError) as caught:
             select_database(demo=True)
-        # The message is the whole point: a bare "not found" leaves the next
-        # step to guesswork.
         assert "seed_demo_data" in str(caught.value)
 
     def test_the_label_never_carries_credentials(self, monkeypatch):
         monkeypatch.setattr(
             "app.staff.context.DATABASE_URL",
-            "mysql://admin:hunter2@db.example.com/rentdesk",
+            "mysql://admin:hunter2@db.example.com/rentwheels",
         )
         label = select_database().label
         assert "hunter2" not in label
         assert "admin" not in label
-        assert "rentdesk" in label
+        assert "rentwheels" in label
 
 
 # --------------------------------------------------------------------------
@@ -289,7 +285,7 @@ class TestShellRouting:
         sign_in(shell.context, role="admin")
         shell._on_signed_in(shell.context.user)
         qapp.processEvents()
-        assert shell._navbar is not None
+        assert shell._sidebar is not None
         assert shell.stack.currentWidget() is not shell.login_view
         assert shell.current_page_key == "one"
 
@@ -316,33 +312,60 @@ class TestShellRouting:
         sign_in(shell.context, role="staff")
         shell._on_signed_in(shell.context.user)
         assert shell.show_page("secret") is False
-        # Not merely hidden: never constructed, so it holds no data at all.
         assert "secret" not in shell._page_widgets
 
-    def test_staff_never_see_the_admin_button(self, shell, qapp):
+    def test_staff_never_see_the_admin_row(self, shell, qapp):
         sign_in(shell.context, role="staff")
         shell._on_signed_in(shell.context.user)
-        labels = [b.text() for b in shell._nav_group.buttons()]
+        labels = shell._sidebar.item_labels()
         assert "Secret" not in labels
         assert "One" in labels
 
-    def test_admin_see_every_button(self, shell, qapp):
+    def test_admin_see_every_row(self, shell, qapp):
         sign_in(shell.context, role="admin")
         shell._on_signed_in(shell.context.user)
-        labels = [b.text() for b in shell._nav_group.buttons()]
-        assert {"One", "Two", "Secret"} <= set(labels)
+        labels = set(shell._sidebar.item_labels())
+        assert {"One", "Two", "Secret"} <= labels
 
-    def test_the_navbar_is_rebuilt_per_session(self, shell, qapp):
-        """A button left over from the last sign-in is a way to reach a page
+    def test_the_sidebar_shows_the_stub_rows_to_both_roles(self, shell, qapp):
+        """The brief lists Billing, Maintenance and Settings. This build has no
+        screen for them, so they appear and say so on press -- for everyone."""
+        for role in ("staff", "admin"):
+            sign_in(shell.context, role=role)
+            shell._on_signed_in(shell.context.user)
+            labels = shell._sidebar.item_labels()
+            assert {"Reports", "Billing", "Maintenance", "Settings"} <= set(labels)
+            shell.context.sign_out()
+
+    def test_the_current_page_is_marked_in_the_sidebar(self, shell, qapp):
+        sign_in(shell.context, role="admin")
+        shell._on_signed_in(shell.context.user)
+        shell.show_page("two")
+        assert shell._sidebar.item("two").is_active()
+        assert not shell._sidebar.item("one").is_active()
+
+    def test_a_stub_row_does_not_become_the_current_page(self, shell, qapp, monkeypatch):
+        import app.staff.shell as shell_mod
+
+        monkeypatch.setattr(shell_mod, "toast", lambda *a, **k: None)
+        sign_in(shell.context, role="admin")
+        shell._on_signed_in(shell.context.user)
+        before = shell.current_page_key
+        shell._sidebar.item("billing").click()
+        assert shell.current_page_key == before
+        assert not shell._sidebar.item("billing").is_active()
+
+    def test_the_sidebar_is_rebuilt_per_session(self, shell, qapp):
+        """A row left over from the last sign-in is a way to reach a page
         the current role should not see."""
         sign_in(shell.context, role="admin")
         shell._on_signed_in(shell.context.user)
-        first_navbar = shell._navbar
+        first_sidebar = shell._sidebar
         shell.context.sign_out()
         sign_in(shell.context, role="staff")
         shell._on_signed_in(shell.context.user)
-        assert shell._navbar is not first_navbar
-        assert first_navbar.parent() is None
+        assert shell._sidebar is not first_sidebar
+        assert first_sidebar.parent() is None
 
     def test_sign_out_discards_the_pages(self, shell, qapp, monkeypatch):
         import app.staff.shell as shell_mod
@@ -359,8 +382,6 @@ class TestShellRouting:
         assert shell.context.is_signed_in is False
         assert shell._page_widgets == {}
         assert page.parent() is None
-        # The stack is back to the login screen alone. Pages left in there
-        # would still hold the previous user's rows.
         assert shell.stack.count() == 1
         assert shell.stack.currentWidget() is shell.login_view
 

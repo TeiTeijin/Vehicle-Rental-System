@@ -25,8 +25,7 @@ from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
-#: Every glyph is authored on this grid. 24 gives room for a 1.6px stroke
-#: without the outer paths clipping when rendered at 20px.
+#: Every glyph is authored on this 24 grid.
 GRID = 24
 
 _STROKE = 1.6
@@ -49,8 +48,7 @@ def _circle(cx: float, cy: float, r: float) -> str:
     )
 
 
-#: name -> path data. Single source of truth; `_PATHS` in tests walks it to make
-#: sure every glyph renders and is inside the grid.
+#: name -> path data.
 PATHS: dict[str, str] = {
     # -- navigation --------------------------------------------------------
     # Four squares, one filled, top-left: the dashboard tile pattern.
@@ -83,11 +81,6 @@ PATHS: dict[str, str] = {
         "M4 20V4M4 20h16"
         "M8 20v-6M12.7 20V9M17.3 20v-9.5"
     ),
-    # Billing is deliberately NOT a second credit card. A card already stands for
-    # one payment method inside the transactions card, and putting the same
-    # glyph in the sidebar means a member of staff has to stop and work out
-    # which of the two identical shapes they are looking at. This is a
-    # receipt with a peso sign: money in, one document.
     "billing": (
         "M6.4 2.8h11.2v18.4l-1.87-1.4-1.87 1.4-1.86-1.4-1.87 1.4-1.86-1.4-1.87 1.4Z"
         "M12 7.2v6.4M14.6 8.9a2.7 2.7 0 0 0-4.7 1.8c0 2.3 4.7 1.5 4.7 3.8"
@@ -122,6 +115,13 @@ PATHS: dict[str, str] = {
     ),
     "download": "M12 3.8v10.6M7.8 10.6 12 14.8l4.2-4.2M4.4 19.4h15.2",
     "up_right": "M7.4 16.6 16.6 7.4M8.8 7.4h7.8v7.8",
+    "arrow_up": "M12 19.2V5.4M6.9 10.5 12 5.4l5.1 5.1",
+    "arrow_down": "M12 4.8v13.8M6.9 13.5 12 18.6l5.1-5.1",
+    "swap": (
+        "M4.2 8.8h13.2M14.6 5.6l3 3.2-3 3.2"
+        "M19.8 15.2H6.6M9.4 11.8l-3 3.2 3 3.2"
+    ),
+    "user": f"{_circle(12, 8.2, 3.7)}M4.9 20.3a7.1 7.1 0 0 1 14.2 0",
     # -- channels -----------------------------------------------------------
     # A person behind a counter for walk-in; a browser window for online.
     "walk_in": (
@@ -141,16 +141,12 @@ PATHS: dict[str, str] = {
     "card": (
         f"{_round_rect(2.8, 5.5, 18.4, 13, 2.4)}M2.8 10h18.4M6.4 14.6h3.6"
     ),
-    # GCash's own mark is a lowercase "G" with a currency stroke, and drawing
-    # that recognisably at 20px needs more than the two arcs a coin would give.
     "gcash": (
         "M8.1 16.9a4.9 4.9 0 1 0-2.7-8.7 4.9 4.9 0 0 1 4.3 8.4"
         "M12.4 6.3a5.6 5.6 0 1 1-4.1 9.7"
         "M6.3 12.4h3.4M8 11.1v2.6"
     ),
     # -- trend -------------------------------------------------------------
-    # The change indicator's arrow. Pointed up; the caller mirrors it for a fall
-    # rather than shipping a second glyph that could drift out of alignment.
     "trend_up": "M4 16.6 9.4 11l3.4 3.4L20 7.2M20 7.2h-5.4M20 7.2v5.4",
     # -- misc ---------------------------------------------------------------
     "check": "M5 12.6 9.8 17.4 19 8.2",

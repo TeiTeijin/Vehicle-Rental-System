@@ -12,6 +12,8 @@ this shows a plain indicator rather than a broken image placeholder.
 
 from __future__ import annotations
 
+from functools import partial
+
 from sqlalchemy import select
 
 from app.models import Booking, Inspection_Report, Users
@@ -67,7 +69,7 @@ class InspectionsPage(StaffPage):
                 Column("Photo"),
                 Column("Inspector", ALIGN_LEFT),
             ],
-            lambda: _inspection_rows(self.context),
+            partial(_inspection_rows, self.context),
             empty_message="No inspections recorded yet.",
         )
         self.body.addWidget(self.table, 1)

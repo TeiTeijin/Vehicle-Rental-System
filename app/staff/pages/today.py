@@ -75,9 +75,7 @@ def _in_the_workshop(context, today: date):
         records = session.execute(
             select(Maintenance_Record)
             .where(
-                # The open states are the column's enum values. `in_progress`
-                # is not one of them; using it raises a LookupError when the row
-                # is read back, long after the query that selected it.
+                # The open states are the column's enum values; `in_progress` is not one.
                 Maintenance_Record.status.in_(("scheduled", "ongoing")),
                 Maintenance_Record.start_date <= today + timedelta(days=14),
             )
@@ -113,17 +111,17 @@ class TodayPage(StaffPage):
 
         self.overdue = LoadStateTable(
             BOOKING_COLUMNS,
-            lambda: _overdue(self.context, date.today()),
+            lambda context=self.context: _overdue(context, date.today()),
             empty_message="Nothing is late.",
         )
         self.due_back = LoadStateTable(
             BOOKING_COLUMNS,
-            lambda: _due_back_today(self.context, date.today()),
+            lambda context=self.context: _due_back_today(context, date.today()),
             empty_message="No cars due back today.",
         )
         self.collections = LoadStateTable(
             BOOKING_COLUMNS,
-            lambda: _collections_today(self.context, date.today()),
+            lambda context=self.context: _collections_today(context, date.today()),
             empty_message="No collections booked for today.",
         )
         self.workshop = LoadStateTable(
@@ -135,7 +133,7 @@ class TodayPage(StaffPage):
                 Column("Expected", ALIGN_LEFT),
                 Column("Cost", ALIGN_RIGHT),
             ],
-            lambda: _in_the_workshop(self.context, date.today()),
+            lambda context=self.context: _in_the_workshop(context, date.today()),
             empty_message="Nothing in the workshop.",
         )
 
@@ -157,9 +155,7 @@ class TodayPage(StaffPage):
 
     def refresh(self) -> None:
         super().refresh()
-        # "Today" is defined by the clock, so the dates are re-read on every
-        # refresh. A window left open across midnight would otherwise keep
-        # showing yesterday's collections.
+        # Dates are re-read per refresh: the window may span midnight.
         for table in (self.overdue, self.due_back, self.collections, self.workshop):
             table.load()
 

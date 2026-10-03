@@ -131,7 +131,6 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
         rows.append(Row("No payments recorded against this booking.", "note"))
     rows.append(Row("", "blank"))
 
-    # The line the customer came in to read.
     rows.append(
         Row(
             "PAID IN FULL - Thank you!"

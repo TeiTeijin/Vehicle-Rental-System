@@ -30,7 +30,6 @@ def booking(start, end):
 
 class TestOverlapSemantics:
     def test_returns_touch_and_turn_around_same_day(self):
-        # The headline business rule: a car back on the 5th is free on the 5th.
         existing = [booking(D1, D5)]
         assert AvailabilityChecker.is_available(None, D5, D6, existing) is True
 
@@ -65,11 +64,6 @@ class TestOverlapSemantics:
             AvailabilityChecker.is_available(None, start, end, [])
 
     def test_previous_inclusive_rule_would_have_blocked_turnaround(self):
-        # Documents why the predicate changed. Old rule:
-        #     start <= b.end and b.start <= end
-        # For a re-rent starting the day the previous one ends, both sides are
-        # true, so it reported a conflict and same-day turnaround was
-        # impossible.
         old_predicate_says_conflict = (D5 <= D5) and (D1 <= D6)
         assert old_predicate_says_conflict is True
 
@@ -83,8 +77,6 @@ class TestFindConflict:
         assert found is blocker
 
     def test_returns_the_first_blocker_in_list_order(self):
-        # Both overlap the requested range; find_conflict does not rank them,
-        # it reports whichever the caller listed first.
         first = booking(D8, D9)
         second = booking(D1, D5)
         assert AvailabilityChecker.find_conflict(D4, D9, [first, second]) is first
@@ -109,9 +101,6 @@ class TestRentalDays:
             RentalCalculator.rental_days(start, end)
 
     def test_range_rule_matches_availability_rule(self):
-        # These two used to disagree: availability allowed start == end while
-        # pricing rejected it, so the same input blew up in the second call
-        # with a message about a range the first call had already accepted.
         for start, end in [(D5, D5), (D5, D1), (D1, D5)]:
             availability_rejects = False
             pricing_rejects = False
@@ -146,7 +135,6 @@ class TestPolymorphicPricing:
         assert RentalCalculator.total_cost(bike, D1, date(2026, 9, 8)) == Decimal("3920.00")
 
     def test_total_is_always_quantised_to_two_places(self):
-        # A rate that does not divide cleanly, times the long-term discount.
         car = Car("Toyota", "Vios", 2022, "999.99")
         total = RentalCalculator.total_cost(car, D1, date(2026, 9, 8))
         assert total == Decimal("6299.94")

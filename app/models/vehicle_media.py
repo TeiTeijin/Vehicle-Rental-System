@@ -10,8 +10,7 @@ class Vehicle_Media(Base):
     vehicle_id = Column(Integer, ForeignKey("VEHICLE.vehicle_id"), nullable=False)
     source = Column(String(255), nullable=False)
     view_angle = Column(String(255), nullable=False)
-    # NOTE: image_url holds CarImages signed URLs that embed the API key
-    # (api_key= query param). Treat this column as credential data.
+    # NOTE: signed URLs embed the API key -- treat as credential data.
     image_url = Column(String(255), nullable=False)
     model_3d_url = Column(String(255), nullable=False)
     is_watermarked = Column(Boolean, default=False)

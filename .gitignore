@@ -22,3 +22,5 @@ gallery.html
 
 # Test/tooling caches
 .pytest_cache/
+
+skills-lock.json

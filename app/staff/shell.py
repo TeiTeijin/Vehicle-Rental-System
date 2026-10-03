@@ -1,16 +1,22 @@
-"""The staff window: navbar, routing, and the sign-in gate.
+"""The staff window: sidebar, routing, and the sign-in gate.
 
 Structure is a ``QStackedWidget`` with login at index 0 and the pages after
 it, so signing in and out is a page switch rather than a teardown. The chrome
-around the stack -- navbar, demo banner -- is rebuilt per session, and the page
-widgets themselves are discarded on sign-out: a page that outlived the session
-would still hold the previous user's loaded rows.
+around the stack -- sidebar, demo banner -- is rebuilt per session, and the
+page widgets themselves are discarded on sign-out: a page that outlived the
+session would still hold the previous user's loaded rows.
 
-The navbar is rebuilt from :data:`PAGES` on every sign-in and sign-out rather
-than being created once, because the visible set depends on the role and a
-stale button is a way to reach a page you should not be able to see. Each
-page also re-checks its own permission on activation, so even a constructed-
+The sidebar is rebuilt from :data:`default_pages` on every sign-in and sign-out
+rather than being created once, because the visible set depends on the role and
+a stale row is a way to reach a page you should not be able to see. Each page
+also re-checks its own permission on activation, so even a constructed-
 but-hidden page cannot be shown to the wrong role.
+
+The window is resizable at every stage: the sign-in form opens at its own
+smaller size and the dashboard grows to :data:`metrics.WINDOW_MIN_W` by
+:data:`metrics.WINDOW_MIN_H`, but nothing is pinned to a fixed size, so the
+window can always be dragged. The pages decide for themselves how to reflow at
+the width they are given, and the page base scrolls when the height runs out.
 """
 
 from __future__ import annotations
@@ -20,43 +26,61 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from app.staff import theme
+from app.staff import metrics, theme
 from app.staff.context import AccessDenied, StaffContext
 from app.staff.login import LOGIN_SIZE, LoginView
+from app.staff.sidebar import Sidebar
 from app.staff.widgets import blocking_error, confirm, toast
 
-#: How often the dashboard re-reads the database. 30 seconds is short enough
-#: that a check-in by a colleague shows up while you are still looking at the
-#: screen, and long enough that it is not a visible source of flicker on a
-#: shared machine. Overridable so a test does not have to wait for it.
+#: Dashboard re-read interval; overridable so tests need not wait.
 DASHBOARD_REFRESH_MS = 30_000
+
+
+#: Sidebar groups, in order.
+NAV_SECTIONS: tuple[str, ...] = ("General", "Tools")
 
 
 @dataclass(frozen=True)
 class PageSpec:
-    """One navbar entry.
+    """One sidebar entry.
 
-    `admin_only` hides the button for staff; the page then re-checks the role
-    on activation, so the check exists in two places on purpose.
+    `admin_only` hides the row for staff; the page then re-checks the role on
+    activation, so the check exists in two places on purpose.
+
+    `icon` names a glyph in `app.staff.icons`. It defaults rather than being
+    required because a `PageSpec` is also what a test builds to exercise
+    routing, and a test page should not have to pick a glyph; shipping a page
+    with the wrong glyph is a one-line fix, shipping one with none is a row of
+    leading-edge whitespace.
     """
 
     key: str
     title: str
     factory: Callable[["StaffShell"], QWidget]
+    icon: str = "dashboard"
     admin_only: bool = False
     #: Pages that hold live figures refresh themselves on the dashboard timer.
     auto_refresh: bool = False
+    #: Which sidebar group the row sits in.
+    section: str = NAV_SECTIONS[0]
+
+
+#: Brief's rows with no screen behind them: key -> (label, icon, group).
+STUB_SECTIONS: dict[str, tuple[str, str, str]] = {
+    "reports": ("Reports", "reports", "General"),
+    "billing": ("Billing", "billing", "Tools"),
+    "maintenance": ("Maintenance", "maintenance", "Tools"),
+    "settings": ("Settings", "settings", "Tools"),
+}
 
 
 class StaffShell(QMainWindow):
@@ -68,102 +92,112 @@ class StaffShell(QMainWindow):
         self.pages = list(pages) if pages is not None else default_pages()
         self._current_key: str | None = None
 
-        self.setWindowTitle("RentDesk Staff")
-        #: The working size, for tables of bookings. Re-applied on sign-in and
-        #: released from the fixed size the login imposes.
-        self._windowed_size = (1180, 760)
-        self.setFixedSize(*LOGIN_SIZE)
+        self.setWindowTitle("rentwheels")
+        #: Size the window opens at; re-applied on sign-in.
+        self._windowed_size = (metrics.REFERENCE_W, metrics.REFERENCE_H)
+        self.resize(*LOGIN_SIZE)
+        self.setMinimumSize(*LOGIN_SIZE)
         self.setStyleSheet(theme.load_stylesheet())
 
         self.stack = QStackedWidget(self)
 
-        # The container is built once and the navbar and banner are inserted
-        # into it on sign-in. Replacing the central widget each time would
-        # mean reparenting `self.stack`, which is itself a child of the window
-        # and cannot be moved while it is the central widget.
         self._chrome = QWidget(self)
         self._chrome.setObjectName("page")
         self._chrome_layout = QVBoxLayout(self._chrome)
         self._chrome_layout.setContentsMargins(0, 0, 0, 0)
         self._chrome_layout.setSpacing(0)
-        self._chrome_layout.addWidget(self.stack, 1)
+
+        self._body = QWidget(self._chrome)
+        self._body_layout = QHBoxLayout(self._body)
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(0)
+        self._body_layout.addWidget(self.stack, 1)
+
+        self._chrome_layout.addWidget(self._body, 1)
         self.setCentralWidget(self._chrome)
 
-        #: Rebuilt per session, so a button for the wrong role can never be
-        #: left over from the last sign-in.
-        self._navbar: QFrame | None = None
+        #: Rebuilt per session so no wrong-role row survives.
+        self._sidebar: Sidebar | None = None
         self._banner: QFrame | None = None
 
         self.login_view = LoginView(context, self._on_signed_in, self)
         self.stack.addWidget(self.login_view)
 
-        #: Filled by `_build_navbar` on sign-in, so there is always somewhere to
-        #: show an access error even when the navbar is not up.
+        #: Filled lazily by `_page_for`.
         self._page_widgets: dict[str, QWidget] = {}
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(DASHBOARD_REFRESH_MS)
         self._refresh_timer.timeout.connect(self._on_refresh_tick)
 
-        # Kept separately so sign-out can restore it. The title says which
-        # database is open, and "RentDesk Staff" alone after a sign-out from
-        # demo data would read as though the shell had switched to live.
         if context.selection.is_demo:
-            self._title = "RentDesk Staff  -  DEMO DATA"
+            self._title = "rentwheels  -  DEMO DATA"
         else:
-            self._title = f"RentDesk Staff  -  {context.selection.label}"
+            self._title = f"rentwheels  -  {context.selection.label}"
         self.setWindowTitle(self._title)
 
     # -- chrome -----------------------------------------------------------
 
-    def _build_navbar(self) -> QFrame:
-        """A fresh navbar for the current role.
+    def _build_sidebar(self) -> Sidebar:
+        """A fresh sidebar for the current role.
 
-        Rebuilt rather than reused so a button that is not allowed for this
-        role cannot be left over from the last session.
+        Rebuilt rather than reused so a row that is not allowed for this role
+        cannot be left over from the last session.
         """
-        navbar = QFrame(self)
-        navbar.setObjectName(theme.OBJ_NAVBAR)
-        navbar.setFixedHeight(58)
+        sidebar = Sidebar(parent=self)
+        sidebar.page_requested.connect(self.show_page)
+        sidebar.sign_out_requested.connect(self.sign_out)
+        sidebar.stub_requested.connect(self._on_stub_requested)
+        sidebar.build(self._sidebar_sections())
+        return sidebar
 
-        layout = QHBoxLayout(navbar)
-        layout.setContentsMargins(22, 0, 22, 0)
-        layout.setSpacing(4)
+    def _sidebar_sections(self) -> list[tuple[str, list[tuple[str, str, str, bool]]]]:
+        """`[(group label, [(key, label, icon, navigable)])]`, in order.
 
-        logo = QLabel("RentDesk", navbar)
-        logo.setObjectName("logo")
-        layout.addWidget(logo)
+        Real pages carry `enabled=True`. The brief lists Billing, Maintenance and
+        Settings as destinations and this build has no screen for any of them,
+        so they appear as rows that report themselves on press rather than
+        navigating to nothing. Dropping them would have been the alternative and
+        it would make the sidebar look like a different application.
 
-        self._nav_group = QButtonGroup(navbar)
-        self._nav_group.setExclusive(True)
+        Groups come from `NAV_SECTIONS` and both lists are walked in order, so
+        the sidebar reads top-to-bottom in declaration order rather than in
+        whichever order a dict happened to hash.
 
-        for spec in self._visible_pages():
-            button = QPushButton(spec.title, navbar)
-            button.setObjectName(theme.OBJ_NAV_ITEM)
-            button.setCheckable(True)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.clicked.connect(lambda _checked=False, key=spec.key: self.show_page(key))
-            self._nav_group.addButton(button)
-            layout.addWidget(button)
-            button.setProperty("page_key", spec.key)
+        Admin-only pages are omitted entirely for staff, which is why the sidebar
+        is rebuilt per session rather than mutated in place.
+        """
+        rows: dict[str, list[tuple[str, str, str, bool]]] = {
+            group: [] for group in NAV_SECTIONS
+        }
+        unknown: set[str] = set()
 
-        layout.addStretch(1)
+        for spec in self.pages:
+            if spec.admin_only and not self.context.is_admin:
+                continue
+            group = rows.get(spec.section)
+            if group is None:
+                unknown.add(spec.section)
+                continue
+            group.append((spec.key, spec.title, spec.icon, True))
 
-        self.nav_user = QLabel(self.context.display_name, navbar)
-        self.nav_user.setObjectName("navUser")
-        layout.addWidget(self.nav_user)
+        for key, (label, icon, section) in STUB_SECTIONS.items():
+            group = rows.get(section)
+            if group is None:
+                unknown.add(section)
+                continue
+            group.append((key, label, icon, False))
 
-        if self.context.is_admin:
-            role = QLabel("admin", navbar)
-            role.setObjectName("navUser")
-            layout.addWidget(role)
+        if unknown:
+            raise ValueError(
+                f"sidebar has no group named {sorted(unknown)}; "
+                f"known groups are {list(NAV_SECTIONS)}"
+            )
 
-        sign_out = QPushButton("Sign out", navbar)
-        sign_out.setObjectName("ghostButton")
-        sign_out.clicked.connect(self.sign_out)
-        layout.addWidget(sign_out)
+        return [(group, rows[group]) for group in NAV_SECTIONS if rows[group]]
 
-        return navbar
+    def _on_stub_requested(self, label: str, reason: str) -> None:
+        toast(self, f"{label} is {reason}.", "error")
 
     def _build_demo_banner(self) -> QFrame:
         banner = QFrame(self)
@@ -220,8 +254,8 @@ class StaffShell(QMainWindow):
         return widget
 
     def _sync_nav(self) -> None:
-        for button in self._nav_group.buttons():
-            button.setChecked(button.property("page_key") == self._current_key)
+        if self._sidebar is not None:
+            self._sidebar.set_current(self._current_key)
 
     @property
     def current_page_key(self) -> str | None:
@@ -231,18 +265,21 @@ class StaffShell(QMainWindow):
 
     def _on_signed_in(self, user) -> None:
         """Build the pages and go to the first one."""
-        # The login pins the window to a small fixed size. A sign-in form is
-        # not something to hand someone at 1180x760, and letting the window be
-        # dragged wider just stretches two fields and a button.
-        self.setMinimumSize(0, 0)
-        self.setMaximumSize(16777215, 16777215)
+        self.setMinimumSize(metrics.WINDOW_MIN_W, metrics.WINDOW_MIN_H)
         self.resize(*self._windowed_size)
         self._clear_chrome()
         if self.context.selection.is_demo:
             self._banner = self._build_demo_banner()
             self._chrome_layout.insertWidget(0, self._banner)
-        self._navbar = self._build_navbar()
-        self._chrome_layout.insertWidget(self._chrome_layout.count() - 1, self._navbar)
+        self._sidebar = self._build_sidebar()
+        self._body_layout.setContentsMargins(
+            metrics.SIDEBAR_MARGIN,
+            metrics.SIDEBAR_MARGIN,
+            0,
+            metrics.SIDEBAR_MARGIN,
+        )
+        self._body_layout.setSpacing(metrics.SIDEBAR_MARGIN)
+        self._body_layout.insertWidget(0, self._sidebar)
 
         self._refresh_timer.start()
         first = self._visible_pages()
@@ -251,24 +288,30 @@ class StaffShell(QMainWindow):
         toast(self, f"Signed in as {self.context.display_name}.")
 
     def _clear_chrome(self) -> None:
-        """Remove and destroy the navbar and banner.
+        """Remove and release the sidebar and banner.
 
-        ``deleteLater`` rather than ``setParent(None)``: the old widgets would
-        otherwise stay alive as hidden children of the container, each still
-        holding a page's worth of stale buttons.
+        ``setParent(None)`` *without* ``deleteLater``. Doing both is a double
+        free: reparenting hands the C++ widget to Python, and the deferred
+        delete is then posted for an object Python may already have destroyed
+        once the reference below is dropped. Orphan the widget and drop the
+        reference -- the last reference going frees it exactly once -- and the
+        old chrome cannot be reachable from the window in the meantime.
         """
-        for widget in (self._banner, self._navbar):
-            if widget is not None:
-                self._chrome_layout.removeWidget(widget)
-                widget.setParent(None)
-                widget.deleteLater()
+        if self._banner is not None:
+            self._chrome_layout.removeWidget(self._banner)
+            self._banner.setParent(None)
+        if self._sidebar is not None:
+            self._body_layout.removeWidget(self._sidebar)
+            self._sidebar.setParent(None)
         self._banner = None
-        self._navbar = None
+        self._sidebar = None
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(0)
 
     def sign_out(self) -> None:
         if not confirm(
             self,
-            "Sign out of RentDesk Staff?",
+            "Sign out of RentWheels Staff?",
             detail="Unsaved text in a form will be lost.",
         ):
             return
@@ -280,9 +323,8 @@ class StaffShell(QMainWindow):
         self._clear_chrome()
         self.setWindowTitle(self._title)
         self.stack.setCurrentWidget(self.login_view)
-        # Back to the fixed sign-in box, and clear it -- a half-typed password
-        # must not be waiting there for whoever signs in next.
-        self.setFixedSize(*LOGIN_SIZE)
+        self.setMinimumSize(*LOGIN_SIZE)
+        self.resize(*LOGIN_SIZE)
         self.login_view.password.clear()
         self.login_view.error.setVisible(False)
 
@@ -294,11 +336,15 @@ class StaffShell(QMainWindow):
         user's loaded rows. The next sign-in builds fresh pages, so the old
         ones would sit in the stack for the life of the process -- reachable,
         and holding data the person who just signed out had access to.
+
+        ``setParent(None)``, not ``deleteLater``: the widget is orphaned from
+        the stack immediately and freed when the last Python reference drops,
+        so it is destroyed once. The two together hand the object to Python and
+        post a deferred delete for it as well, which can free it twice.
         """
         for key, widget in self._page_widgets.items():
             self.stack.removeWidget(widget)
             widget.setParent(None)
-            widget.deleteLater()
         self._page_widgets.clear()
 
     def _on_refresh_tick(self) -> None:
@@ -320,9 +366,6 @@ class StaffShell(QMainWindow):
         try:
             refresh()
         except Exception:  # noqa: BLE001
-            # A background refresh must never interrupt whatever the user is
-            # doing. The page's own table shows the failure; a dialog here would
-            # pop up unbidden every 30 seconds.
             pass
 
     # -- test seams --------------------------------------------------------
@@ -346,11 +389,42 @@ def default_pages() -> list[PageSpec]:
     from app.staff.pages.today import build_today_page
 
     return [
-        PageSpec("dashboard", "Dashboard", build_dashboard_page, auto_refresh=True),
-        PageSpec("today", "Today", build_today_page, auto_refresh=True),
-        PageSpec("bookings", "Bookings", build_bookings_page),
-        PageSpec("fleet", "Fleet", build_fleet_page),
-        PageSpec("customers", "Customers", build_customers_page),
-        PageSpec("payments", "Payments", build_payments_page, auto_refresh=True),
-        PageSpec("inspections", "Inspections", build_inspections_page),
+        PageSpec(
+            "dashboard",
+            "Dashboard",
+            build_dashboard_page,
+            icon="dashboard",
+            auto_refresh=True,
+        ),
+        PageSpec(
+            "today",
+            "New Rental",
+            build_today_page,
+            icon="pos",
+            auto_refresh=True,
+        ),
+        PageSpec("bookings", "Bookings", build_bookings_page, icon="bookings"),
+        PageSpec("fleet", "Fleet", build_fleet_page, icon="vehicle"),
+        PageSpec("customers", "Customers", build_customers_page, icon="customers"),
+        PageSpec(
+            "payments",
+            "Payments",
+            build_payments_page,
+            icon="card",
+            auto_refresh=True,
+        ),
+        PageSpec(
+            "inspections", "Inspections", build_inspections_page, icon="check"
+        ),
     ]
+
+
+def sidebar_page_keys(pages: list[PageSpec] | None = None) -> list[str]:
+    """The keys the sidebar shows for a staff member, in sidebar order.
+
+    Admin-only pages are excluded, matching what `Sidebar` is given at sign-in.
+    The keys that are *not* in this list are the stub rows, which exist in the
+    sidebar but navigate nowhere.
+    """
+    specs = default_pages() if pages is None else pages
+    return [s.key for s in specs if not s.admin_only]

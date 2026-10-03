@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import select
 
@@ -27,7 +28,7 @@ from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
 from app.staff.widgets import blocking_error, confirm, toast
 
-#: Actions a plain staff member may perform. Everything not in here is admin.
+#: Actions a plain staff member may perform. Anything else is admin.
 COUNTER_ACTIONS = ("check_in", "check_out", "record_payment")
 
 
@@ -77,7 +78,7 @@ class BookingsPage(StaffPage):
                 Column("Owed", ALIGN_RIGHT),
                 Column("Booked", ALIGN_LEFT),
             ],
-            lambda: _booking_rows(self.context),
+            partial(_booking_rows, self.context),
             empty_message="No bookings yet.",
         )
         self.body.addWidget(self.table, 1)
@@ -128,9 +129,8 @@ class BookingsPage(StaffPage):
             return False
 
         try:
-            # Re-read inside the write session rather than trusting the list
-            # view: a booking settled by a colleague a moment ago must not be
-            # the one that gets cancelled.
+            # Re-read here, not from the list view: a booking settled by a
+            # colleague a moment ago must not be the one cancelled.
             with self.context.session() as session:
                 fresh = session.get(Booking, booking_id)
                 if fresh is None:
@@ -160,8 +160,8 @@ class BookingsPage(StaffPage):
 
 # -- the actions ----------------------------------------------------------
 #
-# Each takes a session and a *fresh* booking, and is called inside
-# `StaffContext.session()` so the commit and rollback are handled in one place.
+# Each takes a session and a *fresh* booking, called inside
+# `StaffContext.session()`.
 
 
 def _inspector_row(session, context):
@@ -178,8 +178,6 @@ def _inspector_row(session, context):
 
 
 def _do_confirm(session, booking, context, **_) -> None:
-    # `created_by` is the audit trail and the service does not take a separate
-    # "who confirmed this", so the confirmation actor is already recorded.
     booking_service.confirm_booking(session, booking)
 
 

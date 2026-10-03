@@ -41,18 +41,16 @@ from app.models import Booking, Payment
 from app.services.booking_service import CHANNELS
 from app.utils.money import ZERO, money
 
-#: How many weeks the activity heatmap shows. Sixteen weeks is about the widest
-#: that still fits a card without the cells going narrower than the gap between
-#: them.
+#: How many weeks the activity heatmap shows.
 HEATMAP_WEEKS = 16
 
-#: Statuses that mean money actually arrived. Only these are revenue -- a
-#: pending transfer and a declined card are both money that has not arrived,
-#: and a refund is money that left again.
+#: Days offered by the picker, plus one so the oldest has a prior day.
+REVENUE_DAYS = 14
+
+#: Statuses that mean money actually arrived.
 _MONEY_IN = ("paid",)
 
-#: Order statuses that never happened, and so should not be counted as orders
-#: anywhere on the dashboard.
+#: Order statuses that never happened and must not be counted.
 _VOID_STATUSES = ("cancelled",)
 
 
@@ -96,8 +94,7 @@ class MonthSales:
     month: date  # first of the month
     label: str
     total: Decimal = ZERO
-    #: The month's share of the annual target, for the target line to compare
-    #: against. Zero until the dashboard scales it in.
+    #: The month's share of the annual target.
     target: Decimal = ZERO
 
 
@@ -113,6 +110,8 @@ class DashboardFigures:
     today: date
     revenue_today: Decimal = ZERO
     revenue_yesterday: Decimal = ZERO
+    #: Revenue per calendar day over the picker's window; every day present.
+    revenue_days: dict = field(default_factory=dict)  # date -> Decimal
     recent: list = field(default_factory=list)  # list[TransactionRow]
     channels: ChannelTotals = field(default_factory=ChannelTotals)
     orders_per_day: dict = field(default_factory=dict)  # date -> int
@@ -288,9 +287,6 @@ def recent_transactions(
                 customer=customer.full_name if customer is not None else "-",
                 channel=booking.channel if booking is not None else None,
                 method=payment.method,
-                # The sign is a rendering decision made from status: the column
-                # never goes negative, because `record_payment` refuses a
-                # non-positive amount.
                 amount=payment.amount,
                 refunded=payment.status == "refunded",
             )
@@ -319,6 +315,41 @@ def revenue_on(session: Session, day: date) -> Decimal:
     return money(total or 0, field="revenue_on")
 
 
+def revenue_by_day(
+    session: Session,
+    from_date: date,
+    to_date: date,
+) -> dict[date, Decimal]:
+    """Revenue per calendar day in a window, every day present.
+
+    Gaps are zero rather than absent. The revenue card's date picker offers
+    every day in the window, and a day with no takings is a real answer, not a
+    missing one -- the same reason the heatmap keeps quiet days. One grouped
+    query, on the same ``paid_at`` the single-day reader uses.
+    """
+    if to_date < from_date:
+        return {}
+    rows = session.execute(
+        select(func.date(Payment.paid_at), func.sum(Payment.amount))
+        .where(
+            Payment.status.in_(_MONEY_IN),
+            Payment.paid_at >= datetime.combine(from_date, datetime.min.time()),
+            Payment.paid_at <= datetime.combine(to_date, datetime.max.time()),
+        )
+        .group_by(func.date(Payment.paid_at))
+    ).all()
+
+    span = (to_date - from_date).days + 1
+    buckets: dict[date, Decimal] = {
+        from_date + timedelta(days=i): ZERO for i in range(span)
+    }
+    for raw_day, total in rows:
+        day = raw_day if isinstance(raw_day, date) else date.fromisoformat(str(raw_day))
+        if day in buckets:
+            buckets[day] = money(total or 0, field="revenue_by_day")
+    return buckets
+
+
 def collect(
     session: Session,
     *,
@@ -336,10 +367,13 @@ def collect(
     """
     today = today or date.today()
 
-    figures = DashboardFigures(
-        today=today,
-        revenue_today=revenue_on(session, today),
-        revenue_yesterday=revenue_on(session, today - timedelta(days=1)),
+    figures = DashboardFigures(today=today)
+    figures.revenue_days = revenue_by_day(
+        session, today - timedelta(days=REVENUE_DAYS), today
+    )
+    figures.revenue_today = figures.revenue_days.get(today, ZERO)
+    figures.revenue_yesterday = figures.revenue_days.get(
+        today - timedelta(days=1), ZERO
     )
 
     if weeks > 0:

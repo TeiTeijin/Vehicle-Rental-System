@@ -38,26 +38,16 @@ from app.staff.context import (  # noqa: E402
 from app.staff.pages.base import StaffPage  # noqa: E402
 from app.staff.pages.bookings import COUNTER_ACTIONS, BookingsPage  # noqa: E402
 from app.staff.pages.customers import EXPIRING_SOON_DAYS  # noqa: E402
-from app.staff.pages.dashboard import DashboardPage  # noqa: E402
+from app.staff.pages.dashboard import DashboardPage, pesos  # noqa: E402
 from app.staff.pages.fleet import FleetPage  # noqa: E402
 from app.staff.pages.inspections import InspectionsPage  # noqa: E402
 from app.staff.pages.payments import PaymentsPage  # noqa: E402
 from app.staff.pages.today import TodayPage  # noqa: E402
 from app.staff.shell import StaffShell  # noqa: E402
 from app.staff.tables import LoadState  # noqa: E402
-from app.staff.theme import OK as OK_COLOUR  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
 
-#: The date the fixture branch is built around. Read by `Branch` and by tests
-#: that assert against it.
-#:
-#: It is a module constant only because that is what every call site reads, but
-#: the `branch` fixture reassigns it to `date.today()` on each test. A suite this
-#: size runs for minutes, so a run that starts at 23:58 and crosses midnight
-#: would otherwise build its dataset against yesterday and then have the pages
-#: -- which ask the clock themselves -- answer about today: "due back" would be
-#: the wrong row, "overdue" would gain a booking, and the counts would disagree.
-#: That is a flake you hit once a day and then cannot reproduce.
+#: Rebuilt per test by `branch`; a run crossing midnight must not go stale.
 TODAY = date.today()
 
 
@@ -132,7 +122,6 @@ class Branch:
                 session, category, "SHOP-001", status="maintenance"
             )
 
-            # Out now, not due back for a while.
             self.out_booking = self._booking(
                 session,
                 self.customer,
@@ -141,7 +130,6 @@ class Branch:
                 TODAY + timedelta(days=4),
                 status="ongoing",
             )
-            # Due back today.
             self.due_back = self._booking(
                 session,
                 self.customer,
@@ -150,7 +138,6 @@ class Branch:
                 TODAY,
                 status="ongoing",
             )
-            # Due back two days ago, never returned.
             self.overdue = self._booking(
                 session,
                 self.customer,
@@ -159,8 +146,6 @@ class Branch:
                 TODAY - timedelta(days=2),
                 status="ongoing",
             )
-            # A confirmed rental that starts later, so the car is promised but
-            # free on the lot today.
             self.upcoming = self._booking(
                 session,
                 self.customer,
@@ -169,10 +154,6 @@ class Branch:
                 TODAY + timedelta(days=4),
                 status="confirmed",
             )
-            # A confirmed rental that starts *today*: the car is physically on
-            # the lot but is already spoken for, which is the case the dashboard
-            # tile and the Fleet screen disagree about if you only look at
-            # `VEHICLE.status`.
             self.collecting = self._booking(
                 session,
                 self.customer,
@@ -181,8 +162,6 @@ class Branch:
                 TODAY + timedelta(days=3),
                 status="confirmed",
             )
-            # Settled history, for the money screens. Kept inside the current
-            # month so the "takings this month" tile has something in it.
             self.finished = self._booking(
                 session,
                 self.customer,
@@ -205,8 +184,6 @@ class Branch:
                 )
             )
 
-            # Two payments on the finished booking: one cleared, one still in
-            # flight. The pending one must not reach the takings figure.
             session.add_all(
                 [
                     Payment(
@@ -349,6 +326,14 @@ def as_staff(branch):
     )
 
 
+def as_admin(branch):
+    """The inverse of `as_staff`, for the tests that compare the two roles."""
+    built, context = branch
+    context.sign_in(
+        StaffUser(built.admin.user_id, "Branch Admin", "admin@example.com", "admin")
+    )
+
+
 def texts(table):
     return [table.cell_text(r, 0) for r in range(table.row_count())]
 
@@ -445,8 +430,6 @@ class TestTodayPage:
     def test_collections_show_who_is_picking_up(self, shell, branch):
         page = TodayPage(shell)
         page.refresh()
-        # The only booking starting today or already under way on a car that is
-        # not being returned today.
         assert page.collections.row_count() >= 1
         assert all("#" in t for t in texts(page.collections))
 
@@ -607,8 +590,6 @@ class TestPaymentsPage:
         page.refresh()
         listed = {page.outstanding.cell_text(r, 0) for r in range(page.outstanding.row_count())}
         assert f"#{built.finished.booking_id}" not in listed
-        # The rentals that are still under way are not settled, so the page is
-        # not empty -- the exclusion is selective, not a blanket wipe.
         assert f"#{built.overdue.booking_id}" in listed
 
     def test_outstanding_is_largest_first(self, shell, branch):
@@ -694,109 +675,40 @@ class TestInspectionsPage:
 
 
 class TestDashboardPage:
-    """`animate=False` throughout: a label mid-count-up cannot be read as a
-    number, so an animated card would make every assertion here a race.
+    """The cards, charts and role split have their own file --
+    `test_staff_dashboard.py`. What is checked here is how the page integrates
+    with a real branch, and that the old metric strip the redesign removed is
+    genuinely gone.
     """
 
-    def _values(self, page) -> dict[str, str]:
-        return {
-            key: tile.value.text() for key, tile in page._strip_tiles.items()
-        }
+    def test_the_revenue_card_shows_the_year_to_date_total(self, shell, branch):
+        from app.services import dashboard_service
 
-    def test_the_operational_tiles(self, shell, branch):
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        values = self._values(page)
-        assert values["out"] == "3"  # three ongoing rentals
-        assert values["due_back"] == "1"
-        assert values["overdue"] == "1"
+        with page.context.reading() as session:
+            months = dashboard_service.month_sales(session, date.today().year)
+            collected_today = dashboard_service.revenue_on(session, date.today())
+        ytd = sum((m.total for m in months), Decimal("0.00"))
+        assert page.revenue_value.text() == pesos(ytd)
+        assert pesos(collected_today) in page.revenue_collections.text()
 
-    def test_free_today_excludes_a_car_that_is_already_promised(self, shell, branch):
-        """`GO-001` reads `available` in the status column but is confirmed from
-        today. Counting it free is how the tile and the Fleet screen end up
-        disagreeing, and how someone is handed a car that is already collected."""
-        page = DashboardPage(shell, animate=False)
-        page.refresh()
-        # Three cars read `available`; one of them is spoken for right now.
-        assert self._values(page)["available"] == "2"
-
-    def test_the_money_tiles_carry_the_currency_even_at_zero(self, shell, branch):
-        page = DashboardPage(shell, animate=False)
-        page.refresh()
-        assert self._values(page)["outstanding"].startswith("₱")
-        assert page.revenue_value.text().startswith("₱")
-
-    def test_a_nil_money_tile_still_shows_its_prefix(self, shell, branch):
-        """Skipping the render when the value has not moved left a tile that
-        starts at zero showing a bare '0', with no currency at all."""
-        from app.staff.pages.dashboard import MetricTile
-
-        tile = MetricTile("Takings", OK_COLOUR)
-        tile.set_value(0, prefix="₱", decimals=2)
-        assert tile.value.text() == "₱0.00"
-
-    def test_outstanding_counts_a_late_fee(self, shell, branch):
-        from app.services.booking_service import apply_penalty
-
-        built, context = branch
-        page = DashboardPage(shell, animate=False)
-        page.refresh()
-        before = Decimal(self._values(page)["outstanding"][1:].replace(",", ""))
-        with context.session() as session:
-            booking = session.get(Booking, built.overdue.booking_id)
-            apply_penalty(
-                session, booking, "late_return", Decimal("250.00"), "Late fee"
-            )
-        page.refresh()
-        after = Decimal(self._values(page)["outstanding"][1:].replace(",", ""))
-        assert after == before + Decimal("250.00")
-
-    def test_the_month_total_ignores_an_uncleared_payment(self, shell, branch):
-        """A pending transfer is money that has not arrived. Including it
-        overstates takings, which is the mistake an auditor finds."""
-        from app.services import payment_service
-
-        built, context = branch
-        with context.reading() as session:
-            assert payment_service.takings(session) == Decimal("15000.00")
-        page = DashboardPage(shell, animate=False)
-        page.refresh()
-        assert page.revenue_value.text().startswith("₱")
-
-    def test_admin_gets_the_cards_and_the_series_queries(self, shell, branch):
-        page = DashboardPage(shell, animate=False)
-        page.refresh()
-        assert page.channels_curves is not None
-        assert page.activity_heatmap is not None
-        assert page.target_chart is not None
-        assert page.channels_curves.series, "no channel series was set"
-
-    def test_staff_get_the_cards_and_issue_no_series_query(self, shell, branch, monkeypatch):
-        """The charts are branch trends, not counter figures. A staff member is
-        not shown them, so their refresh should not pay for the queries."""
-        as_staff(branch)
+    def test_the_old_metric_strip_and_its_tile_are_gone(self, shell, branch):
         import app.staff.pages.dashboard as module
 
-        called = []
-        real = module.dashboard_service.month_sales
-
-        def spy(*args, **kwargs):
-            called.append(True)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(module.dashboard_service, "month_sales", spy)
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        assert called == []
+        assert not hasattr(page, "_strip_tiles")
+        assert not hasattr(module, "MetricTile")
 
-    def test_both_roles_see_the_same_operational_numbers(self, shell, branch):
+    def test_both_roles_see_the_same_figures(self, shell, branch):
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        as_admin = self._values(page)
+        admin_value = page.revenue_value.text()
         as_staff(branch)
         staff_page = DashboardPage(shell, animate=False)
         staff_page.refresh()
-        assert self._values(staff_page) == as_admin
+        assert staff_page.revenue_value.text() == admin_value
 
 
 # --------------------------------------------------------------------------
@@ -821,7 +733,6 @@ class TestBookingsPageActions:
             for r in range(page.table.row_count())
             if page.table.cell_text(r, 0) == f"#{built.finished.booking_id}"
         )
-        # Fully paid: paid and owed are both zero.
         assert page.table.cell_text(row, 7) == "15,000.00"
         assert page.table.cell_text(row, 8) == "0.00"
 
@@ -897,9 +808,7 @@ class TestBookingsPageActions:
 
         self._select(page, f"#{built.upcoming.booking_id}")
         assert page.cancel_booking("First reason") is True
-        # The table reloaded after the first cancel, so the row has to be found
-        # again -- cancelling by whatever row happens to be under the cursor
-        # would be a different booking.
+        # The table reloads after the cancel, so the row must be found again.
         self._select(page, f"#{built.upcoming.booking_id}")
         assert page.cancel_booking("Second reason") is False
         assert refusals, "the second cancel was refused silently"

@@ -6,17 +6,22 @@ new layout answers "how is the branch doing": what came in today, where the
 orders came from, when they were placed, what was just paid, and how the year
 is tracking.
 
-**The five tiles are not gone.** Out / due back / overdue / free / owed are the
-questions a member of staff asks while standing at the counter, and this page is
-still the first thing they see. They are kept in a compact strip along the top,
-restyled rather than replaced, so nothing that was on screen has been lost.
+The brief's five cards, in its two rows. What changed from the previous
+dashboard is everything around them: the operational strip above the grid is
+gone, the cards are no longer admin-only, and the grid now reflows between three
+shapes instead of always being three equal columns.
 
-**The cards are admin-only, and the widgets are built lazily.** The revenue
-figure, the channel split and the year-to-date line are the branch's
-performance rather than the next customer's. Staff see the operational strip and
-the transaction list; admins see all of it. The gate is on construction, not
-just visibility, so a counter member's thirty-second refresh does not run four
-queries for numbers they will never see.
+**Everyone sees all five cards.** This page used to hide them from staff and
+show them only to admins, on the grounds that branch performance is
+management's business. That was the wrong cut: every figure here is an
+aggregate count, none of them is about an individual customer, and the person
+answering the counter is the person who needs to know the branch took ₱16k
+today. A member of staff who cannot see the number asks a colleague.
+
+**The operational strip is gone, and its numbers moved to Today.** It held five
+more figures competing for attention with the hero number directly below them.
+Out / due back / overdue / free / owed are still answered -- they are the first
+thing the Today page shows.
 
 **Every figure comes from `app.services.dashboard_service`, in one call.** Two
 figures for the same thing that quietly differ is the specific failure a
@@ -27,28 +32,30 @@ the cards cannot disagree.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QComboBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
+    QSpacerItem,
     QVBoxLayout,
     QWidget,
 )
 
 from sqlalchemy import func, select
 
-from app.models import Booking, Vehicle
-from app.services import booking_service, dashboard_service, payment_service
+from app.services import dashboard_service
 from app.staff import theme
 from app.staff.cards import (
     Caption,
     Card,
+    ElidedLabel,
     HeroNumber,
     IconButton,
     Pill,
@@ -58,137 +65,207 @@ from app.staff.cards import (
 from app.staff.dashboard_charts import (
     ActivityHeatmap,
     ChannelCurves,
+    RevenueSparkline,
     SalesTargetChart,
 )
 from app.staff.metrics import (
+    ACTIVITY_SHARE,
     CARD_GUTTER,
     CARD_PADDING,
+    CHANNELS_SHARE,
     HERO_SIZE,
+    MEDIUM_CONTENT_W,
+    REVENUE_SHARE,
+    ROW1_H,
+    ROW2_H,
+    TARGET_SHARE,
+    TRANSACTIONS_SHARE,
+    TARGET_SIZE,
+    WIDE_CONTENT_W,
 )
 from app.staff.pages.base import StaffPage
-
-
-class MetricTile(QWidget):
-    """One of the small operational figures in the strip along the top.
-
-    A plain widget rather than a `Card`: at 96px tall there is no room for a
-    border and a shadow, and the strip reads better as a row of numbers than as
-    a row of boxes. The value is tabular so the strip does not jitter when the
-    numbers change width.
-    """
-
-    def __init__(self, label: str, colour: str, parent=None) -> None:
-        super().__init__(parent)
-        self._colour = colour
-
-        self.value = HeroNumber("0", size=28, colour=colour)
-        self.caption = Caption(label, size=12)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(2)
-        layout.addWidget(self.value)
-        layout.addWidget(self.caption)
-
-    def set_value(self, value, *, prefix: str = "", decimals: int | None = None) -> None:
-        if decimals is not None:
-            self.value.setText(f"{prefix}{value:,.{decimals}f}")
-        else:
-            self.value.setText(f"{prefix}{value:,.0f}")
+from app.utils.money import ZERO
 
 
 class _CardGrid(QWidget):
     """The five cards, in a grid that reflows as the window narrows.
 
-    Three columns at the 1440px reference, two below `TWO_COL_W`, one below
-    `NARROW_W`. The reflow is on a `resizeEvent` rather than a `QGridLayout`
-    with stretch factors, because a grid cannot move a widget from one cell to
-    another after it has been added -- the layout would need to be rebuilt, and
-    rebuilding it on every resize frame is a visible stutter.
+    **Three shapes, and the choice is made on content width, not window width.**
+    The window's width is not the grid's width: the sidebar takes a fixed 210
+    and the page margins take a fixed 52, so a 1146px grid is a 1440px window.
+    Testing against the window would mean every threshold drifting as the chrome
+    changed, and the reflow would fire at widths where the cards are still wide
+    enough for three columns.
+
+    * `WIDE` -- the brief's two rows. Row 1 is revenue at 35% beside channels at
+      65%; row 2 is activity, transactions and target at 30/38/32.
+    * `MEDIUM` -- two per row, with the sales target on a row of its own. A 30%
+      card at 760px of content is 228px, which cannot hold a peso axis label and a
+      month row at the same time.
+    * `NARROW` -- one column, all five. There is no fourth step: the window's
+      own `WINDOW_MIN_W` is the floor.
+
+    The reflow is on a `resizeEvent`, and the layout is rebuilt only when the
+    *shape* changes -- not on every resize frame, which would be a visible
+    stutter. Within a shape the cards are laid out by stretch factors, which Qt
+    recomputes for free.
     """
+
+    WIDE = "wide"
+    MEDIUM = "medium"
+    NARROW = "narrow"
+
+    #: Most rows any shape uses; narrow is five, one card per row.
+    MAX_ROWS = 5
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._cards: list[Card] = []
-        self._columns = 3
-        self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setSpacing(CARD_GUTTER)
+        self._shape: str | None = None
+        #: One per row any shape can use; created once, never rebuilt.
+        self._row_layouts = [
+            self._make_row_layout() for _ in range(self.MAX_ROWS)
+        ]
+        self._rows = QVBoxLayout(self)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(CARD_GUTTER)
+        for layout in self._row_layouts:
+            self._rows.addLayout(layout)
+
+    @staticmethod
+    def _make_row_layout() -> QHBoxLayout:
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(CARD_GUTTER)
+        return layout
 
     def add(self, card: Card) -> None:
+        """Add `card`. Order is the brief's reading order, top-left to
+        bottom-right, and the shapes below index into this list."""
         self._cards.append(card)
+        self._shape = None
         self._relayout()
 
+    @property
+    def cards(self) -> list[Card]:
+        return list(self._cards)
+
+    def shape_for_width(self, width: int) -> str:
+        """Which of the three shapes a grid `width` px across should take."""
+        if width >= WIDE_CONTENT_W:
+            return self.WIDE
+        if width >= MEDIUM_CONTENT_W:
+            return self.MEDIUM
+        return self.NARROW
+
+    @property
+    def shape(self) -> str | None:
+        """The shape currently laid out, or None before the first one."""
+        return self._shape
+
+    def _rows_for(self, shape: str) -> list[list[tuple[int, int]]]:
+        """Rows of `(card index, column share)` for `shape`.
+
+        **Rows are separate `QHBoxLayout`s, not rows of one `QGridLayout`.**
+        That is the whole reason this is not a grid. A grid's column stretch is
+        per *column*, so the brief's two rows cannot both be satisfied: row 1
+        wants 35/65 across two columns and row 2 wants 30/38/32 across three, and
+        a single column 0 cannot be both 35% and 30% of the grid. Nested row
+        layouts give each row its own proportions, which is what the brief is
+        actually describing.
+        """
+        if shape == self.WIDE:
+            return [
+                # Row 1: 35 / 65.
+                [(0, REVENUE_SHARE), (1, CHANNELS_SHARE)],
+                # Row 2: 30 / 38 / 32.
+                [(2, ACTIVITY_SHARE), (3, TRANSACTIONS_SHARE), (4, TARGET_SHARE)],
+            ]
+        if shape == self.MEDIUM:
+            return [
+                [(0, REVENUE_SHARE), (1, CHANNELS_SHARE)],
+                # Three here is a third of 760; the heatmap cannot hold 16 weeks.
+                [(2, 50), (3, 50)],
+                # The target takes a row of its own.
+                [(4, 100)],
+            ]
+        return [[(index, 100)] for index in range(len(self._cards))]
+
+    def _empty(self, layout: QHBoxLayout) -> None:
+        """Strip `layout` back to empty, leaving the widgets owned by the grid.
+
+        The widgets are deliberately *not* reparented to `None` on the way out.
+        `takeAt` already removes the item from the layout, and the card stays a
+        child of this grid, so it is still alive and can be handed straight back
+        to another row below. Calling `setParent(None)` here instead hands Qt
+        ownership back to Python, and the resulting transient wrappers have been
+        collected in the middle of a later SQLAlchemy query, which faults the
+        whole interpreter. Nothing is freed either way -- the cards are held by
+        `_cards` for the grid's lifetime -- so the extra step bought nothing.
+        """
+        while layout.count():
+            layout.takeAt(0)
+
     def _relayout(self) -> None:
-        while self._grid.count():
-            item = self._grid.takeAt(0)
-            if item.widget() is not None:
-                item.widget().setParent(None)
-        for index, card in enumerate(self._cards):
-            self._grid.addWidget(card, index // self._columns, index % self._columns)
-        for column in range(3):
-            self._grid.setColumnStretch(column, 1 if column < self._columns else 0)
-        # Rows share the leftover height evenly, so a short card and a tall one
-        # still meet on the same baseline.
-        for row in range((len(self._cards) + self._columns - 1) // self._columns):
-            self._grid.setRowStretch(row, 1)
+        """Put each card in the row this shape gives it.
+
+        The row layouts themselves are created once in `__init__` and reused.
+        Rebuilding them would mean allocating and destroying a `QHBoxLayout` per
+        row on every reflow, and the destroyed wrappers are then freed by
+        Python's collector at whatever moment the allocator gets round to it --
+        which is inside a SQLAlchemy query, and which has crashed this suite
+        more than once.
+        """
+        if not self._cards:
+            return
+        shape = self._shape_for_current_width()
+        rows = self._rows_for(shape)
+
+        for layout in self._row_layouts:
+            self._empty(layout)
+
+        for index, row in enumerate(rows):
+            layout = self._row_layouts[index]
+            for card_index, share in row:
+                if card_index >= len(self._cards):
+                    continue
+                layout.addWidget(self._cards[card_index], share)
+
+        # Emptied rather than hidden, so a card is in one layout only.
+        for layout in self._row_layouts[len(rows) :]:
+            self._empty(layout)
+
+        self._shape = shape
+
+    def _shape_for_current_width(self) -> str:
+        return self.shape_for_width(self.width())
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        self._apply_columns()
+        new_shape = self._shape_for_current_width()
+        if new_shape != self._shape:
+            self._relayout()
         super().resizeEvent(event)
 
-    def _apply_columns(self, width: int | None = None) -> None:
-        """Choose a column count for `width` and reflow if it changed."""
-        from app.staff.metrics import NARROW_W, TWO_COL_W
-
-        available = self.width() if width is None else width
-        columns = 3
-        if available < NARROW_W:
-            columns = 1
-        elif available < TWO_COL_W:
-            columns = 2
-        if columns != self._columns:
-            self._columns = columns
-            self._relayout()
-
     def reflow_to(self, width: int) -> None:
-        """Lay out as though the grid were `width` across.
+        """Lay out as though the grid were `width` px across.
 
-        For tests and for the screenshot script, which need a deterministic
-        column count without depending on when Qt happens to deliver a resize.
+        For tests and for the screenshot script, which need a deterministic shape
+        without depending on when Qt happens to deliver a resize.
         """
-        self._apply_columns(width)
+        shape = self.shape_for_width(width)
+        if shape != self._shape:
+            self._shape = shape
+            self._relayout()
 
 
 class DashboardPage(StaffPage):
+    PANEL = True
+
     def __init__(self, shell, *, animate: bool = True) -> None:
         super().__init__(shell, "Dashboard", "The branch at a glance.")
 
-        #: Set False to land every value and every chart immediately. Tests read
-        #: numbers out of labels and cannot see a half-drawn curve, so they
-        #: turn this off; anything embedding the page may want the same.
+        #: Set False to land every value immediately.
         self.animate = animate
-
-        # -- the operational strip ------------------------------------------
-        # Kept from the old dashboard. Every one of these is a question a member
-        # of staff asks while standing at the counter, and they are the numbers
-        # a counter member should see -- unlike the cards below, which are the
-        # branch's performance.
-        self.strip = QWidget(self)
-        strip_layout = QHBoxLayout(self.strip)
-        strip_layout.setContentsMargins(0, 0, 0, 0)
-        strip_layout.setSpacing(38)
-        self._strip_tiles = {
-            "out": MetricTile("Out now", theme.WARN),
-            "due_back": MetricTile("Due back today", theme.TEXT),
-            "overdue": MetricTile("Overdue", theme.DANGER),
-            "available": MetricTile("Free to rent", theme.OK),
-            "outstanding": MetricTile("Owed to the branch", theme.DANGER),
-        }
-        for tile in self._strip_tiles.values():
-            strip_layout.addWidget(tile)
-        strip_layout.addStretch(1)
-        self.body.addWidget(self.strip)
 
         # -- the cards ------------------------------------------------------
         self.grid = _CardGrid(self)
@@ -200,9 +277,6 @@ class DashboardPage(StaffPage):
         self.transactions_card = self._build_transactions_card()
         self.target_card = self._build_target_card()
 
-        # Order matters: the brief reads left-to-right, top-to-bottom, with the
-        # dark revenue card anchoring the top left and the two dark cards
-        # balancing it across the row.
         for card in (
             self.revenue_card,
             self.channels_card,
@@ -255,113 +329,121 @@ class DashboardPage(StaffPage):
         return body
 
     def _build_revenue_card(self) -> Card:
-        """Today's takings, dark, with the three counter actions."""
-        card = Card(dark=True)
-        card.setMinimumHeight(210)
+        """Takings for one day, with a picker for the days before it."""
+        card = Card(dark=False)
+        # A minimum, not a fixed height: the row grows with the window.
+        card.setMinimumHeight(ROW1_H)
 
         self.revenue_value = HeroNumber(
-            "₱0.00", size=HERO_SIZE, colour=theme.PAPER
+            "₱0.00", size=HERO_SIZE, colour=theme.TEXT
         )
         self.revenue_trend = TrendLabel()
-        self.revenue_pill = Pill(
-            "Today",
-            colour=theme.PAPER,
-            background=theme.INK_RAISED,
-            height=26,
-        )
 
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(8)
-        self.btn_new_rental = self._pill_button(
-            "New Rental", "plus", theme.INK, theme.TAN, tooltip="Start a new rental"
+        # The picker's selection is the day shown; today is the default.
+        self.revenue_period = QComboBox()
+        self.revenue_period.setObjectName("revenuePeriod")
+        self.revenue_period.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.revenue_period.currentIndexChanged.connect(
+            self._on_revenue_day_changed
         )
-        self.btn_log_return = self._pill_button(
-            "Log Return", "history", theme.PAPER, theme.INK_RAISED,
-            tooltip="Record a returned car",
-        )
-        self.btn_more = IconButton(
-            "dots",
-            colour=theme.MUTED,
-            background=theme.INK_RAISED,
-            tooltip="More",
-        )
-        actions.addWidget(self.btn_new_rental)
-        actions.addWidget(self.btn_log_return)
-        actions.addStretch(1)
-        actions.addWidget(self.btn_more)
+        self._revenue_days: dict[date, Decimal] = {}
+        self._revenue_day: date | None = None
+        self._today: date = date.today()
 
-        body = self._card_header(card, "Total Revenue", dark=True)
+        #: The selected day's takings, shown under the year-to-date hero.
+        self.revenue_collections = QLabel()
+        self.revenue_collections.setTextFormat(Qt.TextFormat.RichText)
+        self.revenue_collections.setWordWrap(True)
+        self.revenue_collections.setStyleSheet("background: transparent;")
+
+        body = self._card_header(card, "Total Revenue", dark=False)
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(10)
-        title_row.addWidget(self.revenue_value)
-        title_row.addStretch(1)
-        title_row.addWidget(self.revenue_trend, 0, Qt.AlignmentFlag.AlignTop)
+        title_row.addWidget(self.revenue_value, 1)
         body.addLayout(title_row)
+
+        collections_row = QHBoxLayout()
+        collections_row.setContentsMargins(0, 0, 0, 0)
+        collections_row.setSpacing(10)
+        collections_row.addWidget(self.revenue_collections, 1)
+        collections_row.addWidget(self.revenue_trend, 0, Qt.AlignmentFlag.AlignTop)
+        body.addLayout(collections_row)
 
         foot = QHBoxLayout()
         foot.setContentsMargins(0, 0, 0, 0)
-        foot.addWidget(self.revenue_pill)
+        foot.addWidget(self.revenue_period)
         foot.addStretch(1)
-        foot.addLayout(actions)
         body.addLayout(foot)
-        body.addStretch(1)
+
+        self.revenue_sparkline = RevenueSparkline()
+        body.addWidget(self.revenue_sparkline, 1)
 
         card.layout().addLayout(body)
         return card
 
-    def _pill_button(
-        self,
-        text: str,
-        icon_name: str,
-        colour: str,
-        background: str,
-        *,
-        tooltip: str = "",
-    ) -> QWidget:
-        """A filled action chip: an icon and a word, 44px tall."""
-        from app.staff.metrics import BTN_HEIGHT, BTN_RADIUS
+    def _on_revenue_day_changed(self, index: int) -> None:
+        day = self.revenue_period.itemData(index)
+        if day is not None:
+            self._show_revenue_day(day)
 
-        holder = QWidget()
-        holder.setFixedHeight(BTN_HEIGHT)
-        holder.setCursor(Qt.CursorShape.PointingHandCursor)
-        holder.setToolTip(tooltip or text)
-
-        layout = QHBoxLayout(holder)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(7)
-        layout.addWidget(IconButton(icon_name, colour=colour, size=20, icon_size=18))
-        label = QLabel(text)
-        font = QFont("Inter")
-        font.setPixelSize(14)
-        font.setWeight(QFont.Weight.DemiBold)
-        label.setFont(font)
-        label.setStyleSheet(f"color: {colour}; background: transparent;")
-        layout.addWidget(label)
-
-        holder.setStyleSheet(
-            f"QWidget {{ background: {background}; border-radius: {BTN_RADIUS}px; }}"
+    def _show_revenue_day(self, day: date) -> None:
+        """Show `day`'s takings on the collections line, with its change against
+        the day before. The hero stays the year-to-date total."""
+        self._revenue_day = day
+        amount = self._revenue_days.get(day, ZERO)
+        self.revenue_collections.setText(
+            f'<span style="color:{theme.MUTED}">{self._collections_label(day)}:'
+            f'</span> <span style="color:{theme.TEXT}; font-weight:600;">'
+            f"{pesos(amount)}</span>"
+        )
+        yesterday = self._revenue_days.get(day - timedelta(days=1))
+        self.revenue_trend.set_change(
+            self._change_pct(amount, yesterday),
+            up_is_good=True,
         )
 
-        def click(event) -> None:
-            from app.staff.widgets import toast
+    def _collections_label(self, day: date) -> str:
+        """A short day name, so the line stays clear at the narrowest width."""
+        if day == self._today:
+            return "Today"
+        if day == self._today - timedelta(days=1):
+            return "Yesterday"
+        return day.strftime("%b %d")
 
-            toast(self.window(), f"{text}  Enot wired up in this build")
+    @staticmethod
+    def _change_pct(
+        current: Decimal | None, previous: Decimal | None
+    ) -> float | None:
+        """Day-over-day change, or None when there is nothing to compare to."""
+        if not previous:
+            return None
+        return float(((current or ZERO) - previous) / previous * 100)
 
-        holder.mousePressEvent = click  # type: ignore[method-assign]
-        return holder
+    @staticmethod
+    def _day_label(day: date, today: date) -> str:
+        if day == today:
+            return "Today's Revenue"
+        if day == today - timedelta(days=1):
+            return "Yesterday's Revenue"
+        return day.strftime("%a, %b %d")
 
     def _build_channels_card(self) -> Card:
-        """The walk-in / online split, light."""
+        """The walk-in / online split, light.
+
+        The two figures are painted onto the chart as small overlay chips
+        rather than living in their own row above it: at the window's minimum
+        height a separate row of 28px numbers pushed the plot down to a handful
+        of pixels, and the chart is the part of this card that has to survive a
+        resize.
+        """
         card = Card(dark=False)
-        card.setMinimumHeight(210)
+        card.setMinimumHeight(ROW1_H)
 
         self.channels_curves = ChannelCurves()
         self.channels_curves.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.channel_tiles: dict[str, tuple[HeroNumber, Pill]] = {}
 
         body = self._card_header(
             card,
@@ -369,80 +451,59 @@ class DashboardPage(StaffPage):
             dark=False,
             subtitle="Orders placed, last 16 weeks",
         )
-        tiles = QHBoxLayout()
-        tiles.setContentsMargins(0, 0, 0, 0)
-        tiles.setSpacing(30)
-        for key in ("walk_in", "online"):
-            column = QVBoxLayout()
-            column.setContentsMargins(0, 0, 0, 0)
-            column.setSpacing(2)
-            label = HeroNumber(
-                "0",
-                size=30,
-                colour=theme.CHANNEL_COLOURS[key],
-            )
-            pill = Pill(
-                theme.CHANNEL_LABELS[key],
-                colour=theme.CHANNEL_COLOURS[key],
-                background=_tint(theme.CHANNEL_COLOURS[key], 0.14),
-                height=24,
-                font_size=11,
-            )
-            column.addWidget(label)
-            column.addWidget(pill)
-            tiles.addLayout(column)
-            self.channel_tiles[key] = (label, pill)
-        tiles.addStretch(1)
-        body.addLayout(tiles)
         body.addWidget(self.channels_curves, 1)
 
         card.layout().addLayout(body)
         return card
 
     def _build_activity_card(self) -> Card:
-        """Orders per day, dark, as a sixteen-week grid."""
-        card = Card(dark=True)
-        card.setMinimumHeight(210)
+        """Orders per day, light, as a sixteen-week grid."""
+        card = Card(dark=False)
+        # Taller than row 1: each holds a chart or a list that needs the height.
+        card.setMinimumHeight(ROW2_H)
 
         self.activity_heatmap = ActivityHeatmap()
         self.activity_heatmap.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self.activity_caption = Caption(
-            "Sixteen weeks of orders", colour=theme.INK_LINE, size=12
+            "Sixteen weeks of orders", colour=theme.MUTED, size=12
         )
 
-        body = self._card_header(card, "Order Activity", dark=True)
+        body = self._card_header(card, "Order Activity", dark=False)
         body.addWidget(self.activity_heatmap, 1)
         body.addWidget(self.activity_caption)
         card.layout().addLayout(body)
         return card
 
     def _build_transactions_card(self) -> Card:
-        """The five most recent payments, dark."""
-        card = Card(dark=True)
-        card.setMinimumHeight(210)
+        """The five most recent payments, light like the cards beside it."""
+        card = Card(dark=False)
+        card.setMinimumHeight(ROW2_H)
 
-        self.transactions_list = QVBoxLayout()
+        # One shared grid so the four columns line up across rows.
+        self.transactions_list = QGridLayout()
         self.transactions_list.setContentsMargins(0, 0, 0, 0)
-        self.transactions_list.setSpacing(0)
+        self.transactions_list.setHorizontalSpacing(12)
+        self.transactions_list.setVerticalSpacing(0)
+        self.transactions_list.setColumnStretch(0, 1)
         self._transaction_rows: list[QWidget] = []
 
         body = self._card_header(
             card,
             "Recent Transactions",
-            dark=True,
+            dark=False,
             buttons=(
                 IconButton(
                     "search",
                     colour=theme.MUTED,
-                    background=theme.INK_RAISED,
+                    background=theme.SURFACE,
                     tooltip="Search transactions",
                 ),
                 IconButton(
                     "sliders",
                     colour=theme.MUTED,
-                    background=theme.INK_RAISED,
+                    background=theme.SURFACE,
                     tooltip="Filter",
                 ),
             ),
@@ -454,15 +515,18 @@ class DashboardPage(StaffPage):
     def _build_target_card(self) -> Card:
         """Year-to-date against the annual target, light."""
         card = Card(dark=False)
-        card.setMinimumHeight(210)
+        card.setMinimumHeight(ROW2_H)
 
-        self.target_value = HeroNumber("₱0", size=30, colour=theme.TEXT)
+        self.target_value = HeroNumber(
+            "₱0", size=TARGET_SIZE, colour=theme.TEXT
+        )
         self.target_pill = Pill(
             "0% of target",
             colour=theme.TEXT,
             background=theme.SURFACE,
             height=24,
             font_size=11,
+            radius=8,
         )
         self.target_chart = SalesTargetChart()
         self.target_chart.setSizePolicy(
@@ -472,8 +536,7 @@ class DashboardPage(StaffPage):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(10)
-        head.addWidget(self.target_value)
-        head.addStretch(1)
+        head.addWidget(self.target_value, 1)
         head.addWidget(self.target_pill, 0, Qt.AlignmentFlag.AlignTop)
 
         body = self._card_header(card, "Sales Target", dark=False)
@@ -488,35 +551,15 @@ class DashboardPage(StaffPage):
         super().refresh()
 
         today = date.today()
-        show_figures = self.context.is_admin
         with self.context.reading() as session:
             figures = dashboard_service.collect(
                 session,
                 today=today,
-                # The cards are the branch's performance, not the next
-                # customer's. A counter member is not shown them, so their
-                # refresh must not pay for the channel, heatmap or year queries.
-                # `collect` is told to skip them rather than being handed a
-                # session it is not allowed to use -- the alternative is
-                # computing them and throwing them away.
-                weeks=dashboard_service.HEATMAP_WEEKS if show_figures else 0,
-                recent=5 if show_figures else 0,
-                monthly=show_figures,
+                weeks=dashboard_service.HEATMAP_WEEKS,
+                recent=5,
+                monthly=True,
             )
-            operational = self._operational(session, today)
 
-        self._fill_strip(operational)
-        if not show_figures:
-            # Staff get the operational strip and nothing else. The cards are
-            # hidden rather than left showing zeroes: an empty revenue card
-            # invites someone to ask why the branch has taken nothing, and the
-            # answer would be "because you are not an admin", which is a worse
-            # answer than not asking.
-            self.grid.setVisible(False)
-            self._first_load = False
-            return
-
-        self.grid.setVisible(True)
         self._fill_revenue(figures)
         self._fill_channels(figures)
         self._fill_activity(figures)
@@ -525,82 +568,43 @@ class DashboardPage(StaffPage):
 
         self._first_load = False
 
-    def _operational(self, session, today: date) -> dict:
-        """The counter's five numbers.
-
-        Unchanged from the previous dashboard, including the decision to count
-        "free to rent" against committed bookings rather than the raw
-        `Vehicle.status` -- which is what keeps this row agreeing with the
-        Fleet screen.
-        """
-        out_now = session.execute(
-            select(func.count(Booking.booking_id)).where(
-                Booking.status == "ongoing"
-            )
-        ).scalar_one()
-        due_back = session.execute(
-            select(func.count(Booking.booking_id)).where(
-                Booking.status == "ongoing", Booking.end_date == today
-            )
-        ).scalar_one()
-        overdue = len(booking_service.overdue_returns(session, today))
-        free_now = session.execute(
-            select(func.count(Vehicle.vehicle_id)).where(
-                Vehicle.status == "available",
-                ~Vehicle.vehicle_id.in_(
-                    select(Booking.vehicle_id).where(
-                        Booking.status.in_(("confirmed", "ongoing")),
-                        Booking.start_date <= today,
-                        Booking.end_date > today,
-                    )
-                ),
-            )
-        ).scalar_one()
-
-        outstanding = Decimal("0.00")
-        for booking in session.execute(
-            select(Booking).where(
-                Booking.status.in_(("confirmed", "ongoing", "completed"))
-            )
-        ).scalars():
-            balance = payment_service.booking_balance(session, booking)
-            if balance.balance > 0:
-                outstanding += balance.balance
-
-        return {
-            "out": out_now,
-            "due_back": due_back,
-            "overdue": overdue,
-            "available": free_now,
-            "outstanding": outstanding,
-        }
-
-    def _fill_strip(self, operational: dict) -> None:
-        self._strip_tiles["out"].set_value(operational["out"])
-        self._strip_tiles["due_back"].set_value(operational["due_back"])
-        self._strip_tiles["overdue"].set_value(operational["overdue"])
-        self._strip_tiles["available"].set_value(operational["available"])
-        self._strip_tiles["outstanding"].set_value(
-            operational["outstanding"], prefix="₱", decimals=2
-        )
-
     def _fill_revenue(self, figures) -> None:
-        self.revenue_value.setText(pesos(figures.revenue_today))
-        self.revenue_trend.set_change(figures.revenue_change_pct, up_is_good=True)
+        days = dict(figures.revenue_days)
+        if not days:
+            # A hand-built `DashboardFigures` carries only the single figure.
+            days = {figures.today: figures.revenue_today}
+        self._revenue_days = days
+        self._today = figures.today
+
+        # The seven days ending today, oldest first; span is fixed to the week.
+        week = sorted(days)[-7:]
+        self.revenue_sparkline.set_series([days[day] for day in week])
+
+        # The hero is the year-to-date figure; the picker lands on the line below.
+        self.revenue_value.setText(pesos(figures.revenue_ytd))
+
+        self.revenue_period.blockSignals(True)
+        self.revenue_period.clear()
+        for day in sorted(days, reverse=True):
+            self.revenue_period.addItem(self._day_label(day, figures.today), day)
+        # Keep the selected day across a refresh; else fall back to today.
+        target = self._revenue_day if self._revenue_day in days else figures.today
+        index = self.revenue_period.findData(target)
+        if index < 0:
+            index = 0
+        self.revenue_period.setCurrentIndex(index)
+        self.revenue_period.blockSignals(False)
+        self._show_revenue_day(target)
 
     def _fill_channels(self, figures) -> None:
         totals = figures.channels
-        series = []
-        for key, count in totals.as_rows():
-            label, _pill = self.channel_tiles[key]
-            label.setText(f"{count:,}")
-            series.append(
-                (theme.CHANNEL_LABELS[key], count, theme.CHANNEL_COLOURS[key])
-            )
+        series = [
+            (theme.CHANNEL_LABELS[key], count, theme.CHANNEL_COLOURS[key])
+            for key, count in totals.as_rows()
+        ]
         self.channels_curves.set_series(series)
 
-        # If any booking predates the channel column, say so rather than letting
-        # the two curves quietly total less than the branch's real order count.
+        # Say so if any booking predates the channel column.
         if totals.unattributed:
             self.channels_curves.setToolTip(
                 f"{totals.unattributed} booking(s) predate channel tracking "
@@ -622,19 +626,18 @@ class DashboardPage(StaffPage):
         """Empty the list's layout completely.
 
         `removeWidget` on its own is not enough here: it takes the widget out of
-        the layout but leaves the layout item, and `addStretch` returns `None`
-        in PySide6 so a trailing spacer cannot be tracked and removed
-        individually. Draining through `takeAt` handles rows and spacers with
-        one loop and leaves nothing for the next refresh to accumulate on.
+        the layout but leaves the layout item, so the cells of a row would pile
+        up row after row on every refresh. Draining through `takeAt` handles the
+        widgets and the trailing spacer (whose `widget()` is `None`) with one
+        loop and leaves nothing for the next refresh to accumulate on.
         """
         while self.transactions_list.count():
             item = self.transactions_list.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Reparent only; `deleteLater()` here is a double free waiting to happen.
                 widget.setParent(None)
-                widget.deleteLater()
-            # The layout's ownership moved into Python here; dropping the last
-            # reference is what actually deletes the C++ item.
+            # Ownership moved into Python; dropping the reference deletes it.
             del item
         self._transaction_rows.clear()
 
@@ -648,44 +651,56 @@ class DashboardPage(StaffPage):
             font.setPixelSize(13)
             empty.setFont(font)
             empty.setStyleSheet(
-                f"color: {theme.INK_LINE}; background: transparent;"
+                f"color: {theme.MUTED}; background: transparent;"
             )
-            self.transactions_list.addWidget(empty)
+            self.transactions_list.addWidget(empty, 0, 0, 1, 4)
             self._transaction_rows.append(empty)
             return
 
-        for entry in rows:
-            self.transactions_list.addWidget(self._transaction_row(entry))
-        self.transactions_list.addStretch(1)
+        for row, entry in enumerate(rows):
+            self._transaction_row(entry, row)
+        # A trailing spacer holds the rows at the top; `_clear_transactions` drains it.
+        self.transactions_list.addItem(
+            QSpacerItem(
+                0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
+            ),
+            len(rows),
+            0,
+            1,
+            4,
+        )
 
-    def _transaction_row(self, entry) -> QWidget:
-        """One payment: who, how, which channel, how much."""
-        holder = QWidget()
-        holder.setFixedHeight(46)
-        layout = QHBoxLayout(holder)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+    def _transaction_row(self, entry, row: int) -> None:
+        """One payment: who, how, which channel, how much.
 
-        name = QLabel(entry.customer)
-        name_font = QFont("Inter")
-        name_font.setPixelSize(14)
-        name_font.setWeight(QFont.Weight.Medium)
-        name.setFont(name_font)
-        name.setStyleSheet(f"color: {theme.PAPER}; background: transparent;")
+        The four cells go into the shared grid at (row, column) rather than into
+        a layout of their own, so every row's method, channel and amount share a
+        column and line up down the card.
+        """
+        name = ElidedLabel(
+            entry.customer,
+            colour=theme.TEXT,
+            size=14,
+            weight=QFont.Weight.Medium,
+        )
 
         method = Caption(
             theme.METHOD_LABELS.get(entry.method, entry.method.title()),
-            colour=theme.INK_LINE,
+            colour=theme.MUTED,
             size=12,
         )
 
+        mark = theme.CHANNEL_DOT_COLOURS.get(entry.channel, theme.MUTED)
         channel = Pill(
             theme.CHANNEL_LABELS.get(entry.channel, "Unrecorded"),
-            colour=theme.INK_LINE,
-            background=theme.INK_RAISED,
+            colour=theme.TEXT,
+            background=theme.SURFACE,
+            dot=bool(entry.channel),
+            dot_colour=mark,
+            border_colour=mark,
             height=22,
             font_size=11,
-            dot=bool(entry.channel),
+            radius=8,
         )
 
         amount = QLabel(_signed_pesos(entry.amount, entry.refunded))
@@ -694,24 +709,21 @@ class DashboardPage(StaffPage):
         amount_font.setWeight(QFont.Weight.DemiBold)
         amount_font.setFeature(QFont.Tag("tnum"), 1)
         amount.setFont(amount_font)
-        # A refund is red and carries a minus sign. The sign alone would be
-        # ambiguous next to a discount, and the amount column holds positive
-        # values by design.
         amount.setStyleSheet(
             "background: transparent; color: "
-            f"{theme.DANGER if entry.refunded else theme.PAPER};"
+            f"{theme.DANGER if entry.refunded else theme.TEXT};"
         )
         amount.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
 
-        layout.addWidget(name)
-        layout.addWidget(method)
-        layout.addStretch(1)
-        layout.addWidget(channel)
-        layout.addWidget(amount)
-        self._transaction_rows.append(holder)
-        return holder
+        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        self.transactions_list.addWidget(name, row, 0, align)
+        self.transactions_list.addWidget(method, row, 1, align)
+        self.transactions_list.addWidget(channel, row, 2, align)
+        self.transactions_list.addWidget(amount, row, 3)
+        self.transactions_list.setRowMinimumHeight(row, 46)
+        self._transaction_rows.append(name)
 
     def _fill_target(self, figures) -> None:
         target = theme.SALES_TARGET
@@ -720,9 +732,7 @@ class DashboardPage(StaffPage):
 
         pct = float(achieved / target * 100) if target else Decimal(0)
         self.target_pill.set_text(f"{pct:.0f}% of ₱{float(target) / 1_000_000:.0f}M")
-        # Behind pace is amber, on pace is green. A single threshold at 100% would
-        # show a branch two thirds of the way through September at 50% as "fine",
-        # which is the reading the bar exists to prevent.
+        # Behind pace is amber, on pace is green.
         on_pace = _pace(achieved, target, figures.today)
         self.target_pill.set_text_colour(
             theme.OK if on_pace else theme.WARN
@@ -744,6 +754,7 @@ class DashboardPage(StaffPage):
             self.channels_curves.animate_in()
             self.activity_heatmap.animate_in()
             self.target_chart.animate_in()
+            self.revenue_sparkline.animate_in()
 
     _animations_played = False
 
@@ -761,15 +772,6 @@ def _pace(achieved: Decimal, target: Decimal, today: date) -> bool:
     days_elapsed = (today - year_start).days + 1
     expected = target * Decimal(days_elapsed) / Decimal(365)
     return achieved >= expected
-
-
-def _tint(colour: str, alpha: float) -> str:
-    """A translucent version of `colour`, as `#RRGGBB` for a QSS background."""
-    from PySide6.QtGui import QColor
-
-    c = QColor(colour)
-    c.setAlphaF(alpha)
-    return c.name(QColor.NameFormat.HexArgb)
 
 
 def pesos(amount: Decimal | float, *, decimals: int = 2) -> str:

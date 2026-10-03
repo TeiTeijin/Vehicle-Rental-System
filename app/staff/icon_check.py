@@ -76,8 +76,7 @@ def main() -> int:
         )
         signatures.setdefault(signature(name), []).append(name)
 
-        # Nothing may touch the outer 2px: a glyph that fills its box has been
-        # drawn at the wrong scale and will clip against a card's padding.
+        # Nothing may touch the outer 2px: it would clip against card padding.
         if x0 < 2 or y0 < 2 or x1 > SIZE - 3 or y1 > SIZE - 3:
             problems.append(f"{name}: {(x0, y0, x1, y1)} touches the grid edge")
 

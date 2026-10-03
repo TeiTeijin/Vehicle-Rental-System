@@ -13,13 +13,11 @@ class Payment(Base):
     amount = Column(DECIMAL(10, 2), nullable=False)
     method = Column(Enum('cash', 'card', 'gcash'), nullable=False, default='cash')
 
-    # pending / failed have no paid_at, so this used to be NOT NULL and was
-    # unsatisfiable for two of the four statuses the same column allows.
+    #: `pending`/`failed` rows have no paid_at.
     status = Column(Enum('pending', 'paid', 'failed', 'refunded'), nullable=False, default='pending')
     paid_at = Column(DateTime, nullable=True)
 
-    # Who took the money. Without it a shift cannot be reconciled against the
-    # drawer at the end of the day.
+    #: Staff member who took the money (shift reconciliation).
     recorded_by = Column(Integer, ForeignKey("USERS.user_id"), nullable=True)
 
     # GCash ref, card auth code, or the printed receipt number.
@@ -27,9 +25,6 @@ class Payment(Base):
 
     note = Column(String(255), nullable=True)
 
-    # Defaulted rather than required: this column did not exist until the staff
-    # rebuild, and every pre-existing caller that constructs a Payment omits it.
-    # A NOT NULL column with no default is a trap for the next writer.
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
     booking = relationship("Booking", back_populates="payments")

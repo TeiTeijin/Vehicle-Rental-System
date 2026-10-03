@@ -21,9 +21,7 @@ from pathlib import Path
 
 from PIL import Image
 
-#: Colours to count, with the tolerance for "close enough to be this colour".
-#: 28 is about the largest gap antialiasing leaves between two distinct fills,
-#: wide enough to catch a curve and tight enough not to count its own glow.
+#: name -> (colour, tolerance for "close enough to be this colour")
 WATCH = {
     "tan": ((184, 166, 138), 28),
     "brown": ((138, 111, 78), 28),

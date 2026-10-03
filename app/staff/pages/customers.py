@@ -14,6 +14,7 @@ reasoning as the booking window, and for the same reason.
 from __future__ import annotations
 
 from datetime import date, timedelta
+from functools import partial
 
 from sqlalchemy import func, select
 
@@ -22,8 +23,7 @@ from app.services.booking_service import check_licence
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
 
-#: A licence inside this window is called out, but not treated as blocking.
-#: The customer can still rent today; they just need renewing this week.
+#: Licences inside this window are flagged, not treated as blocking.
 EXPIRING_SOON_DAYS = 30
 
 
@@ -32,9 +32,6 @@ def _customer_rows(context):
     soon = today + timedelta(days=EXPIRING_SOON_DAYS)
 
     with context.reading() as session:
-        # One grouped count instead of a query per customer. With a few hundred
-        # customers the per-row version is measurably slow, and the screen is
-        # on the 30-second refresh path.
         rental_counts = dict(
             session.execute(
                 select(Booking.user_id, func.count(Booking.booking_id)).group_by(
@@ -98,7 +95,7 @@ class CustomersPage(StaffPage):
                 Column("Rentals", ALIGN_RIGHT),
                 Column("Since", ALIGN_LEFT),
             ],
-            lambda: _customer_rows(self.context),
+            partial(_customer_rows, self.context),
             empty_message="No customers yet.",
         )
         self.body.addWidget(self.table, 1)

@@ -62,7 +62,6 @@ class TestReceiptContent:
         payment_service.record_payment(session, booking, 5000, "gcash")
         balance = payment_service.booking_balance(session, booking)
 
-        # 12,500 rental + 750 cleaning = 13,250 due; 5,000 paid; 8,250 left.
         assert balance.total_due == 13250
         assert balance.balance == 8250
         text = lines(session, booking)
@@ -75,9 +74,9 @@ class TestReceiptContent:
         payment_service.record_payment(session, booking, 5000, "gcash")
         payment_service.record_payment(session, booking, 7500, "cash")
         assert amounts(session, booking) == [
-            "PHP 12,500.00",   # total due
-            "PHP 5,000.00",    # deposit
-            "PHP 7,500.00",    # balance on return
+            "PHP 12,500.00",
+            "PHP 5,000.00",
+            "PHP 7,500.00",
         ]
         assert "PAID IN FULL" in lines(session, booking)
 
@@ -209,7 +208,6 @@ class TestReceiptCurrencyIsRenderable:
             if not row.text:
                 continue
             font, size = _FONTS[row.style]
-            # stringWidth raises or returns 0 for a glyph the font lacks.
             assert stringWidth(row.text, font, size) > 0, row.text
 
     def test_the_ascii_formatter_agrees_with_the_unicode_one(self):

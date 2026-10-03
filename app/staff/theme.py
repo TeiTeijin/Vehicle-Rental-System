@@ -19,7 +19,6 @@ from PySide6.QtGui import QColor
 # -- palette ---------------------------------------------------------------
 
 BG = "#F1E8D8"
-NAVBAR = "#FFFFFF"
 TEXT = "#1A1A1A"
 MUTED = "#8A8175"
 ACCENT = "#D8CCBB"
@@ -30,41 +29,36 @@ INK = "#171717"
 PAPER = "#FFFFFF"
 
 # -- the dashboard's second surface ------------------------------------------
-# The dashboard is the only staff screen with a dark half. It is a different
-# object from the one the rest of the app sits on, not a recolouring of it: the
-# revenue figure and the activity grid are the two things a manager wants to
-# find instantly, and putting them on the page background would leave them
-# competing with eight light cards for the same attention.
-#
-# INK is the card. INK_RAISED is a 6% lift of it and exists for hover on those
-# cards -- a hover tint derived from the card's own colour, so a dark card does
-# not need a second hand-picked value to stay coherent.
 
 INK_RAISED = "#232220"
 INK_LINE = "#3A3733"
-#: Surface mix for the two channel curves and the sales line. TAN carries a
-#: rental that was walked in, BROWN one taken online -- both sit close enough to
-#: the warm neutrals to belong on PAPER without reading as a status colour.
+#: TAN = walk-in, BROWN = online.
 TAN = "#B8A68A"
 BROWN = "#8A6F4E"
-#: The page background doubles as the light cards' warm neighbour. Named
-#: separately so a card can be "the cream" without importing the whole app's
-#: background role into it.
+#: Page background; the light cards' warm neighbour.
 CREAM = BG
 
-#: Semantic status colours. Green/amber/red rather than the existing neutrals,
-#: because "is this car fine?" and "is this money late?" are the two questions
-#: the staff app exists to answer, and neither has an answer in beige.
+#: Semantic status colours.
 OK = "#4F7A5B"
 WARN = "#B07D2B"
 DANGER = "#A8452F"
 
-#: Hover on a dark card: INK_RAISED lifted 6% towards white. Computed rather
-#: than eyeballed, and kept next to INK_RAISED so the two cannot drift apart.
+#: Status green that stays readable on INK.
+OK_LIGHT = "#7FD6A4"
+
+#: Order-activity heatmap shades, darkest first.
+HEATMAP_LEVELS = (
+    "#2A2823",
+    "#4A433A",
+    "#7A6C58",
+    "#B8A68A",
+    "#F1E8D8",
+)
+
+#: Dark-card hover tint; INK_RAISED lifted 6% towards white.
 INK_HOVER = "#302F2D"
 
-#: Channel -> its curve colour, and the label the dashboard shows for it. The
-#: stored values are the database enum; these are what a human reads.
+#: Channel -> display label.
 CHANNEL_LABELS = {
     "walk_in": "Walk-in",
     "online": "Online",
@@ -75,17 +69,27 @@ CHANNEL_COLOURS = {
     "online": BROWN,
 }
 
-#: Payment method as stored -> as displayed. Not `.title()`: "gcash" titles to
-#: "Gcash", and the brand is "GCash". "card" is stored generically because a
-#: single column cannot say which scheme, so it is labelled for both.
+#: Dot/hairline colour for a channel pill.
+CHANNEL_DOT_COLOURS = {
+    "walk_in": "#B08A54",
+    "online": "#6E5233",
+}
+
+#: Dot/hairline colour per payment method.
+METHOD_DOT_COLOURS = {
+    "cash": "#6FAE7C",
+    "gcash": "#5B8FBF",
+    "card": "#C97B4A",
+}
+
+#: Payment method as stored -> as displayed.
 METHOD_LABELS = {
     "cash": "Cash",
     "gcash": "GCash",
     "card": "Credit/Debit Card",
 }
 
-#: Per-booking and per-payment status -> colour. Anything unmapped falls back
-#: to MUTED, which reads as "no opinion" rather than as a fifth severity.
+#: Status -> colour; unmapped falls back to MUTED.
 STATUS_COLOURS = {
     "available": OK,
     "rented": WARN,
@@ -106,43 +110,46 @@ STATUS_COLOURS = {
 
 FONT = "Inter 18pt"
 
-#: Object names, shared between the QSS and the code that sets them. A typo in
-#: a stylesheet selector is silent -- the widget just renders unstyled -- so
-#: these constants are what the Python actually uses.
-OBJ_NAVBAR = "navbar"
-OBJ_NAV_ITEM = "navItem"
+#: Object names shared with the QSS.
 OBJ_DEMO_BANNER = "demoBanner"
 OBJ_STATUS = "statusPill"
 OBJ_EMPTY = "emptyState"
 OBJ_ERROR = "errorState"
 
+# -- the sidebar -------------------------------------------------------------
+
+OBJ_SIDEBAR = "sidebar"
+OBJ_SIDEBAR_WORDMARK = "sidebarWordmark"
+OBJ_SIDEBAR_GROUP = "sidebarGroup"
+OBJ_SIDEBAR_ITEM = "sidebarItem"
+#: Set "true" on the item for the current page.
+PROP_ACTIVE = "active"
+
+# -- the page header --------------------------------------------------------
+
+OBJ_PAGE_HEADER = "pageHeader"
+OBJ_PAGE_OVERFLOW = "pageOverflow"
+OBJ_AVATAR = "avatar"
+
+# -- the page sheet ---------------------------------------------------------
+
+OBJ_PAGE_PANEL = "pagePanel"
+
 # -- sign in ----------------------------------------------------------------
-# The sign-in sits on the app's own background, with no panel behind it. A
-# card on a differently-coloured field read as a separate object dropped into
-# the middle of a window that is otherwise one flat surface.
-#
-# The accent is petrol rather than the amber that automotive work suggests on
-# purpose -- amber already means WARN in STATUS_COLOURS, and a brand colour
-# that looks like an alert is a trap for anyone reading this app quickly.
 
 #: Petrol. The brand colour, and the only non-semantic colour on the screen.
 PETROL = "#1F4E5F"
 PETROL_DEEP = "#16333F"
-#: The field caption, and the placeholder that floats over an empty field.
-#: Used by the sign-in, which is the only screen that needs it.
+#: Field caption and empty-field placeholder.
 CAPTION = "#9B978F"
-#: The sign-in button: a warm sand, deliberately not the petrol primary, so it
-#: does not read as the most important control in the app.
+#: Sign-in button; deliberately not the petrol primary.
 BUTTON = "#E5D7BE"
 BUTTON_HOVER = "#DCCBAE"
 #: The rule under a field. Weightens to FIELD_FOCUS on focus.
 RULE = "#CFC6B5"
-#: Keyboard focus ring on the entry itself. The sign-in's button sand, so the
-#: one accent on that page is a single colour.
+#: Focus ring on the entry; matches the sign-in button sand.
 FIELD_FOCUS = "#E5D7BE"
-#: The focus colour where it has to carry 12px text. #E5D7BE on white is
-#: 1.42:1 and would leave the lifted caption invisible, so the caption takes a
-#: darker shade of the same hue -- 4.84:1, and still recognisably the sand.
+#: Focus colour where it must carry 12px text.
 FIELD_FOCUS_TEXT = "#8A6D3F"
 
 OBJ_LOGIN_ROOT = "loginRoot"
@@ -158,10 +165,7 @@ OBJ_LOGIN_ERROR = "loginError"
 OBJ_LOGIN_FOOT = "loginFoot"
 
 # -- dashboard --------------------------------------------------------------
-# The dashboard's cards are set with a dynamic property rather than an object
-# name, because "this card is dark" is a variant of a card and not a different
-# kind of widget: `Card(dark=True)` sets the property and the stylesheet picks
-# it up. Object names are for identity, properties for state.
+
 PROP_DARK = "dark"
 PROP_HOVER = "hover"
 
@@ -183,28 +187,13 @@ OBJ_SEARCH_FIELD = "searchField"
 
 
 def _money_from_env(name: str, fallback: str) -> Decimal:
-    """A Decimal from the environment, or `fallback` if it is not usable.
-
-    Falls back rather than raising. A mistyped environment variable should not
-    stop the staff app from starting -- that is the one screen nobody can open
-    the branch without -- and the alternative is a dashboard showing a wrong
-    number because `Decimal("six million")` raised on import.
-    """
     try:
         return Decimal(os.getenv(name, fallback))
     except (InvalidOperation, TypeError, ArithmeticError):
         return Decimal(fallback)
 
 
-#: The annual revenue target the dashboard plots against.
-#:
-#: Read from the environment because a target is a business decision and belongs
-#: to whoever runs the branch, not to a constant in a stylesheet module. It is
-#: deliberately NOT the ₱20,000,000 in the design brief: at roughly ₱500,000 a
-#: month, that figure would leave the progress bar permanently near zero and
-#: stop carrying information. Six million is round, is roughly what the branch
-#: is actually turning over, and leaves the year about half-sold by September,
-#: so the bar means something.
+#: Annual revenue target the dashboard plots against; read from the environment.
 SALES_TARGET = _money_from_env("RENTWHEELS_SALES_TARGET", "6000000")
 
 

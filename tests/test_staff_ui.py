@@ -120,8 +120,7 @@ class TestFieldErrors:
 
         label = QLabel()
         show_field_error(label, "Enter an amount.")
-        # A QLabel that is not in a shown window reports isVisible() False
-        # whatever we set, so the flag is checked through the hidden state.
+        # Not in a shown window, so isVisible() is False; check hidden state.
         assert label.isHidden() is False
         assert label.text() == "Enter an amount."
         assert label.objectName() == "fieldError"
@@ -209,8 +208,7 @@ class TestLoadStates:
 
     def test_a_reload_that_still_fails_can_say_so_out_loud(self, qapp):
         table = make_table(qapp, lambda: (_ for _ in ()).throw(OperationalError("x")))
-        # No parent, so the dialog path is not taken -- the assertion is that
-        # the failure is still visible in the state rather than swallowed.
+        # No parent, so the dialog path is not taken.
         assert table.reload_or_report(None) is LoadState.FAILED
         assert table.state is LoadState.FAILED
 
@@ -249,7 +247,6 @@ class TestStatusPills:
         pill = table.table.cellWidget(0, 0)
         assert pill is not None
         assert pill.objectName() == OBJ_STATUS
-        # The item is still there, so sorting and export keep working.
         assert table.table.item(0, 0) is not None
 
     def test_the_pill_text_is_humanised(self, qapp):

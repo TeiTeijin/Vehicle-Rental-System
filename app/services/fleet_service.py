@@ -34,14 +34,10 @@ from app.utils.money import money
 #: Every value the column's enum accepts.
 VEHICLE_STATUSES = ("available", "reserved", "rented", "maintenance")
 
-#: Statuses a new rental may start from. `reserved` is absent on purpose: it is
-#: derived from bookings, never stored.
+#: Statuses a new rental may start from (`reserved` is never stored).
 RENTABLE_STATUSES = ("available",)
 
-#: Which statuses a vehicle may move to, keyed by where it is now. A vehicle in
-#: the workshop cannot jump straight to `rented` without coming out of it, and
-#: an available vehicle cannot be marked `rented` by hand -- that happens only
-#: on check-in.
+#: Legal status moves, keyed by the current status.
 LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
     "available": frozenset({"maintenance"}),
     "reserved": frozenset({"available", "maintenance"}),

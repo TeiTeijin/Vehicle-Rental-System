@@ -37,6 +37,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from tests.test_staff_pages import (  # noqa: E402,F401
+    as_admin,
     as_staff,
     branch,
     qapp,
@@ -48,22 +49,30 @@ from app.staff import icons, theme  # noqa: E402
 from app.staff.dashboard_charts import (  # noqa: E402
     ActivityHeatmap,
     ChannelCurves,
+    RevenueSparkline,
     SalesTargetChart,
     _monotone_path,
     _nice_ceiling,
 )
 from app.staff.metrics import (  # noqa: E402
+    ACTIVITY_SHARE,
     CARD_GUTTER,
     CARD_RADIUS,
+    CHANNELS_SHARE,
+    MEDIUM_CONTENT_W,
     REFERENCE_H,
     REFERENCE_W,
-    TWO_COL_W,
+    REVENUE_SHARE,
+    ROW1_H,
+    ROW2_H,
+    TARGET_SHARE,
+    TRANSACTIONS_SHARE,
+    WIDE_CONTENT_W,
 )
 from app.staff.pages.dashboard import DashboardPage, _pace, pesos  # noqa: E402
 
 
 #: Alias for the session-scoped app fixture imported from `test_staff_pages`.
-#: Two `QApplication`s in one process is a crash, so both files must share one.
 qt_app = qapp
 
 
@@ -92,6 +101,25 @@ def _laid_out(page, width: int = REFERENCE_W, height: int = REFERENCE_H):
     return page
 
 
+def _rows_of(page) -> list[list]:
+    """The laid-out cards, grouped into the grid's rows.
+
+    Grouped by y rather than by index, so a test can assert about "the cards in
+    the second row" without knowing how the shape placed them. Cards in the same
+    row share a y and a height; sorting on x then gives reading order.
+    """
+    cards = sorted(page.grid.cards, key=lambda c: (c.y(), c.x()))
+    rows: list[list] = []
+    for card in cards:
+        if rows and abs(card.y() - rows[-1][0].y()) <= 1:
+            rows[-1].append(card)
+        else:
+            rows.append([card])
+    for row in rows:
+        row.sort(key=lambda c: c.x())
+    return rows
+
+
 def _count(image: QImage, colour: str, tolerance: int = 26) -> int:
     """Pixels near `colour`. The only way to know a QPainter chart drew."""
     target = QColor(colour)
@@ -106,6 +134,29 @@ def _count(image: QImage, colour: str, tolerance: int = 26) -> int:
             ):
                 total += 1
     return total
+
+
+def _pixel_positions(
+    image: QImage, colour: str, tolerance: int = 26
+) -> list[tuple[int, int]]:
+    """Where the pixels near `colour` are, for tests about *where* a chart drew.
+
+    A count proves a colour is on the canvas; it cannot prove the line sank on
+    the day the week sank, or that the dot landed on the last day. The
+    coordinates can.
+    """
+    target = QColor(colour)
+    hits: list[tuple[int, int]] = []
+    for y in range(image.height()):
+        for x in range(image.width()):
+            pixel = image.pixelColor(x, y)
+            if (
+                abs(pixel.red() - target.red()) <= tolerance
+                and abs(pixel.green() - target.green()) <= tolerance
+                and abs(pixel.blue() - target.blue()) <= tolerance
+            ):
+                hits.append((x, y))
+    return hits
 
 
 # --------------------------------------------------------------------------
@@ -132,62 +183,151 @@ class TestCardGeometry:
 
         for i, a in enumerate(cards):
             for j, b in enumerate(cards[i + 1 :], start=i + 1):
-                # `intersects` counts shared edges, so shrink one by a pixel to
-                # test for a real overlap rather than two flush cards.
+                # `intersects` counts shared edges, so one card is shrunk.
                 assert not a.geometry().adjusted(0, 0, -1, -1).intersects(
                     b.geometry()
                 ), f"cards {i} and {j} overlap: {a.geometry()} vs {b.geometry()}"
 
-    def test_the_cards_share_their_column_edges(self, shell, branch):
-        """Row one must start on the same x as row two.
+    def test_the_reference_width_gives_the_briefs_two_rows(self, shell, branch):
+        """2 cards then 3, which is the layout in `dashboard_staff.txt`."""
+        page = _laid_out(DashboardPage(shell, animate=False))
+        page.refresh()
+        _laid_out(page)
 
-        Without this, a card with a longer minimum width pushes its whole column
-        out of alignment, which is the exact thing the fixed gutter is for.
+        assert page.grid.shape == "wide", page.grid.shape
+        rows = _rows_of(page)
+        assert [len(row) for row in rows] == [2, 3], [
+            len(row) for row in rows
+        ]
+
+    def test_both_rows_start_on_the_same_x(self, shell, branch):
+        """Row one and row two must share a leading edge.
+
+        They are separate `QHBoxLayout`s now -- the brief's rows have different
+        column counts, so they cannot be rows of one grid -- which means nothing
+        forces them to line up. This is the assertion that keeps the grid from
+        drifting into two ragged blocks.
         """
         page = _laid_out(DashboardPage(shell, animate=False))
         page.refresh()
         _laid_out(page)
 
-        cards = page.grid._cards
-        assert len(cards) == 5
-        # Three columns at the reference width, so cards 0/1/2 are row one.
-        lefts_row_one = sorted(cards[i].x() for i in range(3))
-        lefts_row_two = sorted(cards[i].x() for i in (3, 4))
-        assert lefts_row_two[0] == lefts_row_one[0], (
-            f"row two starts at {lefts_row_two[0]}, row one at {lefts_row_one[0]}"
-        )
-        assert lefts_row_two[1] == lefts_row_one[1], (
-            f"column two drifts: {lefts_row_two[1]} vs {lefts_row_one[1]}"
+        rows = _rows_of(page)
+        assert rows[0][0].x() == rows[1][0].x(), (
+            f"row one starts at {rows[0][0].x()}, row two at {rows[1][0].x()}"
         )
 
-    def test_the_gutter_holds_between_columns(self, shell, branch):
+    def test_both_rows_fill_the_grid_width(self, shell, branch):
+        """Neither row may leave a gap at the right edge.
+
+        A stretched card that stops short is a card that has been given a share
+        it did not use, which reads as a layout that did not finish.
+        """
         page = _laid_out(DashboardPage(shell, animate=False))
         page.refresh()
         _laid_out(page)
 
-        cards = page.grid._cards
-        gap = cards[1].x() - (cards[0].x() + cards[0].width())
-        assert gap == CARD_GUTTER, f"gutter is {gap}px, expected {CARD_GUTTER}"
+        width = page.grid.width()
+        for row in _rows_of(page):
+            rightmost = row[-1].x() + row[-1].width()
+            assert rightmost == width, (
+                f"a row ends at {rightmost}, the grid is {width} wide"
+            )
 
-    def test_the_cards_fill_the_grid_width(self, shell, branch):
-        """Three columns across the page, so no card is stranded at the left."""
+    def test_row_one_is_a_35_65_split(self, shell, branch):
         page = _laid_out(DashboardPage(shell, animate=False))
         page.refresh()
         _laid_out(page)
 
-        cards = page.grid._cards
-        rightmost = cards[2].x() + cards[2].width()
-        assert rightmost == page.grid.width(), (
-            f"the row ends at {rightmost}, the grid is {page.grid.width()} wide"
+        row = _rows_of(page)[0]
+        assert len(row) == 2
+        total = row[0].width() + row[1].width() + CARD_GUTTER
+        share = row[0].width() / total * 100
+        assert abs(share - REVENUE_SHARE) < 1.5, (
+            f"revenue card is {share:.1f}% of row one, expected "
+            f"{REVENUE_SHARE}/{CHANNELS_SHARE}"
         )
 
-    def test_every_card_in_a_row_is_the_same_width(self, shell, branch):
-        """A row of cards that are not all the same width looks broken.
+    def test_row_two_is_a_30_38_32_split(self, shell, branch):
+        """The three cards of row two, in the brief's order.
+
+        The order matters as much as the shares: activity, transactions, target
+        left to right, so the target card is the one that lines up with the right
+        edge of the channels card above it.
+        """
+        page = _laid_out(DashboardPage(shell, animate=False))
+        page.refresh()
+        _laid_out(page)
+
+        row = _rows_of(page)[1]
+        assert len(row) == 3
+        total = sum(card.width() for card in row) + CARD_GUTTER * 2
+        for card, expected in zip(
+            row, (ACTIVITY_SHARE, TRANSACTIONS_SHARE, TARGET_SHARE)
+        ):
+            share = card.width() / total * 100
+            assert abs(share - expected) < 1.5, (
+                f"a row-two card is {share:.1f}%, expected {expected}"
+            )
+
+    def test_the_gutter_holds_between_cards(self, shell, branch):
+        page = _laid_out(DashboardPage(shell, animate=False))
+        page.refresh()
+        _laid_out(page)
+
+        for row in _rows_of(page):
+            for left, right in zip(row, row[1:]):
+                gap = right.x() - (left.x() + left.width())
+                assert gap == CARD_GUTTER, (
+                    f"gutter is {gap}px, expected {CARD_GUTTER}"
+                )
+
+    def test_the_gutter_holds_between_rows(self, shell, branch):
+        page = _laid_out(DashboardPage(shell, animate=False))
+        page.refresh()
+        _laid_out(page)
+
+        rows = _rows_of(page)
+        gap = rows[1][0].y() - (rows[0][0].y() + rows[0][0].height())
+        assert gap == CARD_GUTTER, f"row gutter is {gap}px, expected {CARD_GUTTER}"
+
+    def test_row_heights_meet_the_briefs_minimums(self, shell, branch):
+        """230 for row one, 300 for row two -- as minimums, not fixed heights.
+
+        A fixed height would leave a band of empty page under a tall window,
+        which is the thing the "minimums, not heights" comment in `metrics`
+        exists to prevent.
+        """
+        page = _laid_out(DashboardPage(shell, animate=False))
+        page.refresh()
+        _laid_out(page)
+
+        rows = _rows_of(page)
+        assert rows[0][0].height() >= ROW1_H, rows[0][0].height()
+        assert rows[1][0].height() >= ROW2_H, rows[1][0].height()
+
+    def test_a_taller_window_makes_the_rows_taller(self, shell, branch):
+        """The growth is what makes "minimums" the right word for them."""
+        page = _laid_out(DashboardPage(shell, animate=False))
+        page.refresh()
+        _laid_out(page)
+        short = _rows_of(page)[0][0].height()
+
+        _laid_out(page, REFERENCE_W, REFERENCE_H + 200)
+        taller = _rows_of(page)[0][0].height()
+        assert taller > short, f"{taller} is not taller than {short}"
+
+    def test_big_figures_do_not_break_the_rows_shares(self, shell, branch):
+        """A long figure must not widen the card holding it past its share.
 
         This one needs figures with digits in them. A card's minimum width comes
         from its children, so a peso figure of eight or nine characters claims
         more room than its neighbours -- the test branch's small numbers hide
         it, and the real demo data does not.
+
+        The rows are no longer equal-width columns, so "every card the same width"
+        is the wrong assertion now. What must hold is that each card keeps the
+        proportion the brief gave it.
         """
         from app.services.dashboard_service import (
             DashboardFigures,
@@ -238,39 +378,78 @@ class TestCardGeometry:
         )
         _laid_out(page)
 
-        widths = {card.width() for card in page.grid._cards}
-        assert len(widths) == 1, f"cards are {sorted(widths)} wide, not one width"
+        for row, expected in zip(
+            _rows_of(page),
+            (
+                (REVENUE_SHARE, CHANNELS_SHARE),
+                (ACTIVITY_SHARE, TRANSACTIONS_SHARE, TARGET_SHARE),
+            ),
+        ):
+            total = sum(card.width() for card in row) + CARD_GUTTER * (
+                len(row) - 1
+            )
+            for card, share in zip(row, expected):
+                actual = card.width() / total * 100
+                assert abs(actual - share) < 1.5, (
+                    f"a card is {actual:.1f}% of its row, expected {share}% -- "
+                    "a long figure has widened it"
+                )
 
-    def test_the_cards_stay_equal_width_in_two_columns(self, shell, branch):
-        """The other reflow, where two cards share the row instead of three."""
-        page = _laid_out(DashboardPage(shell, animate=False))
+    def test_the_grid_picks_its_shape_from_content_width(self, shell, branch):
+        """The breakpoints are grid widths, not window widths.
+
+        The sidebar takes a fixed 210 and the page margins 52, so a 1146px grid
+        is a 1440px window. A test that passed window widths would pass at widths
+        where the cards are still wide enough for the brief's layout.
+        """
+        grid = DashboardPage(shell, animate=False).grid
+        assert grid.shape_for_width(WIDE_CONTENT_W) == "wide"
+        assert grid.shape_for_width(WIDE_CONTENT_W - 1) == "medium"
+        assert grid.shape_for_width(MEDIUM_CONTENT_W) == "medium"
+        assert grid.shape_for_width(MEDIUM_CONTENT_W - 1) == "narrow"
+
+    def test_medium_gives_the_target_a_row_of_its_own(self, shell, branch):
+        """2 + 2 + 1. The sales curve needs the width more than the other three."""
+        page = DashboardPage(shell, animate=False)
+        page.grid.reflow_to(MEDIUM_CONTENT_W)
         page.refresh()
         _laid_out(page, 1000, REFERENCE_H)
 
-        assert page.grid._columns == 2, page.grid._columns
-        cards = page.grid._cards
-        assert cards[0].width() == cards[2].width(), (
-            f"{cards[0].width()} vs {cards[2].width()}"
-        )
-        assert cards[2].width() == cards[3].width(), (
-            f"{cards[2].width()} vs {cards[3].width()}"
-        )
+        rows = _rows_of(page)
+        assert [len(row) for row in rows] == [2, 2, 1], [len(row) for row in rows]
+        assert rows[2][0] is page.target_card
+        assert rows[2][0].width() == page.grid.width()
 
-    def test_the_grid_reflows_to_two_columns_when_narrow(self, shell, branch):
+    def test_narrow_stacks_all_five(self, shell, branch):
         page = DashboardPage(shell, animate=False)
-        page.resize(REFERENCE_W, REFERENCE_H)
+        page.grid.reflow_to(MEDIUM_CONTENT_W - 1)
         page.refresh()
-        page.layout().activate()
-        assert page.grid._columns == 3
+        _laid_out(page, 800, REFERENCE_H)
 
-        page.grid.reflow_to(1000)
-        assert page.grid._columns == 2
+        rows = _rows_of(page)
+        assert [len(row) for row in rows] == [1, 1, 1, 1, 1], [
+            len(row) for row in rows
+        ]
+        assert [row[0] for row in rows] == page.grid.cards
 
-        page.grid.reflow_to(800)
-        assert page.grid._columns == 1
+    def test_no_shape_overlaps_its_cards(self, shell, branch):
+        """Overlap is the failure that matters, so it is checked at every width.
 
-        page.grid.reflow_to(REFERENCE_W)
-        assert page.grid._columns == 3
+        Each shape is a different set of layouts, and the bugs are per-shape: a
+        row that does not fit its cards only shows up at the width where it does
+        not fit.
+        """
+        for width in (REFERENCE_W, 1100, 1000, 800, 640):
+            page = DashboardPage(shell, animate=False)
+            page.refresh()
+            _laid_out(page, width, REFERENCE_H)
+            cards = page.grid.cards
+            for i, a in enumerate(cards):
+                for b in cards[i + 1 :]:
+                    assert not a.geometry().adjusted(0, 0, -1, -1).intersects(
+                        b.geometry()
+                    ), f"overlap at width {width}: {a.geometry()} vs {b.geometry()}"
+            page.deleteLater()
 
     def test_a_resized_page_reflows_its_grid_on_its_own(self, shell, branch):
         """`reflow_to` is the test hook; `resizeEvent` is the real path.
@@ -282,30 +461,87 @@ class TestCardGeometry:
         page = _laid_out(DashboardPage(shell, animate=False))
         page.refresh()
         _laid_out(page)
-        assert page.grid._columns == 3
+        assert page.grid.shape == "wide"
 
         page.resize(1000, REFERENCE_H)
         QApplication.processEvents()
         QApplication.processEvents()
-        assert page.grid.width() < TWO_COL_W, (
+        assert page.grid.width() < WIDE_CONTENT_W, (
             f"the grid is {page.grid.width()} wide; the page never got narrow"
         )
-        assert page.grid._columns == 2, (
-            f"resizeEvent left the grid at {page.grid._columns} columns"
+        assert page.grid.shape == "medium", (
+            f"resizeEvent left the grid {page.grid.shape}"
         )
 
         page.resize(800, REFERENCE_H)
         QApplication.processEvents()
         QApplication.processEvents()
-        assert page.grid._columns == 1, (
-            f"resizeEvent left the grid at {page.grid._columns} columns"
+        assert page.grid.shape == "narrow", (
+            f"resizeEvent left the grid {page.grid.shape}"
         )
 
-        # And back out again, because a one-way reflow is still a broken reflow.
         page.resize(REFERENCE_W, REFERENCE_H)
         QApplication.processEvents()
         QApplication.processEvents()
-        assert page.grid._columns == 3
+        assert page.grid.shape == "wide"
+
+
+class TestCardColours:
+    """The dashboard's cards all share one palette.
+
+    The brief mixed dark and light cards, but the working design settled on
+    light cards across the grid -- so Order Activity and Recent Transactions must
+    match Total Revenue, Rental Channels and Sales Target rather than sit dark
+    between them.
+    """
+
+    def test_every_card_is_light(self, shell, branch):
+        page = DashboardPage(shell, animate=False)
+        page.refresh()
+        assert page.revenue_card.dark is False
+        assert page.channels_card.dark is False
+        assert page.activity_card.dark is False
+        assert page.transactions_card.dark is False
+        assert page.target_card.dark is False
+
+
+class TestLegendLayout:
+    """The `Less ■■■■■ More` run must not draw a word over the swatches.
+
+    The old code right-anchored the five swatches to the widget edge and then
+    placed "More" at a hardcoded offset inside that span, so the label sat on
+    top of the top shades. `_legend_positions` is the pure geometry behind the
+    fix, tested here without a painter.
+    """
+
+    def test_the_words_sit_on_either_side_of_the_swatches(self):
+        from app.staff.dashboard_charts import _legend_positions
+
+        box, gap, label_gap = 14.0, 4.0, 8.0
+        less_w, more_w = 24.0, 30.0
+        less_x, swatch_xs, more_x = _legend_positions(
+            320.0, less_w, more_w, box=box, gap=gap, label_gap=label_gap
+        )
+
+        assert len(swatch_xs) == 5
+        assert swatch_xs == sorted(swatch_xs)
+        assert swatch_xs[0] == pytest.approx(less_x + less_w + label_gap)
+        assert more_x == pytest.approx(swatch_xs[-1] + box + label_gap)
+        assert less_x + less_w <= swatch_xs[0]
+        assert swatch_xs[-1] + box <= more_x
+
+    def test_the_whole_run_is_anchored_to_the_right_edge(self):
+        from app.staff.dashboard_charts import _legend_positions
+
+        less_w, more_w = 24.0, 30.0
+        _less_x, _swatches, more_x = _legend_positions(320.0, less_w, more_w)
+        assert more_x + more_w == pytest.approx(320.0)
+
+    def test_a_narrow_legend_is_clamped_rather_than_going_negative(self):
+        from app.staff.dashboard_charts import _legend_positions
+
+        less_x, _swatches, _more_x = _legend_positions(40.0, 24.0, 30.0)
+        assert less_x == 0.0
 
 
 class TestStylesheetAgreesWithMetrics:
@@ -322,16 +558,37 @@ class TestStylesheetAgreesWithMetrics:
             "cards will not match the design"
         )
 
-    def test_the_gutter_appears_in_the_stylesheet_or_the_layout(self):
+    def test_the_revenue_pill_radius_is_eight(self):
+        """The day picker reads as a pill, and the corner is a design choice.
+
+        A QSS radius cannot be read back at runtime, so the block is pulled from
+        the sheet and asserted directly. Checking the whole sheet would pass on
+        any of the other 8px radii around it; this pins the picker itself.
+        """
+        css = theme.load_stylesheet()
+        block = css.split("QComboBox#revenuePeriod")[1].split("}")[0]
+        assert "border-radius: 8px" in block, block
+
+    def test_the_gutter_appears_in_the_stylesheet_or_the_layout(self, qt_app):
         """Either the QSS or the layout owns the gap, never neither.
 
         The gap is a layout concern here, so this is really a guard that it did
         not move into the stylesheet and get out of sync with metrics.py.
+
+        Both levels are checked: the gap between rows belongs to the vertical
+        layout, and the gap between cards inside a row to each row layout, so
+        setting one and forgetting the other leaves a grid with a seam down the
+        middle of it.
+
+        Takes `qt_app` because a `QWidget` constructed with no `QApplication`
+        alive is a hard Qt abort, not a Python exception.
         """
         from app.staff.pages.dashboard import _CardGrid
 
         grid = _CardGrid()
-        assert grid._grid.spacing() == CARD_GUTTER
+        assert grid._rows.spacing() == CARD_GUTTER
+        for index, layout in enumerate(grid._row_layouts):
+            assert layout.spacing() == CARD_GUTTER, f"row {index} lost the gutter"
 
 
 # --------------------------------------------------------------------------
@@ -340,36 +597,81 @@ class TestStylesheetAgreesWithMetrics:
 
 
 class TestFiguresMatchTheService:
-    def test_the_revenue_card_shows_todays_takings(self, shell, branch):
+    def test_the_revenue_card_shows_the_year_to_date_total(self, shell, branch):
         from app.services import dashboard_service
 
         page = DashboardPage(shell, animate=False)
         page.refresh()
 
         with page.context.reading() as session:
-            expected = dashboard_service.revenue_on(session, date.today())
-        assert page.revenue_value.text() == pesos(expected)
+            months = dashboard_service.month_sales(session, date.today().year)
+            collected_today = dashboard_service.revenue_on(session, date.today())
+        ytd = sum((m.total for m in months), Decimal("0.00"))
+        assert page.revenue_value.text() == pesos(ytd)
+        assert pesos(collected_today) in page.revenue_collections.text()
 
-    def test_the_channel_totals_add_up_to_the_orders_counted(self, shell, branch):
+    def test_the_revenue_picker_shows_each_days_takings(self, shell, branch):
+        """Picking a day swaps the collections line to that day's takings.
+
+        The hero is the year-to-date total and does not move with the picker;
+        the day the picker selects must re-read the same day the service would
+        report, not a stale total.
+        """
+        from app.services import dashboard_service
+
         page = DashboardPage(shell, animate=False)
         page.refresh()
 
-        shown = sum(
-            int(label.text().replace(",", ""))
-            for label, _pill in page.channel_tiles.values()
-        )
-        series_total = sum(count for _label, count, _c in page.channels_curves.series)
-        assert shown == series_total, (
-            f"the tiles say {shown}, the curves say {series_total}; "
-            "one of them is lying"
-        )
+        combo = page.revenue_period
+        assert combo.count() >= 2, "the picker offers no earlier days"
+        assert combo.itemText(0) == "Today's Revenue"
+
+        day = combo.itemData(1)
+        combo.setCurrentIndex(1)
+        QApplication.processEvents()
+
+        with page.context.reading() as session:
+            expected = dashboard_service.revenue_on(session, day)
+        assert pesos(expected) in page.revenue_collections.text()
+
+    def test_the_sparkline_shows_the_last_seven_days(self, shell, branch):
+        """The sparkline is fixed to the week ending today, regardless of the
+        day the picker drills into: it is the context *behind today*, so it must
+        not follow the selection."""
+        from app.services import dashboard_service
+
+        page = DashboardPage(shell, animate=False)
+        page.refresh()
+
+        with page.context.reading() as session:
+            figures = dashboard_service.collect(session)
+        week = sorted(figures.revenue_days)[-7:]
+        assert page.revenue_sparkline.points == [
+            float(figures.revenue_days[day]) for day in week
+        ]
+        assert len(page.revenue_sparkline.points) == 7
+
+    def test_the_channel_series_carry_the_real_totals(self, shell, branch):
+        """The chart is the only place the figures live, so it is checked
+        against a fresh read of the same window rather than against a tile."""
+        page = DashboardPage(shell, animate=False)
+        page.refresh()
+
+        with page.context.reading() as session:
+            expected = dashboard_service.collect(session).channels
+
+        series = page.channels_curves.series
+        assert [count for _label, count, _colour in series] == [
+            expected.get(name) for name in ("walk_in", "online")
+        ], f"the curve says {series}, the service says {expected.as_rows()}"
 
     def test_the_channel_labels_are_the_theme_labels(self, shell, branch):
         """Not `.title()`. 'gcash'.title() is 'Gcash' and 'walk_in' is 'Walk_In'."""
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        for key, (_label, pill) in page.channel_tiles.items():
-            assert pill.text() == theme.CHANNEL_LABELS[key]
+        assert [label for label, _count, _colour in page.channels_curves.series] == [
+            theme.CHANNEL_LABELS[name] for name in ("walk_in", "online")
+        ]
 
     def test_the_activity_caption_sums_the_grid(self, shell, branch):
         page = DashboardPage(shell, animate=False)
@@ -388,6 +690,10 @@ class TestFiguresMatchTheService:
 
         expected = float(ytd / theme.SALES_TARGET * 100)
         assert f"{expected:.0f}%" in page.target_pill.text()
+
+    def test_the_target_pill_is_a_rounded_rect_not_a_stadium(self, shell, branch):
+        page = DashboardPage(shell, animate=False)
+        assert page.target_pill._radius == 8
 
     def test_a_refund_renders_negative_though_the_column_is_positive(
         self, shell, branch, monkeypatch
@@ -437,9 +743,8 @@ class TestFiguresMatchTheService:
         assert layout_item_count() == baseline, (
             f"the list grew from {baseline} to {layout_item_count()} items"
         )
-        # One row per payment plus the trailing spacer, and it must stay that way.
         assert rows_each_pass >= 1, "the fixture branch has no payments to list"
-        assert layout_item_count() == rows_each_pass + 1, layout_item_count()
+        assert layout_item_count() == 4 * rows_each_pass + 1, layout_item_count()
         assert len(page._transaction_rows) == rows_each_pass
 
     def test_the_list_does_not_creep_up_the_card(self, shell, branch):
@@ -457,6 +762,97 @@ class TestFiguresMatchTheService:
             f"the first row moved from y={first_top} to "
             f"y={page._transaction_rows[0].y()}"
         )
+
+
+class _Payment:
+    """The fields `_transaction_row` reads, without a database row."""
+
+    def __init__(self, customer, method, channel, amount, refunded=False):
+        self.customer = customer
+        self.method = method
+        self.channel = channel
+        self.amount = Decimal(amount)
+        self.refunded = refunded
+
+
+class TestTransactionRows:
+    """The Recent Transactions row: a chip per channel and four lined columns."""
+
+    def _fill_two(self, page):
+        page._clear_transactions()
+        page._transaction_row(
+            _Payment("Ana Dela Cruz", "gcash", "online", "1250.00"), 0
+        )
+        page._transaction_row(
+            _Payment("Marco Reyes", "cash", "walk_in", "480.00"), 1
+        )
+
+    def test_the_channel_pill_is_a_rounded_rect_not_a_stadium(
+        self, shell, branch
+    ):
+        from app.staff.cards import Pill
+
+        page = DashboardPage(shell, animate=False)
+        self._fill_two(page)
+        pill = page.transactions_list.itemAtPosition(0, 2).widget()
+        assert isinstance(pill, Pill)
+        assert pill._radius == 8, "the channel pill is the stadium default"
+
+    def test_walk_in_and_online_take_different_marks(self, shell, branch):
+        from app.staff import theme
+
+        page = DashboardPage(shell, animate=False)
+        self._fill_two(page)
+        online = page.transactions_list.itemAtPosition(0, 2).widget()
+        walk_in = page.transactions_list.itemAtPosition(1, 2).widget()
+        assert online._border_colour == theme.CHANNEL_DOT_COLOURS["online"]
+        assert walk_in._border_colour == theme.CHANNEL_DOT_COLOURS["walk_in"]
+        assert online._dot_colour != walk_in._dot_colour
+        assert online._border_colour == online._dot_colour
+        assert walk_in._border_colour == walk_in._dot_colour
+
+    def test_the_four_columns_line_up_across_rows(self, shell, branch):
+        page = _laid_out(DashboardPage(shell, animate=False))
+        self._fill_two(page)
+        page.transactions_list.activate()
+        QApplication.processEvents()
+        cells = [
+            [
+                page.transactions_list.itemAtPosition(row, column).widget()
+                for column in range(4)
+            ]
+            for row in (0, 1)
+        ]
+        name0, method0, channel0, amount0 = cells[0]
+        _name1, method1, channel1, amount1 = cells[1]
+        assert method0.x() == method1.x()
+        assert channel0.x() == channel1.x()
+        assert amount0.x() == amount1.x()
+        assert name0.x() < method0.x() < channel0.x() < amount0.x()
+
+    def test_the_method_keeps_its_full_label(self, shell, branch):
+        page = DashboardPage(shell, animate=False)
+        page._clear_transactions()
+        page._transaction_row(
+            _Payment("Ana Dela Cruz", "card", "online", "1250.00"), 0
+        )
+        method = page.transactions_list.itemAtPosition(0, 1).widget()
+        assert method.text() == "Credit/Debit Card"
+
+    def test_both_channel_marks_reach_the_pixels(self, shell, branch):
+        """The dot and hairline are painted colour, not just set on a widget."""
+        from app.staff import theme
+
+        page = DashboardPage(shell, animate=False)
+        self._fill_two(page)
+        image = _render(page.transactions_card, 420, 320)
+        assert _count(image, theme.CHANNEL_DOT_COLOURS["online"]) > 0, (
+            "the online coffee mark was never drawn"
+        )
+        assert _count(image, theme.CHANNEL_DOT_COLOURS["walk_in"]) > 0, (
+            "the walk-in caramel mark was never drawn"
+        )
+        assert _count(image, theme.SURFACE) > 0, "the chip lost its fill"
 
 
 class TestPace:
@@ -477,44 +873,62 @@ class TestPace:
 # --------------------------------------------------------------------------
 
 
-class TestRoleGates:
-    def test_staff_see_the_strip_and_not_the_cards(self, shell, branch):
-        as_staff(branch)
-        page = DashboardPage(shell, animate=False)
-        page.refresh()
-        page.show()
-        assert page.strip.isVisible() is True
-        assert page.grid.isVisible() is False
+class TestRoles:
+    """Everyone sees all five cards.
 
-    def test_an_admin_sees_everything(self, shell, branch):
+    This page used to hide the cards from staff and show only the operational
+    strip. The brief asks for one screen for everyone, and every figure on it is
+    an aggregate count rather than anything about a named customer, so there is
+    nothing here for a counter member to be kept out of.
+    """
+
+    def test_staff_see_all_five_cards(self, shell, branch):
+        as_staff(branch)
         page = DashboardPage(shell, animate=False)
         page.refresh()
         page.show()
         assert page.grid.isVisible() is True
-        assert page.strip.isVisible() is True
+        assert len(page.grid.cards) == 5
 
-    def test_a_staff_refresh_issues_none_of_the_card_queries(
-        self, shell, branch, monkeypatch
-    ):
-        """The point of the gate. Counted, not asserted by eye."""
-        as_staff(branch)
-        import app.staff.pages.dashboard as module
-
-        calls: list[str] = []
-        for name in ("month_sales", "orders_per_day", "recent_transactions"):
-            real = getattr(module.dashboard_service, name)
-
-            def spy(*args, _n=name, _r=real, **kwargs):
-                calls.append(_n)
-                return _r(*args, **kwargs)
-
-            monkeypatch.setattr(module.dashboard_service, name, spy)
-
+    def test_an_admin_sees_all_five_cards(self, shell, branch):
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        assert calls == [], f"a staff refresh ran {calls}"
+        page.show()
+        assert page.grid.isVisible() is True
+        assert len(page.grid.cards) == 5
 
-    def test_an_admin_refresh_runs_all_three(self, shell, branch, monkeypatch):
+    def test_both_roles_get_the_same_figures(self, shell, branch):
+        """Not just the same widgets -- the same numbers.
+
+        The failure this guards against is a gate that hides the cards but keeps
+        skipping their queries, so a staff member sees five cards of zeroes and
+        nobody can say why.
+        """
+        as_staff(branch)
+        staff_page = DashboardPage(shell, animate=False)
+        staff_page.refresh()
+        staff_revenue = staff_page.revenue_value.text()
+
+        as_admin(branch)
+        admin_page = DashboardPage(shell, animate=False)
+        admin_page.refresh()
+
+        assert admin_page.revenue_value.text() == staff_revenue, (
+            f"staff see {staff_revenue}, admins see {admin_page.revenue_value.text()}"
+        )
+
+    def test_the_strip_is_gone(self, shell, branch):
+        """Five more figures competing with the hero number is what it was.
+
+        Its operational questions moved to the Today page, which is where a
+        member of staff at the counter looks for them.
+        """
+        page = DashboardPage(shell, animate=False)
+        assert not hasattr(page, "strip")
+        assert not hasattr(page, "_strip_tiles")
+
+    def test_a_refresh_runs_every_card_query(self, shell, branch, monkeypatch):
+        """Counted, not asserted by eye -- this is the gate that used to exist."""
         import app.staff.pages.dashboard as module
 
         calls: list[str] = []
@@ -539,18 +953,42 @@ class TestRoleGates:
 
 class TestChartsPaint:
     def test_the_channel_curves_draw_both_colours(self, qt_app):
-        widget = ChannelCurves()
-        widget.set_series(
+        """Both curves are on the canvas.
+
+        Asserted as a *difference* against a tan-only control rather than as a
+        pixel count. The strokes are gradients that ramp up to full saturation at
+        the end dot, so the number of on-colour pixels depends on how light the
+        colour is: TAN sits close to the cream card and its blended pixels still
+        match within the tolerance, while BROWN only matches where the gradient
+        has nearly reached full alpha. A fixed "> 200 pixels" threshold passed
+        for one curve and failed for the other for that reason alone.
+
+        The control makes the question the one that matters: does drawing the
+        Online series put BROWN on the canvas that was not there before?
+        """
+        def rendered(series):
+            widget = ChannelCurves()
+            widget.set_series(series)
+            widget.progress = 1.0
+            return _render(widget, 560, 300)
+
+        both = rendered(
             [
                 ("Walk-in", 79, theme.TAN),
                 ("Online", 82, theme.BROWN),
             ]
         )
-        widget.progress = 1.0
-        image = _render(widget, 560, 300)
+        tan_only = rendered([("Walk-in", 79, theme.TAN)])
 
-        assert _count(image, theme.TAN) > 200, "no tan curve was drawn"
-        assert _count(image, theme.BROWN) > 200, "no brown curve was drawn"
+        assert _count(both, theme.TAN) > 200, "no tan curve was drawn"
+
+        brown_both = _count(both, theme.BROWN)
+        brown_without = _count(tan_only, theme.BROWN)
+        assert brown_both > 50, f"only {brown_both} brown pixels were drawn"
+        assert brown_both > brown_without * 2, (
+            f"brown went from {brown_without} to {brown_both} when the Online "
+            "series was added, which is not the shape of a second curve"
+        )
 
     def test_an_empty_channel_chart_paints_nothing_and_does_not_raise(self, qt_app):
         """A branch with no orders yet. The old code would divide by zero here."""
@@ -568,6 +1006,52 @@ class TestChartsPaint:
         image = _render(widget, 560, 300)
         assert _count(image, theme.TAN) > 200
 
+    def test_the_revenue_sparkline_draws_a_brown_line(self, qt_app):
+        """The week is a stroke, not a bar chart: it must leave a line behind."""
+        widget = RevenueSparkline()
+        widget.set_series(
+            [Decimal("100"), Decimal("480"), Decimal("120"), Decimal("500"),
+             Decimal("490"), Decimal("520"), Decimal("40")]
+        )
+        widget.progress = 1.0
+        image = _render(widget, 340, 72)
+        assert _count(image, theme.BROWN) > 80, "no sparkline was drawn"
+
+    def test_the_sparkline_sits_on_the_floor_when_the_scale_starts_at_zero(
+        self, qt_app
+    ):
+        """A week at 10% of its peak must dive, not hover mid-canvas.
+
+        The whole reason the card keeps a red "↓ 92.08%" honest is that the wash
+        behind it is scaled from zero: the quiet day lands near the floor, so the
+        percent and the picture agree. Scaling to the data's own range would
+        leave every wobble looking like a cliff.
+        """
+        def last_y(series):
+            widget = RevenueSparkline()
+            widget.set_series(series)
+            widget.progress = 1.0
+            image = _render(widget, 340, 80)
+            hits = _pixel_positions(image, theme.BROWN)
+            assert hits, "nothing was drawn"
+            right = [y for x, y in hits if x > image.width() - 8]
+            assert right, "the line never reached the last day"
+            return max(right)
+
+        flat = [Decimal("1000")] * 7
+        drop = [Decimal("1000")] * 6 + [Decimal("100")]
+        assert last_y(drop) > last_y(flat) + 20, (
+            "the quiet day did not sink relative to a flat week"
+        )
+
+    def test_an_empty_or_flat_sparkline_does_not_divide_by_zero(self, qt_app):
+        """No orders yet, and a week where every day is zero, both paint."""
+        for series in ([], [Decimal("0")] * 7):
+            widget = RevenueSparkline()
+            widget.set_series(series)
+            widget.progress = 1.0
+            assert not _render(widget, 340, 72).isNull()
+
     def test_the_heatmap_paints_one_shade_per_activity_level(self, qt_app):
         from datetime import date as d
 
@@ -578,7 +1062,6 @@ class TestChartsPaint:
         widget.progress = 1.0
         image = _render(widget, 420, 150)
 
-        # The ramp runs from SURFACE up to TAN, so both ends must be present.
         assert _count(image, theme.TAN) > 100, "no high-activity cells"
         assert _count(image, theme.SURFACE) > 100, "no empty cells"
 
@@ -719,6 +1202,28 @@ class TestChartsPaint:
         widget.progress = 1.0
         assert not _render(widget, 560, 220).isNull()
 
+    def test_no_month_is_highlighted_until_the_pointer_arrives(self, qt_app):
+        """At rest the card is the line and its dots; the chip is a hover."""
+        months = [
+            dashboard_service.MonthSales(
+                month=date(2026, m, 1), label=date(2026, m, 1).strftime("%b"),
+                total=Decimal("400000"),
+            )
+            for m in (1, 2, 3, 4, 5, 6)
+        ]
+        widget = SalesTargetChart()
+        widget.set_months(months, Decimal("6000000"), Decimal("2400000"))
+        widget.progress = 1.0
+
+        assert _count(_render(widget, 560, 220), theme.INK) == 0, (
+            "a month was highlighted with no pointer on the chart"
+        )
+
+        widget._hover_month = 2
+        assert _count(_render(widget, 560, 220), theme.INK) > 0, (
+            "the hover chip never drew"
+        )
+
 
 class TestMonotoneSpline:
     """The reason this is not a natural spline.
@@ -735,7 +1240,6 @@ class TestMonotoneSpline:
             QPointF(0, 100), QPointF(50, 80), QPointF(100, 60),
         ]
         path = _monotone_path(points)
-        # Sample the curve and confirm the y never increases.
         sampled = [
             path.pointAtPercent(i / 100).y() for i in range(101)
         ]
@@ -822,8 +1326,7 @@ class TestTabularFigures:
 
         hero = HeroNumber("₱1,234.00")
 
-        # `hero.font` is the *method* on a QWidget -- `font` is a Qt property,
-        # so PySide hands back the unbound callable rather than a QFont.
+        # `hero.font` is the method; PySide returns the callable, not a QFont.
         assert hero.font().isFeatureSet(QFont.Tag("tnum"))
 
     def test_the_hero_number_holds_a_constant_width_across_values(
@@ -841,6 +1344,39 @@ class TestTabularFigures:
             for text in ("₱1,111.11", "₱9,999.99", "₱0,000.00")
         }
         assert len(widths) == 1, f"widths differ: {widths}"
+
+
+class TestHeroNumberFit:
+    def test_a_long_value_shrinks_to_fit_its_card(self, qt_app):
+        """The revenue card gives the figure ~292px. A 64px value does not fit,
+        and a QLabel clips rather than wraps, so the figure must shrink instead
+        of silently losing its leading digits."""
+        from PySide6.QtGui import QFontMetrics
+
+        from app.staff.cards import HeroNumber
+        from app.staff.metrics import HERO_MIN_SIZE, HERO_SIZE
+
+        hero = HeroNumber("₱98,765,432.10")
+        hero.setFixedWidth(292)
+        hero.show()
+        qt_app.processEvents()
+        metrics = QFontMetrics(hero.font())
+        assert metrics.horizontalAdvance(hero.text()) <= hero.width()
+        assert HERO_MIN_SIZE <= hero.font().pixelSize() < HERO_SIZE
+        assert hero.text() == "₱98,765,432.10"
+
+    def test_an_absurd_value_elides_and_keeps_the_full_tooltip(self, qt_app):
+        from app.staff.cards import HeroNumber
+        from app.staff.metrics import HERO_MIN_SIZE
+
+        full = "₱" + "9" * 40 + ".00"
+        hero = HeroNumber(full)
+        hero.setFixedWidth(120)
+        hero.show()
+        qt_app.processEvents()
+        assert hero.font().pixelSize() == HERO_MIN_SIZE
+        assert hero.text().endswith("…")
+        assert hero.toolTip() == full
 
 
 # --------------------------------------------------------------------------
