@@ -1,23 +1,3 @@
-"""A table that distinguishes "no rows" from "the query failed".
-
-The failure this prevents is quiet and expensive. A ``SELECT`` that raises --
-dropped connection, missing column, a timeout -- leaves an empty model. If the
-screen just renders the model, the user sees a clean empty table and concludes
-there is no data, then makes a decision based on that. Six months later nobody
-remembers.
-
-So the three states are explicit and mutually exclusive, and only one of them
-is allowed to look empty:
-
-    loading   a skeleton block, because a blank panel reads as broken
-    failed    a red-bordered message and a Retry button that re-runs the loader
-    empty     a neutral message, only reachable when the loader actually
-              succeeded and returned nothing
-
-`load()` is the only entry point. It catches, it never lets an exception escape
-into a Qt slot, and it always lands in exactly one of those three states.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -53,13 +33,6 @@ class LoadState(Enum):
 
 @dataclass(frozen=True)
 class Column:
-    """One column, with the alignment its content implies.
-
-    Money and counts are right-aligned so digits line up and a total can be
-    read down the column. Left-aligning currency makes a list of amounts
-    genuinely hard to scan.
-    """
-
     title: str
     align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
     stretch: bool = False
@@ -71,12 +44,6 @@ ALIGN_CENTRE = Qt.AlignmentFlag.AlignCenter
 
 
 class StatusPill(QLabel):
-    """A small coloured label, used for status cells.
-
-    A stylesheet cannot select on cell *text*, so the colour has to be set per
-    instance from :func:`app.staff.theme.colour_for`.
-    """
-
     def __init__(self, text: str, status: str | None, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setObjectName(theme.OBJ_STATUS)
@@ -88,16 +55,6 @@ class StatusPill(QLabel):
 
 
 class LoadStateTable(QWidget):
-    """A table plus its loading / empty / failed states.
-
-    `loader` receives no arguments and returns a list of row tuples matching
-    `columns`. It runs on the calling thread: the queries behind these screens
-    are indexed single-table lookups, and the 30-second dashboard refresh runs
-    off the interaction path anyway. A query that genuinely needs a worker
-    thread should be the one place that grows a :class:`QThread`, not every
-    table in the app.
-    """
-
     def __init__(
         self,
         columns: Sequence[Column],
@@ -190,12 +147,6 @@ class LoadStateTable(QWidget):
     # -- loading ----------------------------------------------------------
 
     def load(self) -> LoadState:
-        """Run the loader and land in exactly one state.
-
-        Never raises. An exception escaping into a Qt slot prints a traceback
-        to stderr, which on Windows means a console nobody is watching, and
-        leaves the widget in whatever state it happened to be in.
-        """
         self.state = LoadState.LOADING
         self._sync_stack()
         try:
@@ -265,12 +216,6 @@ class LoadStateTable(QWidget):
         return self._table.rowCount()
 
     def cell_text(self, row: int, column: int) -> str:
-        """The text of a cell, whichever way it is rendered.
-
-        A status cell holds a pill widget *and* an empty item, so the widget
-        has to be checked first -- reading the item would return "" and any
-        caller comparing the text against a status would see nothing.
-        """
         widget = self._table.cellWidget(row, column)
         if isinstance(widget, QLabel):
             return widget.text()
@@ -282,23 +227,12 @@ class LoadStateTable(QWidget):
         self._placeholder.setText(message)
 
     def reload_or_report(self, parent: QWidget | None = None) -> LoadState:
-        """Retry, and if it still fails, say so out loud.
-
-        For actions where the user is waiting on a result -- "refresh" pressed
-        by hand, rather than the background timer -- a failed reload that only
-        updates a small red panel is easy to miss.
-        """
         state = self.retry()
         if state is LoadState.FAILED and parent is not None:
             blocking_error(parent, self.last_error, title="Still not loading")
         return state
 
     def paint_status_colours(self) -> None:
-        """Re-apply pill colours.
-
-        Only needed if rows are edited in place; a full reload rebuilds the
-        widgets anyway. Kept so the paint path is not accidentally lost.
-        """
         brush = QBrush(QColor(theme.TEXT))
         for row in range(self._table.rowCount()):
             for column in range(self._table.columnCount()):

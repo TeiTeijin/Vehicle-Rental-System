@@ -1,35 +1,3 @@
-"""The dashboard: the branch at a glance, as five cards.
-
-Replaces the older six-tile layout, which answered "where is everything" --
-useful for running a counter, and not what a manager opens the app to see. The
-new layout answers "how is the branch doing": what came in today, where the
-orders came from, when they were placed, what was just paid, and how the year
-is tracking.
-
-The brief's five cards, in its two rows. What changed from the previous
-dashboard is everything around them: the operational strip above the grid is
-gone, the cards are no longer admin-only, and the grid now reflows between three
-shapes instead of always being three equal columns.
-
-**Everyone sees all five cards.** This page used to hide them from staff and
-show them only to admins, on the grounds that branch performance is
-management's business. That was the wrong cut: every figure here is an
-aggregate count, none of them is about an individual customer, and the person
-answering the counter is the person who needs to know the branch took ₱16k
-today. A member of staff who cannot see the number asks a colleague.
-
-**The operational strip is gone, and its numbers moved to Today.** It held five
-more figures competing for attention with the hero number directly below them.
-Out / due back / overdue / free / owed are still answered -- they are the first
-thing the Today page shows.
-
-**Every figure comes from `app.services.dashboard_service`, in one call.** Two
-figures for the same thing that quietly differ is the specific failure a
-dashboard exists to prevent, and that happens when each card runs its own query
-and a refresh straddles midnight. One `collect()` per refresh, one `today`, and
-the cards cannot disagree.
-"""
-
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -88,29 +56,6 @@ from app.utils.money import ZERO
 
 
 class _CardGrid(QWidget):
-    """The five cards, in a grid that reflows as the window narrows.
-
-    **Three shapes, and the choice is made on content width, not window width.**
-    The window's width is not the grid's width: the sidebar takes a fixed 210
-    and the page margins take a fixed 52, so a 1146px grid is a 1440px window.
-    Testing against the window would mean every threshold drifting as the chrome
-    changed, and the reflow would fire at widths where the cards are still wide
-    enough for three columns.
-
-    * `WIDE` -- the brief's two rows. Row 1 is revenue at 35% beside channels at
-      65%; row 2 is activity, transactions and target at 30/38/32.
-    * `MEDIUM` -- two per row, with the sales target on a row of its own. A 30%
-      card at 760px of content is 228px, which cannot hold a peso axis label and a
-      month row at the same time.
-    * `NARROW` -- one column, all five. There is no fourth step: the window's
-      own `WINDOW_MIN_W` is the floor.
-
-    The reflow is on a `resizeEvent`, and the layout is rebuilt only when the
-    *shape* changes -- not on every resize frame, which would be a visible
-    stutter. Within a shape the cards are laid out by stretch factors, which Qt
-    recomputes for free.
-    """
-
     WIDE = "wide"
     MEDIUM = "medium"
     NARROW = "narrow"
@@ -140,8 +85,6 @@ class _CardGrid(QWidget):
         return layout
 
     def add(self, card: Card) -> None:
-        """Add `card`. Order is the brief's reading order, top-left to
-        bottom-right, and the shapes below index into this list."""
         self._cards.append(card)
         self._shape = None
         self._relayout()
@@ -151,7 +94,6 @@ class _CardGrid(QWidget):
         return list(self._cards)
 
     def shape_for_width(self, width: int) -> str:
-        """Which of the three shapes a grid `width` px across should take."""
         if width >= WIDE_CONTENT_W:
             return self.WIDE
         if width >= MEDIUM_CONTENT_W:
@@ -160,20 +102,9 @@ class _CardGrid(QWidget):
 
     @property
     def shape(self) -> str | None:
-        """The shape currently laid out, or None before the first one."""
         return self._shape
 
     def _rows_for(self, shape: str) -> list[list[tuple[int, int]]]:
-        """Rows of `(card index, column share)` for `shape`.
-
-        **Rows are separate `QHBoxLayout`s, not rows of one `QGridLayout`.**
-        That is the whole reason this is not a grid. A grid's column stretch is
-        per *column*, so the brief's two rows cannot both be satisfied: row 1
-        wants 35/65 across two columns and row 2 wants 30/38/32 across three, and
-        a single column 0 cannot be both 35% and 30% of the grid. Nested row
-        layouts give each row its own proportions, which is what the brief is
-        actually describing.
-        """
         if shape == self.WIDE:
             return [
                 # Row 1: 35 / 65.
@@ -192,30 +123,10 @@ class _CardGrid(QWidget):
         return [[(index, 100)] for index in range(len(self._cards))]
 
     def _empty(self, layout: QHBoxLayout) -> None:
-        """Strip `layout` back to empty, leaving the widgets owned by the grid.
-
-        The widgets are deliberately *not* reparented to `None` on the way out.
-        `takeAt` already removes the item from the layout, and the card stays a
-        child of this grid, so it is still alive and can be handed straight back
-        to another row below. Calling `setParent(None)` here instead hands Qt
-        ownership back to Python, and the resulting transient wrappers have been
-        collected in the middle of a later SQLAlchemy query, which faults the
-        whole interpreter. Nothing is freed either way -- the cards are held by
-        `_cards` for the grid's lifetime -- so the extra step bought nothing.
-        """
         while layout.count():
             layout.takeAt(0)
 
     def _relayout(self) -> None:
-        """Put each card in the row this shape gives it.
-
-        The row layouts themselves are created once in `__init__` and reused.
-        Rebuilding them would mean allocating and destroying a `QHBoxLayout` per
-        row on every reflow, and the destroyed wrappers are then freed by
-        Python's collector at whatever moment the allocator gets round to it --
-        which is inside a SQLAlchemy query, and which has crashed this suite
-        more than once.
-        """
         if not self._cards:
             return
         shape = self._shape_for_current_width()
@@ -247,11 +158,6 @@ class _CardGrid(QWidget):
         super().resizeEvent(event)
 
     def reflow_to(self, width: int) -> None:
-        """Lay out as though the grid were `width` px across.
-
-        For tests and for the screenshot script, which need a deterministic shape
-        without depending on when Qt happens to deliver a resize.
-        """
         shape = self.shape_for_width(width)
         if shape != self._shape:
             self._shape = shape
@@ -300,7 +206,6 @@ class DashboardPage(StaffPage):
         subtitle: str = "",
         buttons: tuple = (),
     ) -> QVBoxLayout:
-        """A card's title row. Returns the layout to add the body into."""
         body = QVBoxLayout()
         body.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
         body.setSpacing(14)
@@ -329,7 +234,6 @@ class DashboardPage(StaffPage):
         return body
 
     def _build_revenue_card(self) -> Card:
-        """Takings for one day, with a picker for the days before it."""
         card = Card(dark=False)
         # A minimum, not a fixed height: the row grows with the window.
         card.setMinimumHeight(ROW1_H)
@@ -388,8 +292,6 @@ class DashboardPage(StaffPage):
             self._show_revenue_day(day)
 
     def _show_revenue_day(self, day: date) -> None:
-        """Show `day`'s takings on the collections line, with its change against
-        the day before. The hero stays the year-to-date total."""
         self._revenue_day = day
         amount = self._revenue_days.get(day, ZERO)
         self.revenue_collections.setText(
@@ -404,7 +306,6 @@ class DashboardPage(StaffPage):
         )
 
     def _collections_label(self, day: date) -> str:
-        """A short day name, so the line stays clear at the narrowest width."""
         if day == self._today:
             return "Today"
         if day == self._today - timedelta(days=1):
@@ -415,7 +316,6 @@ class DashboardPage(StaffPage):
     def _change_pct(
         current: Decimal | None, previous: Decimal | None
     ) -> float | None:
-        """Day-over-day change, or None when there is nothing to compare to."""
         if not previous:
             return None
         return float(((current or ZERO) - previous) / previous * 100)
@@ -429,14 +329,6 @@ class DashboardPage(StaffPage):
         return day.strftime("%a, %b %d")
 
     def _build_channels_card(self) -> Card:
-        """The walk-in / online split, light.
-
-        The two figures are painted onto the chart as small overlay chips
-        rather than living in their own row above it: at the window's minimum
-        height a separate row of 28px numbers pushed the plot down to a handful
-        of pixels, and the chart is the part of this card that has to survive a
-        resize.
-        """
         card = Card(dark=False)
         card.setMinimumHeight(ROW1_H)
 
@@ -457,7 +349,6 @@ class DashboardPage(StaffPage):
         return card
 
     def _build_activity_card(self) -> Card:
-        """Orders per day, light, as a sixteen-week grid."""
         card = Card(dark=False)
         # Taller than row 1: each holds a chart or a list that needs the height.
         card.setMinimumHeight(ROW2_H)
@@ -477,7 +368,6 @@ class DashboardPage(StaffPage):
         return card
 
     def _build_transactions_card(self) -> Card:
-        """The five most recent payments, light like the cards beside it."""
         card = Card(dark=False)
         card.setMinimumHeight(ROW2_H)
 
@@ -513,7 +403,6 @@ class DashboardPage(StaffPage):
         return card
 
     def _build_target_card(self) -> Card:
-        """Year-to-date against the annual target, light."""
         card = Card(dark=False)
         card.setMinimumHeight(ROW2_H)
 
@@ -623,14 +512,6 @@ class DashboardPage(StaffPage):
         )
 
     def _clear_transactions(self) -> None:
-        """Empty the list's layout completely.
-
-        `removeWidget` on its own is not enough here: it takes the widget out of
-        the layout but leaves the layout item, so the cells of a row would pile
-        up row after row on every refresh. Draining through `takeAt` handles the
-        widgets and the trailing spacer (whose `widget()` is `None`) with one
-        loop and leaves nothing for the next refresh to accumulate on.
-        """
         while self.transactions_list.count():
             item = self.transactions_list.takeAt(0)
             widget = item.widget()
@@ -671,12 +552,6 @@ class DashboardPage(StaffPage):
         )
 
     def _transaction_row(self, entry, row: int) -> None:
-        """One payment: who, how, which channel, how much.
-
-        The four cells go into the shared grid at (row, column) rather than into
-        a layout of their own, so every row's method, channel and amount share a
-        column and line up down the card.
-        """
         name = ElidedLabel(
             entry.customer,
             colour=theme.TEXT,
@@ -742,12 +617,6 @@ class DashboardPage(StaffPage):
     # -- motion -----------------------------------------------------------
 
     def showEvent(self, event) -> None:  # noqa: N802
-        """Draw the charts in, once, the first time the page appears.
-
-        On the thirty-second refresh the curves are already at full progress:
-        re-drawing them every thirty seconds would make a live screen flicker
-        constantly, which is worse than no animation at all.
-        """
         super().showEvent(event)
         if self.animate and not self._animations_played:
             self._animations_played = True
@@ -760,12 +629,6 @@ class DashboardPage(StaffPage):
 
 
 def _pace(achieved: Decimal, target: Decimal, today: date) -> bool:
-    """Whether revenue is tracking at or above a straight-line pace.
-
-    Compares against the share of the year elapsed rather than against the full
-    target, so a branch in April is not told it is behind for having sold less
-    than a whole year. The last day is pulled back to include today.
-    """
     if not target:
         return False
     year_start = date(today.year, 1, 1)
@@ -775,13 +638,6 @@ def _pace(achieved: Decimal, target: Decimal, today: date) -> bool:
 
 
 def pesos(amount: Decimal | float, *, decimals: int = 2) -> str:
-    """Money as ₱1,234.50.
-
-    The staff app used to render `PHP ` because the old tile font did not
-    reliably carry the sign glyph; Inter does, so the dashboard uses the same
-    helper as the rest of the app and the two stop disagreeing about what a peso
-    looks like.
-    """
     return f"₱{amount:,.{decimals}f}"
 
 

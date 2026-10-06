@@ -1,13 +1,3 @@
-"""Colours and stylesheet for the staff application.
-
-The staff app is a *separate* window from the customer app, but it should look
-like it belongs to the same product, so it reuses the palette already in
-``app/ui/styles.qss`` and adds the three semantic colours the operations
-screens need. Those live here as constants rather than only in the QSS so that
-code which draws -- status pills, the hand-drawn dashboard charts, a coloured
-row -- can use the same values without re-parsing a stylesheet.
-"""
-
 from __future__ import annotations
 
 import os
@@ -185,6 +175,20 @@ OBJ_ROW_AMOUNT = "rowAmount"
 OBJ_LEGEND = "legendLabel"
 OBJ_SEARCH_FIELD = "searchField"
 
+# -- new rental --------------------------------------------------------------
+#: The filter popover on the New Rental page. Carries `class="card"`, so it is
+#: styled by the same dashboard card rule: 28px radius, 1px border, white.
+OBJ_FILTER_POPOVER = "filterPopover"
+#: The button in the pinned bar that opens the popover.
+OBJ_FILTER_BUTTON = "filterButton"
+#: One filter group: a heading and its checkboxes.
+OBJ_FILTER_GROUP = "filterGroup"
+OBJ_FILTER_GROUP_HEADING = "filterGroupHeading"
+OBJ_FILTER_CHECK = "filterCheck"
+OBJ_FILTER_SPIN = "filterSpin"
+OBJ_FILTER_COUNT = "filterCount"
+OBJ_FILTER_CLEAR = "filterClear"
+
 
 def _money_from_env(name: str, fallback: str) -> Decimal:
     try:
@@ -198,7 +202,6 @@ SALES_TARGET = _money_from_env("RENTWHEELS_SALES_TARGET", "6000000")
 
 
 def colour_for(status: str | None) -> QColor:
-    """The colour for a status string, never ``None``."""
     return QColor(STATUS_COLOURS.get((status or "").strip().lower(), MUTED))
 
 

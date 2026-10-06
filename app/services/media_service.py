@@ -31,15 +31,6 @@ def _fresh_rows(session, vehicle) -> list[Vehicle_Media]:
 
 
 def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
-    """Cache the photo URL, and optionally the 3D model payload.
-
-    `include_3d` defaults to False on purpose. Resolving the generation slug
-    and fetching the model payload costs 2 extra HTTP round trips per vehicle,
-    and the hero only ever reads the 2D photo. Nothing else in the project
-    reads `model_3d_url` yet, so the default keeps those calls off the startup
-    path. Flip it to True when the 3D viewer lands; the `model_3d_url` column
-    and the `model_3d` row are already in place for it.
-    """
     image_url = ci.get_signed_image_url(vehicle.make, vehicle.model, vehicle.year)
     model_url = None
     watermarked = True
@@ -107,6 +98,13 @@ def _cache_for_motorcycle(session, vehicle) -> None:
             cached_at=datetime.now(),
         )
     )
+
+
+def pick_photo_url(rows: list[Vehicle_Media]) -> str | None:
+    return next(
+        (r.image_url for r in rows if r.view_angle == "front34" and r.image_url),
+        None,
+    ) or next((r.image_url for r in rows if r.image_url), None)
 
 
 def get_or_fetch_media(session, vehicle, include_3d: bool = False) -> list[Vehicle_Media]:

@@ -594,3 +594,196 @@ QLabel#sectionLabel {
     background: transparent;
     letter-spacing: 0.2px;
 }
+
+/* VEHICLE CARDS (New Rental)
+   A vehicle card paints its own panel and shadow so the hover lift can move
+   them, so the frame and its shell stay unpainted. The blanket `QWidget` cream
+   at the top of this file would otherwise fill them. The button's radius is
+   VEHICLE_BTN_RADIUS; the test asserts the two agree. */
+QFrame#vehicleCard, #vehicleSlot, #vehicleCardSurface, #vehicleCardSkeleton,
+#brandRails, #brandSection, #vehicleRail, #vehicleRailViewport,
+#vehicleRailHost {
+    background: transparent;
+    border: none;
+}
+
+QPushButton#vehicleDetailsButton {
+    background: #FFFFFF;
+    border: 1px solid #FFFFFF;
+    border-radius: 8px;
+    color: #1A1A1A;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 14px;
+}
+
+QPushButton#vehicleDetailsButton:hover {
+    background: #EEEAE1;
+    border-color: #EEEAE1;
+}
+
+/* BRAND ROWS (New Rental)
+   The fleet is grouped by make: a heading over a side-scrolling rail. The rail
+   hides its vertical bar and shows a thin horizontal one, so a long brand is
+   scrolled sideways rather than wrapped. */
+QLabel#brandHeading {
+    color: #1A1A1A;
+    font-size: 20px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QScrollArea#vehicleRail QScrollBar:horizontal {
+    height: 6px;
+    background: transparent;
+    margin: 0;
+}
+
+QScrollArea#vehicleRail QScrollBar::handle:horizontal {
+    background: #D8CCBB;
+    border-radius: 3px;
+    min-width: 40px;
+}
+
+QScrollArea#vehicleRail QScrollBar::handle:horizontal:hover {
+    background: #B8A68A;
+}
+
+QScrollArea#vehicleRail QScrollBar::add-line:horizontal,
+QScrollArea#vehicleRail QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: transparent;
+}
+
+QScrollArea#vehicleRail QScrollBar::add-page:horizontal,
+QScrollArea#vehicleRail QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
+
+/* THE FILTER POPOVER (New Rental)
+   White, 28px radius, 1px border: `class="card"`, the dashboard card's recipe, so
+   the panel reads as a card lifted off the page rather than a native dropdown.
+   No tint anywhere inside it either -- the 1px rule between the two columns and
+   the ActiveRow ink bar are the only separators, because a filled second panel
+   would make a 520px box look like two unrelated boxes. */
+QFrame#filterPopover {
+    background: #FFFFFF;
+}
+
+QFrame#filterPopoverDivider {
+    background: #E4DCD0;
+    border: none;
+}
+
+/* The Filters button in the pinned bar. A quiet pill, not a primary action: it is
+   a way in to the filters, and the count beside it is the thing being read. */
+QPushButton#filterButton {
+    background: #EEEAE1;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1A1A1A;
+    padding: 0 14px;
+}
+QPushButton#filterButton:hover {
+    background: #F3EEE4;
+    border-color: #B8A68A;
+}
+
+QWidget#pagePinned QLineEdit#searchField {
+    border-top-left-radius: 20px;
+    border-bottom-left-radius: 0px;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+QWidget#pagePinned QPushButton#filterButton {
+    border-top-left-radius: 0px;
+    border-bottom-left-radius: 0px;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+}
+
+QWidget#pagePinned QPushButton#filterClear {
+    border-top-left-radius: 0px;
+    border-bottom-left-radius: 0px;
+    border-top-right-radius: 20px;
+    border-bottom-right-radius: 0px;
+}
+
+/* The group headings use the same small-caps treatment as the dashboard's column
+   labels, so the popover reads as part of the staff app rather than a foreign
+   widget. */
+QLabel#filterGroupHeading {
+    color: #8A8175;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    background: transparent;
+}
+
+QWidget#filterPane, QWidget#filterPaneHost, QWidget#filterCategoryHost,
+QWidget#filterGroup, QWidget#filterPaneScroll, QWidget#filterCategoryScroll,
+QWidget#filterPanes, QWidget#pagePinned {
+    background: transparent;
+    border: none;
+}
+
+QLabel#filterCount {
+    color: #8A8175;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QPushButton#filterClear {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1A1A1A;
+    padding: 0 12px;
+}
+QPushButton#filterClear:hover:enabled {
+    background: #F3EEE4;
+    border-color: #B8A68A;
+}
+QPushButton#filterClear:disabled {
+    color: #B5ADA1;
+    border-color: #E4DCD0;
+}
+
+/* A disabled group is dimmed rather than hidden: the CC buckets stay visible and
+   ticked when Motorcycle is unticked, so the clerk can see why they no longer
+   apply and get them back by re-ticking. */
+QCheckBox#filterCheck:disabled, QLabel#filterGroupHeading:disabled {
+    color: #B5ADA1;
+}
+
+/* FLEET SIDE (New Rental)
+   The search, the Filters button, the count and Clear all sit in the pinned row
+   above the scroll area, so they stay reachable from any scroll position -- they
+   used to scroll away with the first flick. The empty note is the one thing that
+   still belongs inside the scroll area. */
+QWidget#brandRails, QLabel#nrEmpty {
+    background: transparent;
+    border: none;
+}
+
+QLabel#nrCount {
+    color: #8A8175;
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#nrEmpty {
+    color: #8A8175;
+    font-size: 15px;
+    background: transparent;
+}
+

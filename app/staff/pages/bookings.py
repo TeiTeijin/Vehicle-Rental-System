@@ -1,18 +1,3 @@
-"""Bookings: the full list, and the actions that change a rental's state.
-
-This page owns the write paths -- confirm, cancel, check in, check out, record
-a payment -- so the rules about who may do what belong here rather than being
-sprinkled through the widgets.
-
-The important one is the role split. A `staff` member may do the counter work:
-check a car out, take payment, record damage. A `staff` member may **not**
-cancel a confirmed booking or reverse a payment; those are the actions that
-change what the branch owes someone, and they are admin-only. Hiding the
-button is not the enforcement -- every action calls the service, and the
-service's own checks are the enforcement. The button is hidden so the screen
-does not offer something that will be refused.
-"""
-
 from __future__ import annotations
 
 from datetime import date
@@ -89,15 +74,6 @@ class BookingsPage(StaffPage):
         self.table.load()
 
     def selected_booking_id(self) -> int | None:
-        """The id under the selection, or None.
-
-        Only the id comes back, never the row. `context.reading()` rolls back
-        and closes on the way out, which expires every attribute on anything
-        still attached -- so an `Booking` handed back from it raises
-        `DetachedInstanceError` the moment the caller reads `booking_id`. The
-        write path below opens its own session anyway, so it wants the id, not
-        the row.
-        """
         row = self.table.table.currentRow()
         if row < 0:
             return None
@@ -107,18 +83,11 @@ class BookingsPage(StaffPage):
         return int(text[1:])
 
     def can(self, action: str) -> bool:
-        """Whether this user may perform `action`."""
         if self.context.is_admin:
             return True
         return action in COUNTER_ACTIONS
 
     def run(self, action: str, **kwargs) -> bool:
-        """Perform a state change, and report the outcome.
-
-        Returns True on success. On refusal it shows the service's own message
-        and returns False, because a silent no-op on a booking screen looks
-        identical to a click that did not land.
-        """
         booking_id = self.selected_booking_id()
         if booking_id is None:
             toast(self, "Select a booking first.", "warn")
@@ -165,13 +134,6 @@ class BookingsPage(StaffPage):
 
 
 def _inspector_row(session, context):
-    """The signed-in staff member as a `Users` row in *this* session.
-
-    `check_in`/`check_out` take an inspector and assign it to
-    `INSPECTION_REPORT.inspected_by`. `StaffUser` is a detached value with no
-    `user_id`-backed relationship, so it cannot be assigned -- the row has to
-    be fetched in the same session that will write the report.
-    """
     from app.models import Users
 
     return session.get(Users, context.user.user_id)
