@@ -1,20 +1,3 @@
-"""Fleet: every vehicle, its state, and what is wrong with it.
-
-Two things this screen has to get right, because both are questions a member of
-staff asks out loud at the counter:
-
-  * **"Can I rent this out right now?"** is not the same as ``status ==
-    "available"``. A car can read available and still be unusable -- a licence
-    that has expired, an open maintenance job. ``fleet_service.is_rentable``
-    is the single answer to that question, so the screen shows a separate
-    "Blocked" column rather than folding the two together and leaving someone
-    to discover the problem at handover.
-
-  * **"Is it out?"** is derived from the booking, never from ``status``.
-    ``status`` says the car is physically gone; a booking says it is promised
-    to someone. They disagree often, and the booking is the one that matters.
-"""
-
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -29,13 +12,6 @@ from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
 
 
 def _fleet_rows(context):
-    """One row per vehicle, with every fact the screen shows.
-
-    A single query per table rather than a lazy load per cell. Ten vehicles is
-    nothing, but the shape is the point: a screen that issues a query while
-    painting cannot be wrapped in one transaction, and a second member of
-    staff checking a car out mid-scroll would see a half-updated row.
-    """
     today = date.today()
     with context.reading() as session:
         vehicles = session.execute(

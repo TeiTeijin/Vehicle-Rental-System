@@ -1,22 +1,3 @@
-"""Payments: the money trail, and what is still owed.
-
-The figure at the top is `payment_service.takings`, which counts only `paid`
-rows. That is not the same as the sum of every payment ever recorded, and the
-difference is the whole reason this screen is separate from a naive total:
-
-  * a `pending` GCash transfer is money that has not arrived;
-  * a `failed` card attempt never happened;
-  * a `refunded` row arrived and left again.
-
-Summing those in would overstate the branch's takings, which is the kind of
-mistake an auditor finds. The service already has this right, so the screen
-calls it rather than re-deriving the number.
-
-Outstanding is a different question again: what customers still owe. It is
-computed per booking from `booking_balance`, so a rental with a late fee added
-at check-out shows the fee.
-"""
-
 from __future__ import annotations
 
 from decimal import Decimal
@@ -63,12 +44,6 @@ def _payment_rows(context):
 
 
 def _outstanding_rows(context):
-    """Bookings with money still owed, largest first.
-
-    Ordered by amount rather than date: the person chasing an overdue balance
-    wants the big one, and the list is short enough that paging is not worth
-    building.
-    """
     with context.reading() as session:
         rows = []
         bookings = session.execute(
@@ -155,12 +130,6 @@ class PaymentsPage(StaffPage):
 
     @property
     def all_settled(self) -> bool:
-        """True when nothing is owed.
-
-        Exposed so the dashboard can say "nothing outstanding" without
-        reaching into the table, and so a test can assert the empty state is
-        reachable rather than only the populated one.
-        """
         return self.outstanding.state is LoadState.EMPTY
 
 

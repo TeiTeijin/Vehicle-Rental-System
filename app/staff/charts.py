@@ -1,23 +1,3 @@
-"""Hand-drawn charts, with QPainter and no charting dependency.
-
-The brief was a hand-drawn look, which rules out both the stock Qt styles and a
-plotting library: neither produces a line that looks drawn. So the charts are
-painted directly, and everything about that is deliberate:
-
-  * **Jitter.** A real hand-drawn line does not land on exact pixel values, so
-    the points are offset by a few pixels. Without it a chart looks like a
-    machine drew it, which defeats the point.
-  * **Two passes.** The stroke is drawn once thin and once offset by a pixel or
-    two, the way a pen doubles back on itself. This is what reads as
-    "hand-drawn" more than the jitter does.
-  * **No animation of the shape.** The line is final immediately. What animates
-    is the number next to it (see :class:`CountUpLabel`), because a number
-    counting up is legible motion and a line drawing itself is not.
-
-`paintEvent` is the only place geometry is decided, so a resize is handled by
-the layout and there is no cached size to go stale.
-"""
-
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -30,23 +10,11 @@ from app.staff import theme
 
 
 def _jitter(seed: str, index: int, spread: float) -> float:
-    """A stable small offset in [-spread, spread].
-
-    Deterministic from the label and the index rather than from a global RNG,
-    so repainting the same chart does not make the line visibly crawl. That
-    would be distracting in a window that refreshes every 30 seconds.
-    """
     digest = sum(ord(c) * (i + 7) for i, c in enumerate(seed))
     return (((digest >> (index % 16)) & 0xFF) / 255.0 * 2 - 1) * spread
 
 
 class HandDrawnChart(QWidget):
-    """A line chart with a drawn-on-by-hand feel.
-
-    `values` is a sequence of numbers, oldest first. `labels` optionally names
-    a few of the points.
-    """
-
     def __init__(
         self,
         title: str,
@@ -68,7 +36,6 @@ class HandDrawnChart(QWidget):
         self.setAccessibleName(title)
 
     def set_values(self, values: list[float], labels: list[str] | None = None) -> None:
-        """Update and repaint. Called by the 30-second refresh."""
         self._values = list(values)
         if labels is not None:
             self._labels = labels
@@ -151,11 +118,6 @@ class HandDrawnChart(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No data yet")
 
     def _paint_fill(self, painter: QPainter, rect: QRectF, points: list[QPointF]) -> None:
-        """A soft wash under the line.
-
-        Drawn as a vertical gradient rather than a flat tint so a dense chart
-        does not turn into a solid block.
-        """
         path = QPainterPath(points[0])
         for point in points[1:]:
             path.lineTo(point)
@@ -206,8 +168,6 @@ class HandDrawnChart(QWidget):
 
 
 class HandDrawnBars(QWidget):
-    """Bars for a handful of categories, drawn with the same wobble."""
-
     def __init__(
         self,
         title: str,
@@ -291,8 +251,6 @@ class HandDrawnBars(QWidget):
 
 
 class Sparkline(HandDrawnChart):
-    """A 14-day trend with no axis labels, for a tile that is mostly number."""
-
     def __init__(self, values: list[float], *, colour: str = theme.MUTED, parent=None) -> None:
         super().__init__("", values, labels=[], colour=colour, fill=False, parent=parent)
         self.setFixedHeight(34)
@@ -323,12 +281,6 @@ class Sparkline(HandDrawnChart):
 
 
 def daily_series(session, days: int, column) -> list[float]:
-    """Counts per day for the last `days`, oldest first, gaps filled with 0.
-
-    Filling the gaps is the part that matters: a series that skips a day with
-    no bookings would draw that day at the previous day's x position and
-    quietly misrepresent the trend.
-    """
     today = date.today()
     first = today - timedelta(days=days - 1)
     buckets: dict[date, float] = {first + timedelta(days=i): 0.0 for i in range(days)}

@@ -1,13 +1,3 @@
-"""Delete the locally cached CarImages photos.
-
-The hero caches photo bytes under `cache/media/`, keyed on each vehicle's
-make/model/year. That cache survives CarImages re-signing its URLs, so it will
-not notice if a photo is replaced upstream. Run this when you want to force a
-fresh download.
-
-    python -m scripts.clear_media_cache
-"""
-
 from __future__ import annotations
 
 import sys

@@ -1,14 +1,3 @@
-"""A file of every icon at once, for eyeballing the set.
-
-Not part of the app. Run it and open the PNG:
-
-    python -m app.staff.icon_preview
-
-Icon sets go wrong in ways that unit tests cannot see -- three glyphs that look
-heavier than the rest, one that reads as a different metaphor -- and this is
-the only way to catch that without clicking through the whole dashboard.
-"""
-
 from __future__ import annotations
 
 import sys

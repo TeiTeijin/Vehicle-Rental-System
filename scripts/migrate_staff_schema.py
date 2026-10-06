@@ -1,38 +1,3 @@
-"""Bring an existing database up to the staff-rebuild schema.
-
-The models in `app/models/` were changed to support the staff application: a
-booking records who took it, a payment records who collected it, an inspection
-does not have to invent a photo, and a booking can be settled in several parts.
-None of that is reachable in a database whose tables predate those columns --
-not degraded, but an immediate `ProgrammingError: Unknown column` on the first
-query.
-
-Run this once against the Aiven instance before using the staff app:
-
-    python -m scripts.migrate_staff_schema --dry-run
-    python -m scripts.migrate_staff_schema
-
-Safety, in order of importance:
-
-1. **Idempotent.** Every step inspects the live schema first, so re-running is
-   harmless. A half-applied previous run is not a problem.
-2. **Additive only.** It adds columns and loosens nullability. It never drops
-   or rewrites a column, and it never deletes a row, so a mistake here costs a
-   re-run rather than data.
-3. **Backup advice first.** It prints a reminder but does not take one: the
-   Aiven instance is a free tier, so a full dump is the right call and making
-   it silently would hide a step worth doing by hand.
-
-The one genuinely awkward step is `PAYMENT.paid_at`. It was declared NOT NULL
-while the same column's enum permitted 'pending' and 'failed' -- two of the
-four statuses could never be written. Loosening it means dropping the NOT NULL
-constraint, which MySQL 8 can do directly and SQLite cannot do at all. See
-`relax_paid_at()` for how that is handled per backend.
-
-Only the schema changes. Demo data is `scripts/seed_demo_data.py`, and that
-refuses to touch anything but a throwaway database.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -60,6 +25,21 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
             "channel",
             "VARCHAR(8) NULL",
             "walked in at the counter or taken online; needed by the dashboard",
+        ),
+    ],
+    "VEHICLE": [
+        (
+            "vehicle_class",
+            "VARCHAR(16) NULL",
+            "size class for the New Rental filter rail. Nullable, so a row nobody "
+            "has classified still loads. Filling it in is "
+            "scripts/migrate_vehicle_class.py -- this only creates the column",
+        ),
+        (
+            "engine_cc",
+            "INTEGER NULL",
+            "displacement, which the rail's CC buckets read. Same: schema here, "
+            "data in migrate_vehicle_class",
         ),
     ],
     "INSPECTION_REPORT": [
@@ -139,11 +119,6 @@ def add_columns(dry_run: bool) -> None:
 
 
 def backfill_created_at(dry_run: bool) -> None:
-    """Give existing PAYMENT rows a created_at.
-
-    The model defaults it for new rows, but a column added with no default
-    leaves the existing ones NULL, and the Payments tab sorts by it.
-    """
     if "PAYMENT" not in _inspector().get_table_names():
         return
     if "created_at" not in _columns("PAYMENT"):
@@ -167,10 +142,6 @@ def backfill_created_at(dry_run: bool) -> None:
                 "WHERE created_at IS NULL AND paid_at IS NOT NULL"
             )
         )
-        # Anything still missing a timestamp had a NULL paid_at, which the old
-        # NOT NULL constraint should have prevented but may not have if the
-        # column was added out of band. Use the table's own lowest value as a
-        # floor so the sort order stays sensible.
         conn.execute(
             text(
                 "UPDATE PAYMENT SET created_at = (SELECT MIN(created_at) FROM PAYMENT) "
@@ -181,22 +152,6 @@ def backfill_created_at(dry_run: bool) -> None:
 
 
 def _rebuild_sqlite_table(table: str, dry_run: bool) -> bool:
-    """Rebuild a SQLite table from the model definition, to change nullability.
-
-    SQLite cannot `ALTER COLUMN`, and unlike MySQL it genuinely does enforce
-    NOT NULL -- an `ALTER TABLE ... ADD COLUMN` cannot help either, since the
-    problem is an existing constraint rather than a missing one. The only
-    correct fix is the documented rebuild: copy to a new table, swap, drop the
-    original.
-
-    The replacement table's DDL is compiled from the ORM metadata rather than
-    written out by hand. That is the whole trick -- the rebuilt table is
-    correct by construction, because it *is* what the models declare, and it
-    cannot drift from them the way a hand-written CREATE TABLE eventually
-    would.
-
-    Returns True if the table was rebuilt or already correct.
-    """
     from sqlalchemy.schema import CreateTable
 
     import app.models  # noqa: F401  (registers the tables on Base)
@@ -234,25 +189,10 @@ def _rebuild_sqlite_table(table: str, dry_run: bool) -> bool:
 
 
 def relax_paid_at(dry_run: bool) -> None:
-    """Drop the NOT NULL on PAYMENT.paid_at.
-
-    The column is declared NOT NULL, but the same table's status enum allows
-    'pending' and 'failed' -- neither of which has a payment time. The two
-    declarations contradict each other, and the model has already been changed
-    to nullable. This closes the database side of that.
-
-    Without this, `payment_service.record_payment(..., status="pending")` --
-    recording a GCash transfer that has not landed -- fails on insert.
-    """
     _relax_column("PAYMENT", "paid_at", "DATETIME NULL", dry_run)
 
 
 def relax_photo_url(dry_run: bool) -> None:
-    """Drop the NOT NULL on INSPECTION_REPORT.photo_url, same reasoning.
-
-    Without this, an inspection of a rental that was never photographed has to
-    invent a value, which is why the old code wrote an empty string.
-    """
     _relax_column("INSPECTION_REPORT", "photo_url", "VARCHAR(255) NULL", dry_run)
 
 
@@ -310,7 +250,6 @@ def add_indexes(dry_run: bool) -> None:
 
 
 def verify() -> bool:
-    """Check the model and the database agree. Returns False if they do not."""
     print()
     print("=== verification ===")
     ok = True

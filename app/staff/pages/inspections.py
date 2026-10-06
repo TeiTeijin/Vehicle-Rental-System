@@ -1,15 +1,3 @@
-"""Inspections: the handover record for every rental.
-
-A pre-rental and a post-rental report are what turn a disputed damage claim
-into a settled one, so this screen exists to make gaps in the record obvious.
-A rental with only a pre-rental inspection means the car has not come back yet
-or has come back uninspected, and the "Missing" column is how that gets noticed
-without reading every row.
-
-Photos are optional. `photo_url` is nullable and most inspections have none, so
-this shows a plain indicator rather than a broken image placeholder.
-"""
-
 from __future__ import annotations
 
 from functools import partial

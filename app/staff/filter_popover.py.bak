@@ -1,0 +1,146 @@
+class _BrandPane(QWidget):
+    """The Brand category's options: a continuous list with one row per brand.
+
+    Brand is a real filter axis, so each row toggles a brand on/off. A single
+    row per brand (with a divider line between rows) keeps it continuous and
+    avoids the duplicate checkbox+name pair.
+    """
+
+    #: Emitted with a brand name whenever its tick changes.
+    brand_toggled = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("filterPane")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(FILTER_GAP)
+
+        self.search = QLineEdit(self)
+        self.search.setObjectName(theme.OBJ_SEARCH_FIELD)
+        self.search.setPlaceholderText("Search makes")
+        self.search.setFixedHeight(FILTER_ROW_H)
+        self.search.setClearButtonEnabled(True)
+        layout.addWidget(self.search)
+
+        self._scroll = QScrollArea(self)
+        self._scroll.setObjectName("filterPaneScroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setMaximumHeight(POPOVER_PANE_MAX_H)
+
+        self._host = QWidget(self._scroll)
+        self._host.setObjectName("filterPaneHost")
+        self._layout = QVBoxLayout(self._host)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(2)
+        self._layout.addStretch(1)
+        self._scroll.setWidget(self._host)
+        layout.addWidget(self._scroll, 1)
+
+        self.items: dict[str, ActiveRow] = {}
+        self.dividers: dict[str, QFrame] = {}
+        self.order: list[str] = []
+        self.active: str | None = None
+        self._needle = ""
+        self._selected: set[str] = set()
+
+        self.search.textChanged.connect(self._on_search_changed)
+
+    def set_brands(self, brands) -> None:
+        brands = list(brands)
+        if brands == self.order:
+            self._apply_needle()
+            return
+
+        for row in self.items.values():
+            self._layout.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+        for dv in self.dividers.values():
+            self._layout.removeWidget(dv)
+            dv.setParent(None)
+            dv.deleteLater()
+        self.items = {}
+        self.dividers = {}
+        self.order = brands
+
+        for brand in brands:
+            row = ActiveRow(brand, parent=self._host)
+            row.setObjectName("nrBrandRow")
+            row.setFixedHeight(FILTER_ROW_H)
+            row.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.setToolTip(f"Toggle {brand}")
+            row.clicked.connect(lambda _=False, name=brand: self._toggle(name))
+            self._layout.insertWidget(self._layout.count() - 1, row)
+            self.items[brand] = row
+
+            dv = QFrame(self._host)
+            dv.setObjectName("filterPopoverDivider")
+            dv.setFixedHeight(1)
+            dv.setFrameShape(QFrame.Shape.NoFrame)
+            self._layout.insertWidget(self._layout.count() - 1, dv)
+            self.dividers[brand] = dv
+
+        self._apply_needle()
+        self._sync()
+
+    def selected(self) -> set:
+        return set(self._selected)
+
+    def set_selected(self, brands) -> None:
+        self._selected = set(brands)
+        self._sync()
+        # emit for each? not necessary; filter will read
+
+    def clear(self) -> None:
+        self._selected = set()
+        self._sync()
+
+    def set_availability(self, reachable: set[str] | None) -> None:
+        for brand, row in self.items.items():
+            row.setEnabled(reachable is None or brand in reachable)
+        self._sync()
+
+    def set_active(self, brand: str | None) -> None:
+        self.active = brand
+        for name, row in self.items.items():
+            row.set_active(name == brand)
+            dv = self.dividers.get(name)
+            if dv:
+                dv.setVisible(not bool(self._needle) and (needle_ok(name, self._needle)))  # will fix below
+        # simpler
+        needle = self._needle.lower()
+        for name, row in self.items.items():
+            row.set_active(name == brand)
+        self._apply_needle()
+
+    def _toggle(self, brand: str) -> None:
+        if brand in self._selected:
+            self._selected.discard(brand)
+        else:
+            self._selected.add(brand)
+        self._sync()
+        self.brand_toggled.emit(brand)
+
+    def _sync(self) -> None:
+        for name, row in self.items.items():
+            row.setProperty('checked', name in self._selected)
+            row.style().unpolish(row)
+            row.style().polish(row)
+
+    def _apply_needle(self) -> None:
+        needle = self._needle.lower()
+        for name, row in self.items.items():
+            dv = self.dividers.get(name)
+            hidden = bool(needle) and needle not in name.lower()
+            row.setVisible(not hidden)
+            if dv:
+                dv.setVisible(not hidden)
+        self._sync()  # ensure
+
+    def _on_search_changed(self, text: str) -> None:
+        self._needle = text
+        self._apply_needle()
