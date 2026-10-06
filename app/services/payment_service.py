@@ -1,21 +1,3 @@
-"""Payments: recording money, and working out what is still owed.
-
-`receipt_service.print_receipt` had its own inline balance calculation, and
-`booking_service.check_out` had another. They disagreed: receipt_service
-counted a payment as paid whenever `status == "paid"` but summed over a
-relationship that could only hold one row, and neither shared the penalty
-total with the amount actually recorded. A customer could be told they owed
-PHP 0 on the screen and handed a receipt for PHP 1,000.
-
-Everything now goes through `booking_balance`. A screen that wants to show a
-figure calls that, and gets the same answer the receipt does.
-
-Nothing here talks to a payment gateway. GCash, card and cash are all recorded
-the same way -- as an assertion by staff that money changed hands -- and the
-`reference_no` column is where the proof goes. That is an honest model of what
-this application can actually know.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -40,8 +22,6 @@ METHODS = ("cash", "card", "gcash")
 
 @dataclass(frozen=True)
 class BookingBalance:
-    """What a booking owes and what has been paid against it."""
-
     rental_cost: Decimal
     penalty_total: Decimal
     total_due: Decimal
@@ -54,13 +34,6 @@ class BookingBalance:
 
 
 def amount_paid(session: Session, booking: Booking) -> Decimal:
-    """Total actually collected against a booking.
-
-    Only `paid` rows count. A `pending` GCash transfer and a `failed` card
-    attempt are both money that has not arrived, and a `refunded` row is money
-    that left again -- summing any of them into the takings figure is exactly
-    the kind of error that gets caught by an auditor.
-    """
     return sum(
         (payment.amount for payment in booking.payments if payment.status in SETTLED_STATUSES),
         ZERO,
@@ -68,11 +41,6 @@ def amount_paid(session: Session, booking: Booking) -> Decimal:
 
 
 def booking_balance(session: Session, booking: Booking) -> BookingBalance:
-    """The authoritative balance for a booking.
-
-    Penalties count as owed but not as paid, so a late return shows up as a
-    balance the customer still has to settle at the counter.
-    """
     rental = money(booking.total_cost, field="total_cost")
     penalties = sum((p.amount for p in booking.penalties), ZERO)
     due = money(rental + penalties, field="total_due")
@@ -97,13 +65,6 @@ def record_payment(
     note: str | None = None,
     status: str = "paid",
 ) -> Payment:
-    """Record a payment against a booking.
-
-    Overpayment is allowed but has to be deliberate: a `field_amount` that
-    exceeds the balance is almost always a typo, and silently absorbing it
-    loses the difference. Pass the figure you mean; the caller decides whether
-    the excess becomes a refund.
-    """
     if method not in METHODS:
         raise ValidationError(
             f"Unknown payment method: {method}. Choose one of "
@@ -144,13 +105,6 @@ def refund_payment(
     session: Session,
     payment: Payment, *, reason: str, recorded_by: int | None = None
 ) -> Payment:
-    """Reverse a settled payment.
-
-    Implemented by marking the original row `refunded` rather than by deleting
-    it or writing a negative row. A refund that erases the payment it reverses
-    leaves no record that the money ever moved, which is the one thing a drawer
-    reconciliation needs.
-    """
     if payment.status != "paid":
         raise StateError(
             f"Payment #{payment.payment_id} is '{payment.status}', so it cannot "
@@ -180,7 +134,6 @@ def list_payments(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[Payment]:
-    """Payments newest first, for the Payments tab and end-of-shift drawer count."""
     stmt = select(Payment).options(
         joinedload(Payment.booking).joinedload(Booking.vehicle),
         joinedload(Payment.recorder),
@@ -199,6 +152,5 @@ def list_payments(
 
 
 def takings(session: Session, *, from_date: datetime | None = None, to_date: datetime | None = None) -> Decimal:
-    """Cash actually collected in a window, for the Payments tab header."""
     payments = list_payments(session, status="paid", from_date=from_date, to_date=to_date)
     return money(sum((p.amount for p in payments), ZERO), field="takings")

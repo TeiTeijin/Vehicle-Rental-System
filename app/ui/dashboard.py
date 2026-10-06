@@ -195,7 +195,6 @@ class DashboardWindow(QMainWindow):
 
     @staticmethod
     def _build_content(hero: QWidget) -> QScrollArea:
-        """The hero is taller than the viewport, so it scrolls vertically."""
         area = QScrollArea()
         area.setObjectName("heroScroll")
         area.setWidgetResizable(True)

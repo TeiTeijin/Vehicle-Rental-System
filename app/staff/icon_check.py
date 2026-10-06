@@ -1,13 +1,3 @@
-"""Numeric checks on the icon set. Not part of the app.
-
-`python -m app.staff.icon_check` -- reports each glyph's ink coverage and
-bounding box, and flags silhouettes that are indistinguishable from one another.
-
-Exists because the icon set has to be checked without being looked at: three
-glyphs that render heavier than the rest, or two that come out the same shape,
-are invisible to a test that only asserts "renders without raising".
-"""
-
 from __future__ import annotations
 
 import sys
@@ -23,7 +13,6 @@ INK_ALPHA = 40
 
 
 def measure(name: str) -> tuple[int, tuple[int, int, int, int]]:
-    """(ink pixel count, bounding box) for one glyph."""
     img = pixmap(name, INK, SIZE).toImage()
     xs: list[int] = []
     ys: list[int] = []
@@ -40,7 +29,6 @@ def measure(name: str) -> tuple[int, tuple[int, int, int, int]]:
 
 
 def signature(name: str, cells: int = 8) -> tuple[int, ...]:
-    """A coarse filled/not-filled grid, for comparing two glyphs."""
     img = pixmap(name, INK, SIZE).toImage()
     step = SIZE // cells
     return tuple(

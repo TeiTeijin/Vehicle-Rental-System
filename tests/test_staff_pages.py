@@ -2,8 +2,8 @@
 
 Each page is built over a small, hand-made dataset rather than the demo seed,
 so a test states exactly the situation it is about. Data is built relative to
-`date.today()` because every page asks the clock what day it is -- Today, Fleet
-and Customers all key off it, and a page that read a fixed date would be testing
+`date.today()` because every page asks the clock what day it is -- New Rental,
+Fleet and Customers all key off it, and a page that read a fixed date would test
 something other than what ships.
 """
 
@@ -28,6 +28,7 @@ from app.models import (  # noqa: E402
     Users,
     Vehicle,
     Vehicle_Category,
+    Vehicle_Media,
 )
 from app.staff.context import (  # noqa: E402
     DatabaseSelection,
@@ -35,17 +36,57 @@ from app.staff.context import (  # noqa: E402
     StaffContext,
     StaffUser,
 )
+from app.staff import theme  # noqa: E402
+from app.staff.metrics import (  # noqa: E402
+    FILTER_BAR_H,
+    FILTER_POPOVER_H,
+    FILTER_POPOVER_W,
+    POPOVER_CATEGORY_W,
+    SECTION_ROW_H,
+    VEHICLE_BTN_RADIUS,
+    VEHICLE_CARD_H,
+    VEHICLE_CARD_MIN_W,
+    VEHICLE_CARD_RADIUS,
+    VEHICLE_IMAGE_RADIUS,
+)
 from app.staff.pages.base import StaffPage  # noqa: E402
 from app.staff.pages.bookings import COUNTER_ACTIONS, BookingsPage  # noqa: E402
 from app.staff.pages.customers import EXPIRING_SOON_DAYS  # noqa: E402
 from app.staff.pages.dashboard import DashboardPage, pesos  # noqa: E402
 from app.staff.pages.fleet import FleetPage  # noqa: E402
 from app.staff.pages.inspections import InspectionsPage  # noqa: E402
+from app.staff.pages.new_rental import NewRentalPage  # noqa: E402
 from app.staff.pages.payments import PaymentsPage  # noqa: E402
-from app.staff.pages.today import TodayPage  # noqa: E402
 from app.staff.shell import StaffShell  # noqa: E402
 from app.staff.tables import LoadState  # noqa: E402
+from app.staff.filter_popover import MAX_RATE, FilterPopover  # noqa: E402
+from app.staff.section_row import ActiveRow  # noqa: E402
+from app.staff.vehicle_cards import (  # noqa: E402
+    MediaResolver,
+    RentalVehicle,
+    VehicleCard,
+    VehicleSlot,
+)
+from app.staff.brand_rows import BrandSection, VehicleRail  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
+from PySide6.QtCore import Qt, QPoint, QThreadPool  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMenu  # noqa: E402
+from app.widgets.skeleton import Skeleton  # noqa: E402
+
+
+def qapp_process(_widget=None, turns: int = 8) -> None:
+    """Pump the event loop so queued layout and builds have settled.
+
+    The page's first section can only be read after the layout has run, and the
+    rails stagger their card builds one per turn, so a test that asserts on
+    geometry has to let the loop move. A fixed number of turns rather than a
+    sleep: the work being waited on is already queued, so it finishes as fast as
+    the machine can and there is nothing to gain from a fixed delay.
+    """
+    app = QApplication.instance()
+    for _ in range(turns):
+        app.processEvents()
 
 #: Rebuilt per test by `branch`; a run crossing midnight must not go stale.
 TODAY = date.today()
@@ -334,8 +375,53 @@ def as_admin(branch):
     )
 
 
-def texts(table):
-    return [table.cell_text(r, 0) for r in range(table.row_count())]
+def _add_vehicle(
+    context,
+    *,
+    make: str,
+    model: str,
+    plate: str,
+    category_name: str = "Car",
+    vehicle_class: str | None = None,
+    engine_cc: int | None = None,
+    daily_rate: str = "3000.00",
+    seats: int | None = None,
+    transmission: str | None = None,
+    fuel_type: str | None = None,
+    status: str = "available",
+) -> int:
+    """Add one available vehicle, creating its category if the branch lacks it."""
+    with context.session() as session:
+        category = (
+            session.query(Vehicle_Category)
+            .filter(Vehicle_Category.category_name == category_name)
+            .first()
+        )
+        if category is None:
+            category = Vehicle_Category(
+                category_name=category_name, base_rate_multiplier=1.0
+            )
+            session.add(category)
+            session.flush()
+        row = Vehicle(
+            category_id=category.category_id,
+            make=make,
+            model=model,
+            year=2021,
+            plate_number=plate,
+            daily_rate=Decimal(daily_rate),
+            mileage=1_000,
+            status=status,
+            vehicle_class=vehicle_class,
+            engine_cc=engine_cc,
+            seats=seats,
+            transmission=transmission,
+            fuel_type=fuel_type,
+            created_at=datetime(2026, 1, 1, 9, 0),
+        )
+        session.add(row)
+        session.flush()
+        return row.vehicle_id
 
 
 # --------------------------------------------------------------------------
@@ -373,65 +459,1315 @@ class TestPageRoleGate:
 
 
 # --------------------------------------------------------------------------
-# Today
+# New Rental
 # --------------------------------------------------------------------------
 
 
-class TestTodayPage:
-    def test_overdue_is_separate_from_due_back(self, shell, branch):
-        """Burying a late return in a chronological list is how a car stays
-        out for three extra days."""
-        page = TodayPage(shell)
-        page.refresh()
-        assert page.overdue.row_count() == 1
-        assert page.due_back.row_count() == 1
-        assert page.has_overdue is True
+class TestNewRentalFilterPopover:
+    """The popover is a widget over no database, so it can be asserted directly."""
 
-    def test_an_overdue_row_says_how_late(self, shell, branch):
-        page = TodayPage(shell)
-        page.refresh()
-        assert page.overdue.cell_text(0, 5) == "2 day(s) late"
-
-    def test_a_due_back_row_is_not_called_late(self, shell, branch):
-        page = TodayPage(shell)
-        page.refresh()
-        assert page.due_back.cell_text(0, 5) == "-"
-
-    def test_a_settled_branch_has_nothing_late(self, shell, branch, monkeypatch):
-        monkeypatch.setattr(
-            "app.staff.pages.today.date", frozen_date(TODAY - timedelta(days=100))
+    def test_the_filters_live_in_a_popover_not_a_docked_column(self, shell):
+        page = NewRentalPage(shell)
+        assert page.filter_popover.isVisible() is False
+        # Parenthesised deliberately: without them this parses as
+        # `assert page.filter_rail if ... else (None is None)`, which passes on a
+        # truthy attribute and so would not catch the rail coming back at all.
+        assert (hasattr(page, "filter_rail") is False), (
+            "the docked rail is gone; `page.filter_rail` must not come back"
         )
-        page = TodayPage(shell)
-        page.refresh()
-        assert page.overdue.state is LoadState.EMPTY
-        assert page.has_overdue is False
 
-    def test_the_workshop_lists_the_open_job(self, shell, branch):
-        page = TodayPage(shell)
-        page.refresh()
-        assert page.workshop.row_count() == 1
-        assert "SHOP-001" in page.workshop.cell_text(0, 0)
-        # Vehicle, Work, State, Started, Expected, Cost
-        assert page.workshop.cell_text(0, 2) == "Ongoing"
+    def test_the_popover_is_never_a_qmenu(self, shell):
+        page = NewRentalPage(shell)
+        # A QMenu anywhere in the page's tree is the shape that crashed: an
+        # overridden `exec()` called with no position is an access violation, not
+        # a catchable error (`exit=-1073741819`).
+        assert page.findChildren(QMenu) == []
 
-    def test_a_finished_job_leaves_the_workshop(self, shell, branch):
-        built, context = branch
-        with context.session() as session:
-            record = (
-                session.query(Maintenance_Record)
-                .filter(Maintenance_Record.vehicle_id == built.shop_car.vehicle_id)
-                .one()
+    def test_opening_the_popover_does_not_kill_the_process(self, shell):
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        qapp_process(page)
+        page.open_popover()
+        qapp_process(page)
+        # Reaching here at all is the assertion: the old build died in this call.
+        assert page.filter_popover.isVisible() is True
+        page.close_popover()
+
+    def test_the_popover_toggles(self, shell):
+        page = NewRentalPage(shell)
+        page.show()
+        qapp_process(page)
+        page.toggle_popover()
+        assert page.filter_popover.isVisible() is True
+        page.toggle_popover()
+        assert page.filter_popover.isVisible() is False
+
+    def test_a_real_mouse_click_on_a_box_leaves_the_popover_open(self, qapp):
+        """The regression the brief is really about.
+
+        Ticking a box inside a `Qt.Popup` closes it on the mouse *release* that
+        delivered the click, unless something holds the grab off. Programmatic
+        `setChecked` cannot reproduce that, because it delivers no mouse event at
+        all -- so the old test passed green while the panel still shut on every
+        adjustment a clerk made. `QTest.mouseClick` sends a real press and release.
+
+        Built as a standalone popover configured exactly as `NewRentalPage`
+        configures it, rather than through a page. The panel is a top-level window
+        and this platform does not map the one a live page parents it to, so a
+        click aimed at it goes nowhere and the test would fail for a reason that
+        has nothing to do with the grab. The flags and the attribute are what make
+        the difference, and both are set here.
+        """
+        pop = FilterPopover()
+        pop.setWindowFlags(Qt.WindowType.Popup)
+        # The page's mitigation. Without it a `Qt.Popup` shuts on the release that
+        # delivered the click.
+        pop.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        pop.set_brands(["Toyota", "Honda"])
+        pop.show()
+        qapp_process(pop)
+        assert pop.isVisible() is True
+
+        # A category row first, the way a clerk uses it -- it is what puts the pane
+        # on screen, and Qt discards mouse events for hidden widgets.
+        pop._categories["vehicle_classes"].click()
+        qapp_process(pop)
+        box = pop.type_group.boxes["motorcycle"]
+        assert box.isVisible() is True
+
+        # Near the left edge rather than at the centre, which is QTest's default.
+        # A widget inside a scroll area can sit outside whatever the offscreen
+        # platform has actually mapped, and a click at the centre then lands on
+        # nothing at all -- failing for a reason that has nothing to do with the
+        # grab. The left edge is over the indicator and is always mapped.
+        spot = QPoint(10, box.height() // 2)
+        QTest.mouseClick(
+            box, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, spot
+        )
+        qapp_process(pop)
+
+        assert box.isChecked() is True, "the click never reached the box"
+        assert pop.isVisible() is True, (
+            "the popover must survive the click that adjusted it"
+        )
+
+        # Twice over: a grab that is held at all has to survive repeated use, not
+        # just the first adjustment.
+        QTest.mouseClick(
+            box, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, spot
+        )
+        qapp_process(pop)
+        assert box.isChecked() is False
+        assert pop.isVisible() is True
+
+    def test_the_page_holds_the_popovers_grab_off(self, shell):
+        page = NewRentalPage(shell)
+        # Asserted on its own so the mitigation cannot be dropped from the page
+        # without the click test above going quietly meaningless.
+        assert page.filter_popover.testAttribute(
+            Qt.WidgetAttribute.WA_ShowWithoutActivating
+        ) is True
+        assert page.filter_popover.windowFlags() & Qt.WindowType.Popup
+
+    def test_a_clicking_a_brand_name_ticks_it_rather_than_navigating(self, qapp):
+        """The name row is a second hit target on the tick, not a jump link.
+
+        Brand is a filter axis now, so a row that scrolled instead of selecting
+        would quietly do the wrong thing -- and clicking the *name* is how a clerk
+        ticks brands that are showing as greyed.
+        """
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda"])
+        pop.show()
+        qapp_process(pop)
+
+        pop.brand_pane.rows["Honda"].click()
+        qapp_process(pop)
+        assert pop.brand_pane.boxes["Honda"].isChecked() is True
+        assert pop.current_filter().makes == frozenset({"Honda"})
+
+        # Twice, to put it back -- so the row cannot be a one-way scroll.
+        pop.brand_pane.rows["Honda"].click()
+        qapp_process(pop)
+        assert pop.brand_pane.boxes["Honda"].isChecked() is False
+        assert pop.current_filter().makes == frozenset()
+
+    def test_a_greyed_brand_can_still_be_unticked_by_its_name(self, qapp):
+        """The whole point of keeping the name clickable.
+
+        A brand greyed by the clerk's own selection is one they need to be able to
+        take back. A disabled checkbox would leave them stuck on it.
+        """
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda"])
+        pop.show()
+        qapp_process(pop)
+
+        pop.brand_pane.boxes["Honda"].setChecked(True)
+        pop.set_availability({"makes": {"Toyota"}})
+        assert pop.brand_pane.boxes["Honda"].isEnabled() is False
+
+        pop.brand_pane.rows["Honda"].click()
+        qapp_process(pop)
+        assert pop.brand_pane.boxes["Honda"].isChecked() is False
+
+    def test_the_popover_is_a_fixed_two_column_box(self, qapp):
+        pop = FilterPopover()
+        assert pop.width() == FILTER_POPOVER_W
+        assert pop.height() == FILTER_POPOVER_H
+        assert pop._category_scroll.width() == POPOVER_CATEGORY_W
+
+    def test_the_popover_is_white_with_the_cards_border_and_nothing_else(self, qapp):
+        pop = FilterPopover()
+        # `class="card"` is what puts it under the dashboard card rule: white,
+        # 28px radius, 1px border. Not a tinted panel.
+        assert pop.property("class") == "card"
+
+    def test_every_axis_the_brief_asked_for_has_a_category(self, qapp):
+        pop = FilterPopover()
+        titles = pop.category_titles()
+        assert titles == [
+            "Brand",
+            "Vehicle type",
+            "Engine size",
+            "Price range",
+            "Passengers",
+            "Transmission",
+            "Fuel type",
+        ]
+        # Dropped on purpose: there is no branch or pickup-location axis to filter.
+        assert not any("location" in t or "branch" in t for t in titles)
+
+    def test_clicking_a_category_swaps_the_right_column(self, qapp):
+        pop = FilterPopover()
+        assert pop.current_category() == "makes"
+        pop._categories["cc_buckets"].click()
+        assert pop.current_category() == "cc_buckets"
+        assert pop.panes.currentWidget() is pop.cc_group
+
+    def test_the_engine_size_buckets_are_the_ones_a_shop_quotes(self, qapp):
+        pop = FilterPopover()
+        assert list(pop.cc_group.boxes) == [
+            "Up to 125cc",
+            "126 - 155cc",
+            "156 - 400cc",
+            "Over 400cc",
+        ]
+
+    def test_an_untouched_popover_reports_no_filter(self, qapp):
+        pop = FilterPopover()
+        assert pop.current_filter().is_empty() is True
+        assert pop.current_filter().max_rate is None
+
+    def test_ticking_a_box_publishes_the_whole_selection(self, qapp):
+        pop = FilterPopover()
+        seen = []
+        pop.filters_changed.connect(seen.append)
+
+        pop.type_group.boxes["suv"].setChecked(True)
+        assert len(seen) == 1
+        assert seen[0].vehicle_classes == frozenset({"suv"})
+        assert seen[0].is_empty() is False
+
+    def test_ticking_a_box_leaves_the_popover_open(self, qapp, shell):
+        page = NewRentalPage(shell)
+        page.show()
+        qapp_process(page)
+        page.open_popover()
+        page.filter_popover.type_group.boxes["suv"].setChecked(True)
+        qapp_process(page)
+        # The regression this whole shape exists to avoid: a `Qt.Popup` that
+        # closes on the click that delivered the tick would make every single
+        # adjustment dismiss the panel.
+        assert page.filter_popover.isVisible() is True
+        page.close_popover()
+
+    def test_two_boxes_in_one_group_are_an_or(self, qapp):
+        pop = FilterPopover()
+        pop.fuel_group.boxes["Petrol"].setChecked(True)
+        pop.fuel_group.boxes["Diesel"].setChecked(True)
+        assert pop.current_filter().fuel_types == frozenset({"Petrol", "Diesel"})
+
+    def test_two_groups_are_an_and(self, qapp):
+        pop = FilterPopover()
+        pop.type_group.boxes["suv"].setChecked(True)
+        pop.seat_group.boxes["7"].setChecked(True)
+        filters = pop.current_filter()
+        assert filters.vehicle_classes == frozenset({"suv"})
+        assert filters.seats == frozenset({7})
+
+    def test_a_brand_is_an_axis_like_any_other(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda"])
+        pop.brand_pane.boxes["Toyota"].setChecked(True)
+        pop.seat_group.boxes["7"].setChecked(True)
+        filters = pop.current_filter()
+        assert filters.makes == frozenset({"Toyota"})
+        assert filters.seats == frozenset({7})
+
+    def test_the_price_spin_reads_as_a_real_bound(self, qapp):
+        pop = FilterPopover()
+        pop.price_group.max_rate.setValue(4000)
+        assert pop.current_filter().max_rate == 4000
+
+    def test_an_untouched_upper_spin_is_no_ceiling(self, qapp):
+        # The top of the spin's range is a sentinel, not a million-a-day bound, so
+        # the popover can express "unset" and Clear all can disable itself.
+        pop = FilterPopover()
+        assert pop.price_group.max_rate.maximum() == MAX_RATE
+        assert pop.current_filter().max_rate is None
+
+    def test_an_inverted_price_range_is_swapped_not_rejected(self, qapp):
+        pop = FilterPopover()
+        pop.price_group.min_rate.setValue(6000)
+        pop.price_group.max_rate.setValue(2000)
+        filters = pop.current_filter()
+        assert (filters.min_rate, filters.max_rate) == (2000, 6000)
+
+    def test_clear_resets_every_control_and_publishes_once(self, qapp):
+        pop = FilterPopover()
+        pop.type_group.boxes["suv"].setChecked(True)
+        pop.seat_group.boxes["5"].setChecked(True)
+        pop.price_group.min_rate.setValue(1000)
+        pop.set_brands(["Toyota"])
+        pop.brand_pane.boxes["Toyota"].setChecked(True)
+        seen = []
+        pop.filters_changed.connect(seen.append)
+
+        pop.clear()
+        assert len(seen) == 1, "clearing is one change, not one per control"
+        assert seen[0].is_empty() is True
+        assert pop.type_group.selected() == set()
+        assert pop.brand_pane.selected() == set()
+        assert pop.price_group.min_rate.value() == 0
+
+    def test_the_brand_pane_has_its_own_search_bar(self, qapp):
+        pop = FilterPopover()
+        assert pop.brand_pane.search.placeholderText() == "Search makes"
+        # Only the Brand pane has one; it is the only list long enough to need it.
+        assert pop.brand_pane.search.parent() is pop.brand_pane
+        assert not hasattr(pop.type_group, "search")
+
+    def test_the_brand_pane_search_hides_non_matching_rows(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda", "Ford"])
+        pop.brand_pane.search.setText("to")
+        assert pop.visible_brands() == ["Toyota"]
+        pop.brand_pane.search.setText("")
+        assert pop.visible_brands() == ["Toyota", "Honda", "Ford"]
+
+    def test_the_brand_pane_search_is_not_a_filter(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda"])
+        pop.brand_pane.search.setText("Honda")
+        # Navigating the list, not narrowing the fleet: the grid is untouched.
+        assert pop.current_filter().is_empty() is True
+
+    def test_the_brand_pane_can_be_shown_empty(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(())
+        assert pop.brand_pane.order == []
+        pop.set_brands(["Toyota", "Honda"])
+        assert pop.brand_pane.order == ["Toyota", "Honda"]
+
+
+class TestNewRentalMuting:
+    """Greyed-out axes, fed from `axis_availability` by the page."""
+
+    def test_an_unreachable_axis_is_greyed_but_keeps_its_ticks(self, qapp):
+        pop = FilterPopover()
+        pop.cc_group.boxes["Over 400cc"].setChecked(True)
+        # A selection of SUVs leaves no motorcycle anywhere.
+        pop.set_availability(
+            {
+                "makes": {"Toyota"},
+                "vehicle_classes": {"suv"},
+                "cc_buckets": set(),
+                "transmissions": {"Automatic"},
+                "fuel_types": {"Diesel"},
+                "seats": {7},
+            },
+            exempt="vehicle_classes",
+        )
+        assert pop.cc_group.isEnabled() is False
+        # Dimmed, not discarded: the clerk's choice survives being unreachable.
+        assert pop.cc_group.boxes["Over 400cc"].isChecked() is True
+
+    def test_a_reachable_axis_is_live(self, qapp):
+        pop = FilterPopover()
+        pop.set_availability(
+            {
+                "makes": {"Toyota"},
+                "vehicle_classes": {"suv"},
+                "cc_buckets": {"156 - 400cc"},
+                "transmissions": {"Automatic"},
+                "fuel_types": {"Diesel"},
+                "seats": {7},
+            }
+        )
+        assert pop.muted_axes() == []
+
+    def test_an_unavailable_value_inside_a_live_axis_is_greyed(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda"])
+        # Only Toyota has an SUV; Honda's row has nothing to contribute.
+        pop.set_availability({"makes": {"Toyota"}})
+        assert pop.brand_pane.boxes["Toyota"].isEnabled() is True
+        assert pop.brand_pane.boxes["Honda"].isEnabled() is False
+
+    def test_the_last_touched_axis_is_never_greyed(self, qapp):
+        pop = FilterPopover()
+        # Nothing is reachable, which would otherwise grey every column and leave
+        # no way back out of a zero-result selection.
+        pop.set_availability(
+            {
+                "makes": set(),
+                "vehicle_classes": set(),
+                "cc_buckets": set(),
+                "transmissions": set(),
+                "fuel_types": set(),
+                "seats": set(),
+            },
+            exempt="vehicle_classes",
+        )
+        assert pop.type_group.isEnabled() is True
+        assert "vehicle_classes" not in pop.muted_axes()
+
+    def test_price_is_narrowed_rather_than_greyed(self, qapp):
+        pop = FilterPopover()
+        pop.price_group.min_rate.setValue(9000)
+        pop.set_availability({}, rate_high=2500)
+        # The dearest reachable rate is the honest ceiling, so a dead 9000 floor
+        # cannot sit there describing a range nothing can match.
+        assert pop.price_group.max_rate.maximum() == 2500
+        assert pop.price_group.min_rate.value() == 2500
+        assert pop.price_group.isEnabled() is True
+
+    def test_price_the_clerk_never_touched_is_not_moved(self, qapp):
+        pop = FilterPopover()
+        pop.price_group.min_rate.setValue(1000)
+        pop.set_availability({}, rate_high=2500)
+        # Only the ceiling is narrowed; a floor the clerk chose stays theirs.
+        assert pop.price_group.min_rate.value() == 1000
+
+    def test_an_axis_the_caller_has_no_answer_for_is_left_live(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(["Toyota", "Honda"])
+        # Only an answer about makes: the other axes are left exactly as they were,
+        # not greyed on the strength of a question that was never asked.
+        pop.set_availability({"makes": {"Toyota"}})
+        assert pop.brand_pane.boxes["Honda"].isEnabled() is False
+        assert pop.cc_group.isEnabled() is True
+        assert pop.seat_group.isEnabled() is True
+
+    #: The muting tests need a fleet where engine size is the *only* axis in play,
+    #: so both vehicles carry seats, transmission and fuel. `_add_vehicle` leaves
+    #: those NULL by default, and a NULL column has no values to offer, so those
+    #: axes would grey out for an unrelated reason and a test could pass while
+    #: proving nothing about engine size.
+    #:
+    #: The bike records a displacement and the SUV deliberately does not, because
+    #: `engine_cc` is a motorcycle field -- a car's displacement is not what this
+    #: schema records. That asymmetry is what makes "Honda + motorcycle" a real
+    #: dead end: Honda's only vehicle is the CRV.
+    @staticmethod
+    def _car_and_bike(context) -> None:
+        _add_vehicle(
+            context,
+            make="Honda",
+            model="CRV",
+            plate="HON-001",
+            vehicle_class="suv",
+            seats=7,
+            transmission="Automatic",
+            fuel_type="Diesel",
+        )
+        _add_vehicle(
+            context,
+            make="Yamaha",
+            model="NMAX",
+            plate="BIKE-001",
+            vehicle_class="motorcycle",
+            engine_cc=155,
+            seats=2,
+            transmission="Manual",
+            fuel_type="Petrol",
+        )
+
+    def test_engine_size_is_live_while_a_motorcycle_is_reachable(self, qapp, shell, branch):
+        _built, context = branch
+        self._car_and_bike(context)
+
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        pop = page.filter_popover
+
+        pop.type_group.boxes["motorcycle"].setChecked(True)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        qapp_process(page)
+        # The NMAX is a 155, so its bucket is on the table.
+        assert "cc_buckets" not in pop.muted_axes()
+
+    def test_a_brand_with_no_motorcycle_greys_out_engine_size(self, qapp, shell, branch):
+        _built, context = branch
+        self._car_and_bike(context)
+
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        pop = page.filter_popover
+
+        pop.type_group.boxes["motorcycle"].setChecked(True)
+        while not page._exhausted:
+            page._load_page()
+        # This is the user's case: Honda has the CRV and no bike, so engine size
+        # has nothing left to say.
+        pop.brand_pane.boxes["Honda"].setChecked(True)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        qapp_process(page)
+        assert "cc_buckets" in pop.muted_axes()
+
+    def test_unticking_the_brand_restores_engine_size(self, qapp, shell, branch):
+        _built, context = branch
+        self._car_and_bike(context)
+
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        pop = page.filter_popover
+
+        pop.type_group.boxes["motorcycle"].setChecked(True)
+        while not page._exhausted:
+            page._load_page()
+        pop.brand_pane.boxes["Honda"].setChecked(True)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        assert "cc_buckets" in pop.muted_axes()
+
+        pop.brand_pane.boxes["Honda"].setChecked(False)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        assert "cc_buckets" not in pop.muted_axes()
+
+    def test_a_muted_axis_keeps_its_ticks_through_a_real_selection(self, qapp, shell, branch):
+        _built, context = branch
+        self._car_and_bike(context)
+
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        pop = page.filter_popover
+
+        pop.type_group.boxes["motorcycle"].setChecked(True)
+        pop.cc_group.boxes["126 - 155cc"].setChecked(True)
+        while not page._exhausted:
+            page._load_page()
+        # Brand last, on purpose: the axis the clerk just touched is never greyed,
+        # so the brand must be the final tick for engine size to be the casualty.
+        pop.brand_pane.boxes["Honda"].setChecked(True)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        assert "cc_buckets" in pop.muted_axes()
+        # Dimmed, not discarded: the clerk's engine size is still there to come
+        # back to when the brand is unticked.
+        assert pop.cc_group.boxes["126 - 155cc"].isChecked() is True
+
+    def test_a_failing_availability_query_leaves_the_columns_live(self, shell, branch, monkeypatch):
+        from app.staff.pages import new_rental
+
+        _built, context = branch
+        page = NewRentalPage(shell)
+        page.refresh()
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("no availability")
+
+        monkeypatch.setattr(new_rental, "axis_availability", _boom)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        # Greying itself out on a transient hiccup would be worse than no greying.
+        assert page.filter_popover.muted_axes() == []
+
+    def test_a_failed_refresh_clears_greys_from_the_last_one(self, shell, branch, monkeypatch):
+        from app.services import vehicle_service
+        from app.staff.pages import new_rental
+
+        _built, context = branch
+        self._car_and_bike(context)
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        pop = page.filter_popover
+
+        # A real narrowing first, so there is a genuine grey to be left behind.
+        pop.type_group.boxes["motorcycle"].setChecked(True)
+        while not page._exhausted:
+            page._load_page()
+        pop.brand_pane.boxes["Honda"].setChecked(True)
+        page._availability_timer.stop()
+        page._refresh_availability()
+        assert pop.muted_axes() != []
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("no availability")
+
+        monkeypatch.setattr(new_rental, "axis_availability", _boom)
+        page._refresh_availability()
+        # A grey that outlives its reason is a dead end the clerk cannot see their
+        # way out of, so the failure has to undo it rather than simply do nothing.
+        assert pop.muted_axes() == []
+
+
+class TestNewRentalSectionHighlight:
+    def test_the_brand_list_matches_the_sections_built(self, qapp, shell, branch):
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert page.filter_popover.brand_pane.order == page.brands_shown
+
+    def test_the_brand_in_view_is_the_one_highlighted(self, qapp, shell, branch):
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        while not page._exhausted:
+            page._load_page()
+        qapp_process(page)
+
+        assert page.current_section == page.brands_shown[0]
+        active = [
+            b
+            for b in page.filter_popover.brand_pane.order
+            if page.filter_popover.brand_row(b).is_active()
+        ]
+        assert active == [page.brands_shown[0]]
+
+    def test_the_highlight_is_the_sidebar_paint_not_a_new_one(self, qapp):
+        pop = FilterPopover()
+        pop.set_brands(["Toyota"])
+        row = pop.brand_row("Toyota")
+        assert isinstance(row, ActiveRow)
+        pop.set_active_section("Toyota")
+        assert row.is_active() is True
+        pop.set_active_section(None)
+        assert row.is_active() is False
+
+    def test_the_open_category_uses_the_same_active_row(self, qapp):
+        pop = FilterPopover()
+        row = pop._categories["makes"]
+        assert isinstance(row, ActiveRow)
+        pop._categories["seats"].click()
+        assert row.is_active() is False
+        assert pop._categories["seats"].is_active() is True
+
+    def test_a_brand_the_fleet_does_not_have_is_not_offered(self, qapp, shell, branch):
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert "Mazda" not in page.filter_popover.brand_pane.order
+
+
+class TestNewRentalPage:
+    def test_the_page_uses_the_dashboard_panel(self, shell):
+        page = NewRentalPage(shell)
+        assert page.PANEL is True
+        assert page.panel is not None
+        assert page.HEADER is False
+
+    def test_the_header_row_is_gone(self, shell):
+        page = NewRentalPage(shell)
+        assert page._header.isVisible() is False
+
+    def test_staff_may_open_the_page(self, shell):
+        page = NewRentalPage(shell)
+        page.refresh()
+
+    def test_every_vehicle_gets_a_slot_whatever_its_status(self, shell, branch):
+        _built, context = branch
+        with context.reading() as session:
+            total = session.query(Vehicle).count()
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert total > 0
+        assert len(page.slots) == total
+
+    def test_the_page_loads_one_page_of_brands_at_a_time(self, shell, branch, monkeypatch):
+        from app.staff.pages import new_rental
+
+        monkeypatch.setattr(new_rental, "BRANDS_PER_PAGE", 1)
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        _add_vehicle(context, make="Yamaha", model="NMAX", plate="BIKE-001")
+
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert page.brands_shown == ["Honda"]
+
+        page._load_page()
+        assert page.brands_shown == ["Honda", "Toyota"]
+
+        page._load_page()
+        assert page.brands_shown == ["Honda", "Toyota", "Yamaha"]
+        assert page._exhausted
+
+        page._load_page()
+        assert page.brands_shown == ["Honda", "Toyota", "Yamaha"]
+
+    def test_the_fleet_is_grouped_into_a_row_per_brand(self, shell, branch):
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        _add_vehicle(context, make="Yamaha", model="NMAX", plate="BIKE-001")
+
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert page.brands_shown == ["Honda", "Toyota", "Yamaha"]
+        for section in page._sections:
+            assert section.heading.text() == section.brand
+            assert all(slot.vehicle.make == section.brand for slot in section.slots)
+
+    def test_a_brand_heading_is_just_the_make(self, shell, branch):
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        _add_vehicle(context, make="Honda", model="City", plate="HON-002")
+
+        page = NewRentalPage(shell)
+        page.refresh()
+        # Removed on request: the heading used to read "Honda 2 vehicles". The one
+        # count that remains is in the top bar, describing the whole fleet.
+        assert [s.heading.text() for s in page._sections] == page.brands_shown
+        assert all(not hasattr(s, "count") for s in page._sections)
+
+    def test_the_search_and_filters_bar_is_pinned_above_the_scroll(self, shell):
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        qapp_process(page)
+        bar = page.pinned_bar
+        assert bar.isVisible() is True
+        assert bar.height() == FILTER_BAR_H
+        # Outside the scroll area, so it cannot scroll away with the fleet.
+        assert page.scroll_area.isAncestorOf(bar) is False
+        assert bar.y() < page.scroll_area.y()
+
+    
+
+    #: Brands wide enough that a click can put a middle one at the top of the
+    #: window. With three brands the list barely overflows, so the last brand can
+    #: never reach the top and the scroll would clamp to nothing.
+    SCROLL_BRANDS = ("Boris", "Citroen", "Daihatsu", "Eagle", "Fiat", "GMC", "Holden")
+
+    def _tall_fleet(self, context) -> None:
+        for index, make in enumerate(self.SCROLL_BRANDS):
+            _add_vehicle(
+                context, make=make, model=f"Model{index}", plate=f"S{index:03d}"
             )
-            record.status = "completed"
-        page = TodayPage(shell)
-        page.refresh()
-        assert page.workshop.state is LoadState.EMPTY
 
-    def test_collections_show_who_is_picking_up(self, shell, branch):
-        page = TodayPage(shell)
+    def _scrolling_page(self, shell, monkeypatch, exhaust: bool = True):
+        """A page showing a fleet taller than the window.
+
+        `exhaust=False` leaves brands unloaded, which is the state a scrolling test
+        needs: only then does reaching the bottom have anything left to append.
+        """
+        from app.staff.pages import new_rental
+
+        monkeypatch.setattr(new_rental, "BRANDS_PER_PAGE", 1)
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
         page.refresh()
-        assert page.collections.row_count() >= 1
-        assert all("#" in t for t in texts(page.collections))
+        if exhaust:
+            while not page._exhausted:
+                page._load_page()
+        qapp_process(page)
+        return page
+
+    def test_a_clicked_brand_scrolls_to_it(self, qapp, shell, branch, monkeypatch):
+        _built, context = branch
+        self._tall_fleet(context)
+        page = self._scrolling_page(shell, monkeypatch)
+        bar = page.scroll_area.verticalScrollBar()
+        assert bar.maximum() > 0, "the fleet has to be taller than the window"
+
+        target = page.brands_shown[4]
+        page.scroll_to_section(target)
+        qapp_process(page)
+        assert bar.value() > 0
+        assert page.current_section == target
+
+    def test_the_highlight_follows_the_scroll_rather_than_where_it_landed(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        _built, context = branch
+        self._tall_fleet(context)
+        page = self._scrolling_page(shell, monkeypatch)
+        assert page.current_section == page.brands_shown[0]
+
+        for target in (page.brands_shown[2], page.brands_shown[5], None):
+            if target is None:
+                page.scroll_area.verticalScrollBar().setValue(0)
+                page._settle_timer.stop()
+                page._track_section()
+                assert page.current_section == page.brands_shown[0]
+            else:
+                page.scroll_to_section(target)
+                page._settle_timer.stop()
+                page._track_section()
+                assert page.current_section == target
+            active = page.filter_popover.brand_row(page.current_section)
+            assert active.is_active() is True
+
+    def test_only_one_brand_is_highlighted_at_a_time(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        _built, context = branch
+        self._tall_fleet(context)
+        page = self._scrolling_page(shell, monkeypatch)
+        page.scroll_to_section(page.brands_shown[4])
+        page._settle_timer.stop()
+        page._track_section()
+        active = [
+            b
+            for b in page.filter_popover.brand_pane.order
+            if page.filter_popover.brand_row(b).is_active()
+        ]
+        assert active == [page.brands_shown[4]]
+
+    def test_the_list_really_is_scrollable_and_so_really_is_continuous(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        _built, context = branch
+        self._tall_fleet(context)
+        page = self._scrolling_page(shell, monkeypatch, exhaust=False)
+        bar = page.scroll_area.verticalScrollBar()
+        assert bar.maximum() > 0
+        before = len(page.brands_shown)
+        bar.setValue(bar.maximum())
+        qapp_process(page)
+        assert len(page.brands_shown) > before
+
+    def test_the_count_comes_from_the_database(self, qapp, shell, branch):
+        _built, context = branch
+        with context.reading() as session:
+            total = session.query(Vehicle).count()
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert f"{total:,}" in page.count_label.text()
+
+    def test_a_filter_narrows_the_sections_that_are_built(self, qapp, shell, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001", vehicle_class="medium")
+        _add_vehicle(context, make="Ford", model="Ranger", plate="FOR-001", vehicle_class="pickup")
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        assert set(page.brands_shown) == {"Toyota", "Honda", "Ford"}
+
+        page.filter_popover.type_group.boxes["pickup"].setChecked(True)
+        qapp_process(page)
+        assert page.brands_shown == ["Ford"]
+        assert page.slots[0].vehicle.model == "Ranger"
+
+    def test_clearing_the_rail_restores_the_fleet(self, qapp, shell, branch):
+        _built, context = branch
+        _add_vehicle(context, make="Ford", model="Ranger", plate="FOR-001", vehicle_class="pickup")
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        before = list(page.brands_shown)
+
+        page.filter_popover.type_group.boxes["pickup"].setChecked(True)
+        qapp_process(page)
+        assert page.brands_shown != before
+
+        page.clear_filters()
+        qapp_process(page)
+        assert page.brands_shown == before
+
+    def test_a_search_narrows_the_fleet_to_what_it_names(self, qapp, shell, branch):
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        _add_vehicle(context, make="Ford", model="Ranger", plate="FOR-001")
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+
+        page.search.setText("Ranger")
+        qapp_process(page)
+        assert page.brands_shown == ["Ford"]
+
+    def test_a_search_matching_no_vehicle_says_so_instead_of_breaking(self, qapp, shell, branch):
+        _built, context = branch
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+
+        page.search.setText("no-such-vehicle")
+        page._settle_timer.stop()
+        while not page._exhausted:
+            page._load_page()
+        qapp_process(page)
+        assert page._sections == []
+        assert page._empty.isVisible() is True
+        assert page.current_section is None
+
+    def test_a_selection_that_matches_nothing_does_not_raise(self, qapp, shell, branch):
+        _built, context = branch
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+
+        page.filter_popover.price_group.min_rate.setValue(900_000)
+        qapp_process(page)
+        assert page._sections == []
+
+    def test_a_filter_that_matches_nothing_reports_zero(self, qapp, shell, branch):
+        _built, context = branch
+        page = NewRentalPage(shell)
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        page.filter_popover.price_group.min_rate.setValue(900_000)
+        qapp_process(page)
+        assert page.matched == 0
+        assert page.count_label.text() == "0 of 7 vehicles"
+
+    def test_the_page_survives_a_failing_count(self, qapp, shell, branch, monkeypatch):
+        from app.staff.pages import new_rental
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("count unavailable")
+
+        monkeypatch.setattr(new_rental, "count_filtered_vehicles", _boom)
+        page = NewRentalPage(shell)
+        page.refresh()
+        assert "unavailable" in page.count_label.text()
+        assert page.brands_shown, "the fleet still loads when the count does not"
+
+
+class TestVehicleFilters:
+    def test_brands_come_from_the_fleet(self, branch):
+        from app.services.vehicle_service import vehicle_brands
+
+        _built, context = branch
+        with context.reading() as session:
+            assert vehicle_brands(session) == ["Toyota"]
+
+    def test_the_fleet_can_be_narrowed_to_a_set_of_brands(self, branch):
+        from app.services.vehicle_service import showcase_vehicle_rows
+
+        _built, context = branch
+        with context.reading() as session:
+            grouped = showcase_vehicle_rows(
+                session, category=None, statuses=None, makes=["Toyota", "Honda"]
+            )
+            hondas = showcase_vehicle_rows(
+                session, category=None, statuses=None, makes=["Honda"]
+            )
+        assert len(grouped) == 7
+        assert hondas == []
+
+    def test_an_empty_filter_restricts_nothing(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        assert VehicleFilter().is_empty() is True
+        assert VehicleFilter(search="   ").is_empty() is True
+        assert VehicleFilter(max_rate=1000).is_empty() is False
+
+    def test_a_filter_describes_itself_for_the_readout(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        assert VehicleFilter().describe() == "No filters"
+        assert VehicleFilter(vehicle_classes=frozenset({"suv"})).describe() == "1 filter"
+        assert (
+            VehicleFilter(seats=frozenset({5, 7}), search="vios").describe()
+            == "3 filters"
+        )
+
+    def test_the_whole_fleet_is_returned_when_nothing_is_ticked(self, branch):
+        from app.services.vehicle_service import (
+            VehicleFilter,
+            showcase_vehicle_rows,
+        )
+
+        _built, context = branch
+        with context.reading() as session:
+            rows = showcase_vehicle_rows(
+                session, category=None, statuses=None, filters=VehicleFilter()
+            )
+        assert len(rows) == 7
+
+
+class TestFilterQueries:
+    """The rail's selection is applied in SQL, so these read a real database."""
+
+    def _fleet(self, context) -> None:
+        _add_vehicle(
+            context, make="Toyota", model="Vios", plate="AAA-001",
+            vehicle_class="small", daily_rate="1200", seats=5,
+            transmission="Automatic", fuel_type="Petrol",
+        )
+        _add_vehicle(
+            context, make="Toyota", model="Fortuner", plate="AAA-002",
+            vehicle_class="suv", daily_rate="4800", seats=7,
+            transmission="Automatic", fuel_type="Diesel", engine_cc=2700,
+        )
+        _add_vehicle(
+            context, make="Honda", model="Click", plate="MMP-001",
+            category_name="Motorcycle", vehicle_class="motorcycle",
+            daily_rate="800", seats=2, transmission="Manual",
+            fuel_type="Petrol", engine_cc=125,
+        )
+        _add_vehicle(
+            context, make="Kawasaki", model="NMAX", plate="MMP-002",
+            category_name="Motorcycle", vehicle_class="motorcycle",
+            daily_rate="1500", seats=2, transmission="Automatic",
+            fuel_type="Petrol", engine_cc=155,
+        )
+
+    def _models(self, context, filters) -> set[str]:
+        from app.services.vehicle_service import showcase_vehicle_rows
+
+        with context.reading() as session:
+            return {v.model for v, _ in showcase_vehicle_rows(
+                session, category=None, statuses=None, filters=filters
+            )}
+
+    def test_a_size_class_narrows_the_fleet(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(
+            context, VehicleFilter(vehicle_classes=frozenset({"motorcycle"}))
+        ) == {"Click", "NMAX"}
+        assert self._models(
+            context, VehicleFilter(vehicle_classes=frozenset({"suv"}))
+        ) == {"Fortuner"}
+
+    def test_a_displacement_bucket_narrows_the_fleet(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(
+            context, VehicleFilter(cc_buckets=frozenset({"Up to 125cc"}))
+        ) == {"Click"}
+        assert self._models(
+            context, VehicleFilter(cc_buckets=frozenset({"126 - 155cc"}))
+        ) == {"NMAX"}
+        # A car with no recorded cc is not in any bucket, which is correct: the
+        # clerk asked about engine sizes and the database has nothing to say.
+        assert self._models(
+            context, VehicleFilter(cc_buckets=frozenset({"Over 400cc"}))
+        ) == {"Fortuner"}
+
+    def test_two_displacement_buckets_are_an_or(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(
+            context,
+            VehicleFilter(cc_buckets=frozenset({"Up to 125cc", "126 - 155cc"})),
+        ) == {"Click", "NMAX"}
+
+    def test_a_price_range_narrows_the_fleet(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(context, VehicleFilter(min_rate=1000, max_rate=2000)) == {
+            "Vios",
+            "NMAX",
+        }
+        assert self._models(context, VehicleFilter(min_rate=4000)) == {"Fortuner"}
+
+    def test_a_passenger_count_narrows_the_fleet(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(context, VehicleFilter(seats=frozenset({7}))) == {"Fortuner"}
+
+    def test_transmission_and_fuel_narrow_the_fleet(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(
+            context, VehicleFilter(transmissions=frozenset({"Manual"}))
+        ) == {"Click"}
+        assert self._models(
+            context, VehicleFilter(fuel_types=frozenset({"Diesel"}))
+        ) == {"Fortuner"}
+
+    def test_two_vehicles_in_one_class_are_not_narrowed_away(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(
+            context, VehicleFilter(vehicle_classes=frozenset({"motorcycle"}))
+        ) == {"Click", "NMAX"}
+
+    def test_the_axes_combine_as_an_and(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(
+            context,
+            VehicleFilter(
+                vehicle_classes=frozenset({"motorcycle"}),
+                transmissions=frozenset({"Automatic"}),
+            ),
+        ) == {"NMAX"}
+
+    def test_a_search_matches_make_model_or_plate(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(context, VehicleFilter(search="fortuner")) == {"Fortuner"}
+        assert self._models(context, VehicleFilter(search="kawasaki")) == {"NMAX"}
+        assert self._models(context, VehicleFilter(search="mmp-002")) == {"NMAX"}
+        assert self._models(context, VehicleFilter(search="nothing")) == set()
+
+    def test_a_search_ignores_case_and_surrounding_space(self, branch):
+        from app.services.vehicle_service import VehicleFilter
+
+        _built, context = branch
+        self._fleet(context)
+        assert self._models(context, VehicleFilter(search="  FORTUNER  ")) == {
+            "Fortuner"
+        }
+
+    def test_the_count_agrees_with_the_rows(self, branch):
+        from app.services.vehicle_service import (
+            VehicleFilter,
+            count_filtered_vehicles,
+        )
+
+        _built, context = branch
+        self._fleet(context)
+        filters = VehicleFilter(vehicle_classes=frozenset({"motorcycle"}))
+        with context.reading() as session:
+            counted = count_filtered_vehicles(session, filters)
+        assert counted == len(self._models(context, filters)) == 2
+
+    def test_the_count_reads_the_whole_fleet_not_one_page(self, branch):
+        from app.services.vehicle_service import (
+            VehicleFilter,
+            count_filtered_vehicles,
+        )
+
+        _built, context = branch
+        self._fleet(context)
+        filters = VehicleFilter(vehicle_classes=frozenset({"motorcycle"}))
+        with context.reading() as session:
+            # Only the first brand is ever loaded by the page, but the count answers
+            # for both -- otherwise it would read 1 and lie about the other bike.
+            counted = count_filtered_vehicles(
+                session, filters, available_only=True
+            )
+        assert counted == 2
+
+    def test_the_count_of_everything_is_the_fleet(self, branch):
+        from app.services.vehicle_service import (
+            VehicleFilter,
+            count_filtered_vehicles,
+        )
+
+        _built, context = branch
+        with context.reading() as session:
+            seeded = count_filtered_vehicles(session, VehicleFilter())
+        self._fleet(context)
+        with context.reading() as session:
+            # `branch` already seeds three vehicles, so the count has to be the
+            # seeded ones plus the four added here -- not just the four.
+            assert count_filtered_vehicles(session, VehicleFilter()) == seeded + 4
+
+
+class TestBrandSection:
+    def _vehicle(self, index: int) -> RentalVehicle:
+        return RentalVehicle(
+            vehicle_id=index,
+            make="Toyota",
+            model=f"V{index}",
+            year=2020,
+            daily_rate=Decimal("1000"),
+            seats=4,
+        )
+
+    def test_a_section_shows_the_brand(self, qapp):
+        section = BrandSection(
+            "Toyota", [self._vehicle(index) for index in range(2)], QThreadPool()
+        )
+        assert section.heading.text() == "Toyota"
+        assert [slot.vehicle.vehicle_id for slot in section.slots] == [0, 1]
+
+
+class TestVehicleCard:
+    def _vehicle(self, index: int = 7) -> RentalVehicle:
+        return RentalVehicle(
+            vehicle_id=index,
+            make="Testmake",
+            model=f"Testmodel{index}",
+            year=1999,
+            daily_rate=Decimal("2500"),
+            seats=5,
+            photo_url=None,
+        )
+
+    def test_the_card_carries_the_name_price_and_capacity(self, qapp):
+        card = VehicleCard(self._vehicle())
+        assert card.name.full_text() == "Testmake Testmodel7"
+        assert card.price.text() == "\u20b12,500 / day"
+        assert card.meta.text() == "5 seats"
+
+    def test_check_details_reports_the_vehicle(self, qapp):
+        card = VehicleCard(self._vehicle())
+        seen = []
+        card.details_requested.connect(seen.append)
+        card.details.click()
+        assert seen == [7]
+
+    def test_the_details_button_lives_on_the_photo_overlay(self, qapp):
+        card = VehicleCard(self._vehicle())
+        assert card.details is card.photo.details
+        card.photo.set_reveal(1.0)
+        assert card.photo.reveal == 1.0
+        assert card.photo.details.isEnabled()
+
+    def test_the_photo_zoom_is_animatable(self, qapp):
+        card = VehicleCard(self._vehicle())
+        card.photo.set_zoom(1.06)
+        assert card.photo.zoom == pytest.approx(1.06)
+
+    def test_a_slot_takes_a_photo_url_that_arrives_late(self, qapp):
+        slot = VehicleSlot(self._vehicle())
+        pool = QThreadPool()
+        slot.build(pool)
+        first = slot.card._loader
+        slot.set_photo_url("https://example.test/car.webp")
+        assert slot._photo_url == "https://example.test/car.webp"
+        assert slot.card._loader is not first
+
+    def test_the_card_is_twice_as_round_as_its_button(self):
+        assert VEHICLE_CARD_RADIUS == VEHICLE_BTN_RADIUS * 2
+        assert VEHICLE_IMAGE_RADIUS == VEHICLE_BTN_RADIUS
+
+    def test_the_stylesheet_agrees_with_the_button_radius(self):
+        style = theme.load_stylesheet()
+        assert "QPushButton#vehicleDetailsButton" in style
+        block = style.split("QPushButton#vehicleDetailsButton", 1)[1].split("}", 1)[0]
+        assert f"border-radius: {VEHICLE_BTN_RADIUS}px" in block
+
+    def test_a_slot_swaps_the_skeleton_for_the_card_when_the_photo_arrives(self, qapp):
+        slot = VehicleSlot(self._vehicle())
+        assert slot._stack.currentWidget() is slot.skeleton
+        pool = QThreadPool()
+        slot.build(pool)
+        pool.waitForDone(5000)
+        qapp.processEvents()
+        assert slot.card is not None
+        assert slot._stack.currentWidget() is slot.card
+
+    def test_a_slot_is_built_only_once(self, qapp):
+        slot = VehicleSlot(self._vehicle())
+        pool = QThreadPool()
+        slot.build(pool)
+        card = slot.card
+        slot.build(pool)
+        assert slot.card is card
+
+    def test_a_rail_builds_one_card_per_vehicle(self, qapp):
+        rail = VehicleRail(QThreadPool(), [self._vehicle(index) for index in range(3)])
+        assert [slot.vehicle.vehicle_id for slot in rail.slots] == [0, 1, 2]
+        qapp.processEvents()
+        rail.build_now()
+        assert all(slot.built and slot.card is not None for slot in rail.slots)
+
+    def test_a_rail_side_scrolls_when_it_overflows(self, qapp):
+        rail = VehicleRail(QThreadPool(), [self._vehicle(index) for index in range(9)])
+        rail.resize(VEHICLE_CARD_MIN_W, VEHICLE_CARD_H)
+        rail.show()
+        qapp.processEvents()
+        assert rail.horizontalScrollBar().maximum() > 0
+
+
+def test_the_shimmer_skeleton_is_shared_with_the_hero():
+    import app.ui.hero as hero
+
+    assert hero.Skeleton is Skeleton
+
+
+def test_the_media_resolver_fills_photo_urls_for_the_whole_fleet(qapp, branch, monkeypatch):
+    from app.services import media_service
+    from app.staff import vehicle_cards
+
+    class _Row:
+        view_angle = "front34"
+        image_url = "https://example.test/signed.webp"
+
+    _built, context = branch
+    monkeypatch.setattr(
+        vehicle_cards.media_service,
+        "get_or_fetch_media",
+        lambda session, vehicle, include_3d=False: [_Row()],
+    )
+    assert media_service.pick_photo_url([_Row()]) == "https://example.test/signed.webp"
+
+    resolver = MediaResolver(context)
+    seen: dict[int, str] = {}
+    resolver.signals.resolved.connect(seen.update)
+    resolver.run()
+
+    with context.reading() as session:
+        expected = {v.vehicle_id for v in session.query(Vehicle).all()}
+    assert set(seen) == expected
+    assert set(seen.values()) == {"https://example.test/signed.webp"}
+
+
+def test_the_media_resolver_can_be_limited_to_one_page(qapp, branch, monkeypatch):
+    from app.staff import vehicle_cards
+
+    class _Row:
+        view_angle = "front34"
+        image_url = "https://example.test/signed.webp"
+
+    _built, context = branch
+    monkeypatch.setattr(
+        vehicle_cards.media_service,
+        "get_or_fetch_media",
+        lambda session, vehicle, include_3d=False: [_Row()],
+    )
+    with context.reading() as session:
+        first_page = [v.vehicle_id for v in session.query(Vehicle).all()][:2]
+
+    resolver = MediaResolver(context, first_page)
+    seen: dict[int, str] = {}
+    resolver.signals.resolved.connect(seen.update)
+    resolver.run()
+    assert set(seen) == set(first_page)
 
 
 # --------------------------------------------------------------------------
@@ -967,13 +2303,13 @@ class TestPageRefresh:
     def test_a_table_failure_does_not_take_the_page_down(self, shell, branch, monkeypatch):
         """One broken query should show one failed table, not a dialog over
         every table and a window that has to be reopened."""
-        page = TodayPage(shell)
+        page = PaymentsPage(shell)
         monkeypatch.setattr(
-            page.due_back, "_loader", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+            page.takings, "_loader", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
         )
         page.refresh()
-        assert page.due_back.state is LoadState.FAILED
-        assert page.overdue.state is LoadState.LOADED
+        assert page.takings.state is LoadState.FAILED
+        assert page.outstanding.state is LoadState.LOADED
 
 
 class TestTheFixtureBranch:
@@ -996,24 +2332,3 @@ class TestTheFixtureBranch:
         assert TODAY == date.today(), (
             f"the branch was still built around {TODAY}, not {date.today()}"
         )
-
-
-class _FrozenDate(date):
-    """A `date` subclass that reports one fixed value from `today()`.
-
-    Constructed as `_FrozenDate(2026, 1, 1)` rather than from another `date`,
-    because `date.__new__` only accepts year/month/day -- passing a `date`
-    instance raises inside `__new__`, before anything under test runs.
-    """
-
-    def __new__(cls, year, month, day):
-        return super().__new__(cls, year, month, day)
-
-
-def frozen_date(value: date):
-    """A drop-in for the `date` name in a page module, pinned to `value`."""
-    return type(
-        "FrozenDate",
-        (_FrozenDate,),
-        {"today": classmethod(lambda cls: value)},
-    )

@@ -1,18 +1,3 @@
-"""Ink coverage for a rendered widget. Not part of the app.
-
-    python -m app.staff.inkcheck path/to/widget.png
-
-Reports, for each of a few named colours, how many pixels are close to it. The
-charts are painted rather than styled, so the only way to know a curve actually
-drew is to look for its colour in the output -- and since nobody can look at a
-screenshot in CI, the check has to be numeric.
-
-Usage is deliberately crude and deliberately loud: it answers "is there any of
-this colour in the image", which is the question that catches an empty
-paintEvent, an off-by-one that puts everything outside the clip rect, and a
-gradient that collapsed to transparent.
-"""
-
 from __future__ import annotations
 
 import sys

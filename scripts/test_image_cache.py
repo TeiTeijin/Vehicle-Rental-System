@@ -1,10 +1,3 @@
-"""Image cache behaviour: identity keying, atomic writes, corruption, clear.
-
-    python -m scripts.test_image_cache
-
-Deliberately does not touch the network or the database.
-"""
-
 from __future__ import annotations
 
 import json
