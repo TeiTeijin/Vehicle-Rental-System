@@ -1,24 +1,3 @@
-"""The dashboard's measurements, in one place.
-
-Qt stylesheets cannot be read back at runtime, so a radius written in QSS and a
-radius written in Python are two values that can disagree with no error. The
-dashboard's grid is the strictest layout in the app -- two rows of
-differently-proportioned cards that must align on their edges and their internal
-spacing -- so the numbers live here and the stylesheet's selectors are asserted
-against them in ``tests/test_staff_dashboard.py``.
-
-**Breakpoints are content widths, not window widths.** The card grid is told
-which layout to use by how wide *it* is, which is the window minus the sidebar
-minus the page margins. Storing window widths here and comparing them against a
-widget's own width is the bug the old 1180/900 pair encoded: at the shipped
-1440 window the main area is 1146px, so a "1180 means three columns" threshold
-picked two columns on a 1440px screen. The numbers below are the content widths
-the layout actually has to fit.
-
-Everything is a plain int. Device-pixel scaling happens in Qt; these are logical
-pixels and the whole app is authored at 1x.
-"""
-
 from __future__ import annotations
 
 # -- the window --------------------------------------------------------------
@@ -39,6 +18,11 @@ NAV_GAP = 8
 NAV_ICON = 16
 NAV_ACTIVE_BAR = 3
 
+#: Height of a row in the New Rental brand list. Matches NAV_ROW_H so the two
+#: active-row lists -- the sidebar's pages and the popover's brand list -- have
+#: the same rhythm and the highlight reads as one idea.
+SECTION_ROW_H = 44
+
 # -- the page ---------------------------------------------------------------
 PAGE_MARGIN_X = 26
 PAGE_MARGIN_Y = 22
@@ -46,6 +30,10 @@ PAGE_PANEL_RADIUS = 36
 PAGE_PANEL_PAD = 16
 HEADER_H = 44
 AVATAR = 36
+
+#: Gap between a page's fixed left column and its scrolling content. Wide enough
+#: that the column's border does not touch the fleet cards.
+PAGE_BODY_ROW_GAP = 18
 
 # -- cards ------------------------------------------------------------------
 #: 28px, the same on light and dark cards.
@@ -81,6 +69,84 @@ BTN_PAD_X = 18
 # -- pills ------------------------------------------------------------------
 PILL_HEIGHT = 28
 PILL_RADIUS = 999  # a stadium, not a circle
+
+# -- vehicle cards ----------------------------------------------------------
+#: The "Check details" button radius; the image and card corners derive from it.
+VEHICLE_BTN_RADIUS = 8
+VEHICLE_IMAGE_RADIUS = VEHICLE_BTN_RADIUS
+#: Twice the button radius: the card is deliberately rounder than its contents.
+VEHICLE_CARD_RADIUS = VEHICLE_BTN_RADIUS * 2
+
+VEHICLE_CARD_PAD = 14
+VEHICLE_INNER_GAP = 10
+VEHICLE_IMAGE_H = 150
+VEHICLE_BTN_H = 32
+VEHICLE_NAME_SIZE = 18
+#: One text line, plus the price/button row's floor.
+VEHICLE_LINE_H = 24
+VEHICLE_META_H = 18
+#: Hover lift on a card, in pixels; the card reserves this at its top.
+HOVER_LIFT = 3
+#: Hover: the photo zooms in, and the action strip fades up over it.
+HOVER_ZOOM = 1.06
+HOVER_ZOOM_MS = 180
+HOVER_REVEAL_MS = 140
+#: Height of the gradient the revealed action strip sits against.
+VEHICLE_OVERLAY_H = 56
+#: How far below its resting place the action strip starts, at reveal zero.
+VEHICLE_OVERLAY_OFFSET = 8
+#: Fixed so a skeleton reserves exactly the space its card will occupy. The
+#: last row is the price line; the details button lives on the photo overlay.
+VEHICLE_CARD_H = (
+    VEHICLE_CARD_PAD * 2
+    + VEHICLE_IMAGE_H
+    + VEHICLE_INNER_GAP
+    + VEHICLE_LINE_H
+    + 6
+    + VEHICLE_META_H
+    + VEHICLE_INNER_GAP
+    + VEHICLE_LINE_H
+    + HOVER_LIFT
+)
+
+VEHICLE_CARD_MIN_W = 240
+VEHICLE_CARD_MAX_W = 360
+VEHICLE_CARD_GUTTER = 16
+
+# -- the New Rental filter popover --------------------------------------------
+#: Whole popover, categories plus options. Wide enough for two columns of 44px
+#: rows without the passenger row having to wrap.
+FILTER_POPOVER_W = 520
+#: Fixed height: the tallest pane is the brand list, and a popover that grows with
+#: the fleet would jump under the cursor as brands load.
+FILTER_POPOVER_H = 420
+#: Inset inside the popover's card, as (left, top, right, bottom). Matches
+#: CARD_PADDING so the options sit on the same inset as the card's own content.
+FILTER_POPOVER_PAD = (16, 16, 16, 16)
+#: The left category column. Narrower than the nav sidebar (210) because these
+#: labels are one or two words.
+POPOVER_CATEGORY_W = 180
+#: Cap on either column's scroll area, so a long brand list cannot push the
+#: popover past FILTER_POPOVER_H.
+POPOVER_PANE_MAX_H = 340
+#: Height of a filter row: a checkbox, or a spin box.
+FILTER_ROW_H = 30
+#: Gap between a group's heading and its options, and between options.
+FILTER_GAP = 6
+#: Gap between groups.
+FILTER_GROUP_GAP = 18
+#: Height of the pinned search/filter bar above the fleet list. Not counted in
+#: the popover's height: the bar is on the page, the popover floats over it.
+FILTER_BAR_H = 58
+#: Gap between brand sections in the New Rental fleet list.
+BRAND_ROW_GAP = 22
+#: Quiet period after a scroll gesture before the active section is read again.
+#: Long enough to ignore the intermediate values of a flick, short enough that
+#: the highlight still feels attached to the list.
+SECTION_TRACK_MS = 120
+#: How far from the bottom of the fleet list more brands are fetched, in pixels.
+#: Roughly two card rows, so the next section is on screen before it is needed.
+LOAD_MORE_PX = 420
 
 # -- typography -------------------------------------------------------------
 #: Revenue figure size.
@@ -119,3 +185,5 @@ DRAW_MS = 600
 CELL_STAGGER_MS = 6
 HOVER_MS = 120
 FADE_MS = 400
+
+MAX_RATE = 1_000_000

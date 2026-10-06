@@ -18,6 +18,10 @@ class Vehicle(Base):
     transmission = Column(Enum('Automatic', 'Manual'), nullable=True)
     fuel_type = Column(Enum('Petrol', 'Diesel', 'Electric', 'Hybrid'), nullable=True)
     body_style = Column(Enum('SUV', 'Sedan', 'Hatchback', 'MPV', 'Pickup', 'Underbone', 'Scooter'), nullable=True)
+    #: Staff-facing size class used by the New Rental filter rail.
+    vehicle_class = Column(Enum('small', 'medium', 'suv', 'van', 'pickup', 'truck', 'motorcycle'), nullable=True)
+    #: Engine displacement in cc. Only motorcycles carry one; a car is NULL.
+    engine_cc = Column(Integer, nullable=True)
     status = Column(Enum('available', 'reserved', 'rented', 'maintenance'), nullable=False, default='available')
     created_at = Column(DateTime, nullable=False)
 

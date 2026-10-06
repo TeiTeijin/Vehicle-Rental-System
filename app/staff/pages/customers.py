@@ -1,16 +1,3 @@
-"""Customers: who rents from the branch, and whether they can.
-
-The licence columns are the reason this screen exists. A customer whose
-licence has expired cannot be handed a car, and finding that out at the counter
-is a confrontation. Showing expiry and a "blocked" flag up front turns it into
-something noticed at booking time instead.
-
-The expiry test deliberately ignores the exact date: a licence is usable on
-the day before it expires and not on the day after, so anything within the next
-30 days is flagged as expiring rather than treated as valid or invalid. Same
-reasoning as the booking window, and for the same reason.
-"""
-
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -105,12 +92,6 @@ class CustomersPage(StaffPage):
         self.table.load()
 
     def blocked_customers(self) -> list[str]:
-        """Names of customers who cannot rent today.
-
-        Used by the dashboard to explain why a booking was refused, so the
-        answer is computed once from the service rather than guessed at in two
-        places.
-        """
         today = date.today()
         blocked = []
         with self.context.reading() as session:

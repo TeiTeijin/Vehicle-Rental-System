@@ -1,25 +1,3 @@
-"""Fleet: vehicle records, their status, and their maintenance.
-
-`VEHICLE.status` is the single most consequential field in the schema and
-nothing in the original codebase ever wrote it -- the only assignment in the
-whole project was the literal "available" in the seed script. A car that was
-physically out on rent still read `available`, which the customer-facing hero
-carousel filtered on, so out-on-rent vehicles were shown as bookable.
-
-The status rules live here and nowhere else, so the booking, check-in and
-check-out flows cannot each invent their own idea of what a vehicle's status
-should be.
-
-A note on `reserved`
---------------------
-The column's enum has four values, but only three describe what the car is
-doing *now*: available, rented, maintenance. "Reserved" is a fact about the
-future -- the car is free today and booked on Thursday -- and one column cannot
-hold both. Reserving is therefore derived from the booking table
-(`is_reserved_between`) and the `reserved` value is never written. The enum
-member is left in place rather than dropped so no existing row breaks.
-"""
-
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -55,12 +33,6 @@ BLOCKING_MAINTENANCE_STATUSES = ("scheduled", "ongoing")
 
 
 def set_status(session: Session, vehicle: Vehicle, new_status: str) -> Vehicle:
-    """Move a vehicle to a new status, refusing illegal jumps.
-
-    `force` is for the flows that legitimately cross the state machine --
-    check-in marks a car `rented` even though `available -> rented` is not a
-    legal hand-off -- and is not exposed to the Fleet screen's status picker.
-    """
     if new_status not in VEHICLE_STATUSES:
         raise ValidationError(
             f"Unknown vehicle status: {new_status}", field="status"
@@ -80,18 +52,11 @@ def set_status(session: Session, vehicle: Vehicle, new_status: str) -> Vehicle:
 
 
 def mark_rented(session: Session, vehicle: Vehicle) -> Vehicle:
-    """Called from check-in. Bypasses the state machine deliberately."""
     vehicle.status = "rented"
     return vehicle
 
 
 def mark_available(session: Session, vehicle: Vehicle) -> Vehicle:
-    """Called from check-out.
-
-    Refuses to return a vehicle to the pool while it has open maintenance --
-    otherwise a car that was sent to the workshop on the way back would
-    immediately read `available` and be offered to the next customer.
-    """
     if has_open_maintenance(session, vehicle):
         vehicle.status = "maintenance"
     else:
@@ -114,11 +79,6 @@ def is_rentable(vehicle: Vehicle) -> bool:
 
 
 def has_open_maintenance(session: Session, vehicle: Vehicle) -> bool:
-    """True when the vehicle has maintenance that is scheduled or under way.
-
-    Scheduled counts: a car booked into the workshop on Friday is not rentable
-    today either, because the booking will take it away.
-    """
     return any(
         record.status in BLOCKING_MAINTENANCE_STATUSES
         for record in vehicle.maintenance_records
@@ -131,7 +91,6 @@ def maintenance_conflict(
     start_date: date,
     end_date: date,
 ) -> Maintenance_Record | None:
-    """Open maintenance overlapping a half-open [start_date, end_date) range."""
     for record in vehicle.maintenance_records:
         if record.status not in BLOCKING_MAINTENANCE_STATUSES:
             continue
@@ -149,12 +108,6 @@ def schedule_maintenance(
     cost,
     status: str = "scheduled",
 ) -> Maintenance_Record:
-    """Put a vehicle into the workshop.
-
-    Sets the vehicle's status immediately even for future-dated work, so the
-    fleet screen shows what the diary says. `mark_available` puts it back once
-    the record is completed.
-    """
     if end_date < start_date:
         raise ValidationError(
             "Maintenance end date must not be before its start date.",
@@ -183,7 +136,6 @@ def schedule_maintenance(
 
 
 def complete_maintenance(session: Session, record: Maintenance_Record) -> Maintenance_Record:
-    """Finish a maintenance job and free the vehicle if nothing else holds it."""
     record.status = "completed"
     record.end_date = max(record.end_date, date.today())
     session.flush()
@@ -225,12 +177,6 @@ def add_vehicle(
     fuel_type: str | None = None,
     body_style: str | None = None,
 ) -> Vehicle:
-    """Create a vehicle, rejecting a plate that is already on the fleet.
-
-    The plate is checked here rather than left to the unique constraint, so the
-    counter clerk gets "Plate ABC-123 is already assigned to a Toyota Vios"
-    instead of an IntegrityError.
-    """
     plate = (plate_number or "").strip().upper()
     if not plate:
         raise ValidationError("Plate number is required.", field="plate_number")
@@ -271,7 +217,6 @@ def add_vehicle(
 
 
 def update_vehicle(session: Session, vehicle: Vehicle, **changes) -> Vehicle:
-    """Apply field changes, validating the ones with rules."""
     if "plate_number" in changes:
         plate = (changes["plate_number"] or "").strip().upper()
         clash = session.execute(
@@ -299,11 +244,6 @@ def update_vehicle(session: Session, vehicle: Vehicle, **changes) -> Vehicle:
 
 
 def record_mileage(session: Session, vehicle: Vehicle, mileage: int) -> Vehicle:
-    """Set the odometer, refusing to move it backwards.
-
-    A decreasing odometer means a typo at the counter, and it quietly
-    corrupts every fuel-economy and service-interval calculation afterwards.
-    """
     if mileage < vehicle.mileage:
         raise ValidationError(
             f"Mileage cannot go backwards: it is currently "
@@ -326,11 +266,6 @@ def list_vehicles(
     category_name: str | None = None,
     search: str | None = None,
 ) -> list[Vehicle]:
-    """Vehicles newest-first, with their category and maintenance preloaded.
-
-    joinedload keeps this to one query; without it the fleet screen's status
-    column and the open-maintenance check both trigger a query per row.
-    """
     stmt = (
         select(Vehicle)
         .join(Vehicle_Category, Vehicle.category_id == Vehicle_Category.category_id)

@@ -1,16 +1,3 @@
-"""The pieces every dashboard card is built from.
-
-`Card`, `IconButton`, `Pill`, `HeroNumber` and `SectionLabel`, in one place,
-because the brief's visual language is a *system*: 28px card radius, 12px button
-radius, 999px pills, 26px card padding and a 16px gutter. Get those from five
-places and the grid quietly stops lining up.
-
-All sizing goes through :mod:`app.staff.metrics` rather than being written into
-each widget, because QSS cannot be read back at runtime -- a radius that is 26px
-here and 24px in the stylesheet is invisible until two cards sit side by side
-and one of them looks wrong.
-"""
-
 from __future__ import annotations
 
 from decimal import Decimal
@@ -54,17 +41,6 @@ from app.staff.theme import (
 
 
 class Card(QFrame):
-    """One dashboard panel: rounded, bordered, optionally dark.
-
-    `dark` is a property rather than an object name because it is a variant of
-    the same widget. The stylesheet paints from the property, so a dark card is
-    still a `Card` and can still be looked up by type.
-
-    Deliberately *not* a `QGroupBox` or a styled `QWidget` with a border: a
-    QFrame subclass can own its own paintEvent if the design ever needs a
-    gradient or a soft shadow, which it does on the dark cards.
-    """
-
     def __init__(self, parent: QWidget | None = None, *, dark: bool = False) -> None:
         super().__init__(parent)
         self.setProperty(PROP_DARK, dark)
@@ -78,7 +54,6 @@ class Card(QFrame):
         self._layout.setSpacing(0)
 
     def body(self) -> QVBoxLayout:
-        """The card's content layout, at the standard padding."""
         out = QVBoxLayout()
         out.setContentsMargins(
             CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING
@@ -117,14 +92,6 @@ class Card(QFrame):
 
 
 class IconButton(QWidget):
-    """A square that holds one icon, 40x40 by default.
-
-    A QWidget rather than a QPushButton so it never draws a text label or a
-    default-button ring: at 40px with a 20px glyph, anything Qt adds on its own
-    is something the design did not ask for. Clicked signal replaces
-    `clicked` so the call sites read the same as the rest of the app.
-    """
-
     clicked = Signal()
 
     def __init__(
@@ -216,14 +183,6 @@ class IconButton(QWidget):
 
 
 class Pill(QWidget):
-    """A rounded status chip: a small dot and a short label.
-
-    Replaces the QSS `QFrame#statusPill` used by the table screens. Same idea,
-    drawn here instead, because the dashboard needs three sizes and a dot whose
-    colour can differ from the label's -- neither is expressible in the stylesheet
-    without one selector per combination.
-    """
-
     def __init__(
         self,
         text: str,
@@ -314,14 +273,6 @@ class Pill(QWidget):
 
 
 class HeroNumber(QLabel):
-    """The big figure on a card: 64px, medium weight, tabular.
-
-    Tabular figures are not a nicety here. The dashboard refreshes every thirty
-    seconds, and with proportional digits the peso value changes width as the
-    thousands digit ticks over, so the number visibly jitters left and right
-    every refresh for no reason. `tnum` pins every digit to the same advance.
-    """
-
     def __init__(
         self,
         text: str = "0",
@@ -406,20 +357,6 @@ class HeroNumber(QLabel):
 
 
 class MoneyNumber(QLabel):
-    """A peso amount whose sign and cents are dimmed and whose digits are not.
-
-    The brief splits the hero three ways: `₱` and `.00` in MUTED, the digits in
-    PAPER, all at 64px. That reads as one number rather than three because the
-    dimming is subtle, and the eye picks up the magnitude first and the exact
-    cents second -- which is the right priority when the question is "how much
-    came in today", not "what is the exact figure".
-
-    Rich text rather than three adjacent labels: three labels put the `₱` and
-    the `.00` on their own baselines and the alignment goes wrong the moment the
-    integer part changes width, and this is a number that changes every thirty
-    seconds.
-    """
-
     def __init__(
         self,
         *,
@@ -469,8 +406,6 @@ class MoneyNumber(QLabel):
 
 
 class Caption(QLabel):
-    """A small uppercase-ish label above a figure or a group of rows."""
-
     def __init__(
         self,
         text: str,
@@ -489,15 +424,6 @@ class Caption(QLabel):
 
 
 class ElidedLabel(QLabel):
-    """A left-aligned label that shortens its text instead of clipping it.
-
-    The recent-transactions list is four columns sharing the card's width on a
-    flexible name column, so a long name has to give way to the method, channel
-    and amount beside it. Clipping mid-letter reads as a rendering fault; an
-    ellipsis reads as a truncation. `Ignored` width lets the grid squeeze it
-    below its own size hint, which is what makes room for the ellipsis to appear.
-    """
-
     def __init__(
         self,
         text: str = "",
@@ -548,13 +474,6 @@ class ElidedLabel(QLabel):
 
 
 class TrendLabel(QLabel):
-    """A percentage with its arrow, green when up and red when down.
-
-    The arrow points in the direction of travel, and for revenue a fall is red.
-    Colour alone is not the signal -- the arrow and the sign carry it too, for
-    anyone who cannot separate the two hues.
-    """
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         font = QFont("Inter")
@@ -579,8 +498,6 @@ class TrendLabel(QLabel):
 
 
 class SectionLabel(QLabel):
-    """A card's title. One weight up from `Caption`, never a heading."""
-
     def __init__(
         self,
         text: str,
@@ -598,15 +515,6 @@ class SectionLabel(QLabel):
 
 
 class FadeIn(QWidget):
-    """Wraps a widget and fades it in on first show.
-
-    Cards are built before the window is shown, so there is nothing to fade
-    *from* -- the widget goes from opacity 0 to 1 over 400ms when the page first
-    appears. A `QGraphicsOpacityEffect` is the cheapest thing that does this
-    without touching layout; the alternative (hiding and re-showing) would make
-    the cards pop in one at a time and fight the grid.
-    """
-
     def __init__(self, child: QWidget, *, delay_ms: int = 0, parent=None) -> None:
         super().__init__(parent)
         self._effect = QGraphicsOpacityEffect(self)
@@ -641,7 +549,6 @@ class FadeIn(QWidget):
 
 
 def row_layout(spacing: int = 12) -> QHBoxLayout:
-    """A horizontal layout with no margins, which is what a card row wants."""
     layout = QHBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(spacing)
@@ -649,7 +556,6 @@ def row_layout(spacing: int = 12) -> QHBoxLayout:
 
 
 def padded_column(spacing: int = 18) -> QVBoxLayout:
-    """A vertical layout at the standard card padding."""
     layout = QVBoxLayout()
     layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
     layout.setSpacing(spacing)

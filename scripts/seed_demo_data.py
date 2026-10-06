@@ -1,29 +1,3 @@
-"""Six months of realistic demo data, for screenshots and for trying the app.
-
-This is the one script in the project that must be impossible to point at real
-data by accident. Seeding six months of bookings into the Aiven instance would
-make the branch's live history a mixture of invention, which is not something a
-mistake should be able to do. So rather than trusting a flag, the guard is
-structural:
-
-  * It refuses to run unless the target database is SQLite *or* is explicitly
-    opted in with --i-know-this-is-a-scratch-database, which prints what it is
-    about to do and requires a second flag to actually proceed.
-  * Aiven hostnames are rejected outright, before any connection is opened.
-  * There is no code path that writes to a MySQL database without both flags.
-
-Everything is deterministic. A fixed seed drives the randomness, so the same
-commit always produces the same dashboard -- a demo that reshuffles on every
-run cannot be used to compare screenshots, and "it looked different this time"
-is not a bug report anyone can act on. The six-month window is anchored to
-today by default, so the demo always looks current; pass ``--as-of`` to pin
-that anchor and get byte-identical rows on any day.
-
-    python -m scripts.seed_demo_data --help
-    python -m scripts.seed_demo_data --database demo.db
-    python -m scripts.seed_demo_data --database demo.db --as-of 2026-09-29
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -53,10 +27,6 @@ SEED = 20260929
 
 DEMO_ADMIN_EMAIL = "admin@rentwheels.local"
 
-#: A known counter-staff login. The role split is a headline feature -- a staff
-#: member may check a car out but not cancel a confirmed booking -- and it
-#: cannot be demonstrated without a known staff address. The other staff are
-#: generated, so their emails change with the seed.
 DEMO_STAFF_EMAIL = "counter@rentwheels.local"
 
 #: How many cars sit in the workshop in the demo. They are held out of the
@@ -69,15 +39,6 @@ WORKSHOP_CARS = 2
 _ONLINE_SHARE_NOW = 0.45
 _ONLINE_RAMP = 0.18
 
-#: The rentals forced onto the Today screen, as
-#: (days since it was due back, length in days). A day count of 0 means due
-#: back today; a positive one means it should have come back already, which is
-#: what puts a row in the Overdue table; a negative one means still running.
-#:
-#: These are the cases a random walk essentially never produces on its own --
-#: they are all one- or two-day windows -- and without them the most useful
-#: tables on the Today screen render empty, which looks identical to a broken
-#: query.
 TODAYS_PLANS = [
     (2, 4),    # overdue by two days
     (5, 3),    # overdue by five days
@@ -86,10 +47,6 @@ TODAYS_PLANS = [
     (-9, 12),  # still out, long rental
 ]
 
-#: How many cars are left with no booking at all, so the branch is not running
-#: at 100% and every "free to rent" style figure is non-zero. A demo where the
-#: whole fleet is out cannot show what the Fleet screen looks like when someone
-#: is actually looking for a car.
 UNBOOKED_CARS = 3
 
 #: Hostnames that must never be a demo target, whatever the flags say. The
@@ -118,26 +75,36 @@ STREETS = [
     "Aguinaldo St", "Katipunan Ave", "Osmeña Blvd", "Quezon Ave", "Sumulong Hwy",
 ]
 
+#: (make, model, year, plate, rate, category, seats, transmission, fuel, body,
+#:  vehicle_class, engine_cc)
 VEHICLE_SPECS = [
-    # (make, model, year, plate, rate, category, seats, transmission, fuel, body)
-    ("Toyota", "Vios", 2022, "DEM-101", "2500.00", "Car", 5, "Automatic", "Petrol", "Sedan"),
-    ("Honda", "Civic", 2021, "DEM-102", "3000.00", "Car", 5, "Manual", "Petrol", "Sedan"),
-    ("Toyota", "Camry", 2020, "DEM-103", "3500.00", "Car", 5, "Automatic", "Hybrid", "Sedan"),
-    ("Toyota", "Fortuner", 2023, "DEM-104", "5500.00", "Car", 7, "Automatic", "Diesel", "SUV"),
-    ("Mitsubishi", "Xpander", 2022, "DEM-105", "3800.00", "Car", 7, "Automatic", "Petrol", "MPV"),
-    ("Mazda", "CX-5", 2023, "DEM-106", "5200.00", "Car", 5, "Automatic", "Petrol", "SUV"),
-    ("Nissan", "Altima", 2021, "DEM-107", "3300.00", "Car", 5, "Automatic", "Petrol", "Sedan"),
-    ("Ford", "Explorer", 2022, "DEM-108", "5800.00", "Car", 7, "Automatic", "Petrol", "SUV"),
-    ("Toyota", "Innova", 2023, "DEM-109", "4000.00", "Car", 7, "Automatic", "Diesel", "MPV"),
-    ("Honda", "City", 2022, "DEM-110", "2700.00", "Car", 5, "Automatic", "Petrol", "Sedan"),
-    ("Isuzu", "D-Max", 2022, "DEM-111", "4800.00", "Car", 5, "Manual", "Diesel", "Pickup"),
-    ("Mitsubishi", "Mirage", 2021, "DEM-112", "2300.00", "Car", 4, "Automatic", "Petrol", "Hatchback"),
-    ("Honda", "Click 125i", 2023, "DEM-201", "800.00", "Motorcycle", 2, "Automatic", "Petrol", "Underbone"),
-    ("Yamaha", "NMAX 155", 2022, "DEM-202", "1000.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter"),
-    ("Kawasaki", "Ninja 400", 2023, "DEM-203", "1400.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone"),
-    ("Honda", "PCX 150", 2023, "DEM-204", "1200.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter"),
-    ("Yamaha", "FZ-S", 2022, "DEM-205", "1100.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone"),
-    ("Kymco", "P200", 2023, "DEM-206", "950.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter"),
+    # (make, model, year, plate, rate, category, seats, transmission, fuel, body, class, cc)
+    ("Toyota", "Vios", 2022, "DEM-101", "2500.00", "Car", 5, "Automatic", "Petrol", "Sedan", "small", None),
+    ("Honda", "Civic", 2021, "DEM-102", "3000.00", "Car", 5, "Manual", "Petrol", "Sedan", "small", None),
+    ("Toyota", "Camry", 2020, "DEM-103", "3500.00", "Car", 5, "Automatic", "Hybrid", "Sedan", "medium", None),
+    ("Toyota", "Fortuner", 2023, "DEM-104", "5500.00", "Car", 7, "Automatic", "Diesel", "SUV", "suv", None),
+    ("Mitsubishi", "Xpander", 2022, "DEM-105", "3800.00", "Car", 7, "Automatic", "Petrol", "MPV", "van", None),
+    ("Mazda", "CX-5", 2023, "DEM-106", "5200.00", "Car", 5, "Automatic", "Petrol", "SUV", "suv", None),
+    ("Nissan", "Altima", 2021, "DEM-107", "3300.00", "Car", 5, "Automatic", "Petrol", "Sedan", "medium", None),
+    ("Ford", "Explorer", 2022, "DEM-108", "5800.00", "Car", 7, "Automatic", "Petrol", "SUV", "suv", None),
+    ("Toyota", "Innova", 2023, "DEM-109", "4000.00", "Car", 7, "Automatic", "Diesel", "MPV", "van", None),
+    ("Honda", "City", 2022, "DEM-110", "2700.00", "Car", 5, "Automatic", "Petrol", "Sedan", "small", None),
+    ("Isuzu", "D-Max", 2022, "DEM-111", "4800.00", "Car", 5, "Manual", "Diesel", "Pickup", "pickup", None),
+    ("Mitsubishi", "Mirage", 2021, "DEM-112", "2300.00", "Car", 4, "Automatic", "Petrol", "Hatchback", "small", None),
+    # The two classes with no body_style value. A pickup-bodied light truck is a
+    # `Pickup` to the eye and a `truck` to a customer hiring one for a move, which is
+    # exactly the distinction body_style cannot express.
+    ("Isuzu", "F-Series", 2023, "DEM-113", "6200.00", "Car", 5, "Manual", "Diesel", "Pickup", "truck", None),
+    ("Toyota", "Hilux", 2023, "DEM-114", "5900.00", "Car", 5, "Manual", "Diesel", "Pickup", "truck", None),
+    ("Honda", "Click 125i", 2023, "DEM-201", "800.00", "Motorcycle", 2, "Automatic", "Petrol", "Underbone", "motorcycle", 125),
+    ("Yamaha", "NMAX 155", 2022, "DEM-202", "1000.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter", "motorcycle", 155),
+    ("Kawasaki", "Ninja 400", 2023, "DEM-203", "1400.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone", "motorcycle", 400),
+    ("Honda", "PCX 150", 2023, "DEM-204", "1200.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter", "motorcycle", 150),
+    # FZ-S carries no number in its name, so the migration cannot infer its
+    # displacement; written out here.
+    ("Yamaha", "FZ-S", 2022, "DEM-205", "1100.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone", "motorcycle", 250),
+    ("Kymco", "P200", 2023, "DEM-206", "950.00", "Motorcycle", 2, "Automatic", "Petrol", "Scooter", "motorcycle", 200),
+    ("Kawasaki", "Moto 600", 2023, "DEM-207", "1600.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone", "motorcycle", 600),
 ]
 
 #: `MaintenanceRecord.status` is an Enum column. `in_progress` is not one of its
@@ -196,11 +163,6 @@ class UnsafeTarget(Exception):
 
 
 def assert_safe_target(url: str, *, acknowledged: bool, forced: bool) -> None:
-    """Refuse to seed anything that might be real.
-
-    Called before any connection is opened, so a refusal cannot have already
-    written a row.
-    """
     lowered = url.lower()
 
     for marker in FORBIDDEN_HOST_MARKERS:
@@ -238,7 +200,6 @@ def assert_safe_target(url: str, *, acknowledged: bool, forced: bool) -> None:
 
 
 def _person(rng: random.Random, index: int) -> tuple[str, str, str, str]:
-    """A stable (name, email, phone, address) for a given index."""
     first = FIRST_NAMES[index % len(FIRST_NAMES)]
     last = LAST_NAMES[(index * 7 + 3) % len(LAST_NAMES)]
     name = f"{first} {last}"
@@ -275,12 +236,6 @@ def _staff_member(rng: random.Random, index: int, role: str) -> Users:
 def _make_customers(
     session: Session, rng: random.Random, count: int, today: date
 ) -> list[Users]:
-    """Customers with licence expiry spread over the next three years.
-
-    A couple are deliberately close to expiry, and one has already lapsed, so
-    the licence checks in `booking_service` have something to complain about
-    when the demo is used to exercise those paths.
-    """
     customers = []
     for i in range(count):
         name, email, phone, address = _person(rng, i)
@@ -310,7 +265,20 @@ def _make_customers(
 
 def _make_vehicles(session: Session, categories: dict[str, Vehicle_Category]) -> list[Vehicle]:
     vehicles = []
-    for make, model, year, plate, rate, category, seats, transmission, fuel, body in VEHICLE_SPECS:
+    for (
+        make,
+        model,
+        year,
+        plate,
+        rate,
+        category,
+        seats,
+        transmission,
+        fuel,
+        body,
+        vehicle_class,
+        engine_cc,
+    ) in VEHICLE_SPECS:
         vehicles.append(
             Vehicle(
                 category_id=categories[category].category_id,
@@ -326,6 +294,8 @@ def _make_vehicles(session: Session, categories: dict[str, Vehicle_Category]) ->
                 transmission=transmission,
                 fuel_type=fuel,
                 body_style=body,
+                vehicle_class=vehicle_class,
+                engine_cc=engine_cc,
                 status="available",
                 created_at=datetime(2026, 1, 3, 9, 0),
             )
@@ -336,7 +306,6 @@ def _make_vehicles(session: Session, categories: dict[str, Vehicle_Category]) ->
 
 
 def rng_mileage(make: str, model: str) -> int:
-    """A stable odometer for a vehicle, derived from its name."""
     return 18_000 + (sum(ord(c) for c in make + model) % 47) * 1_000
 
 
@@ -346,12 +315,6 @@ DISCOUNT_3_TO_6 = Decimal("0.95")
 
 
 def rental_total(rate, days: int) -> Decimal:
-    """What a rental of `days` costs, before penalties.
-
-    The discounts mirror `app.domain.vehicle_types`, so demo bookings price the
-    same way real ones do. A float anywhere in here would reintroduce exactly
-    the rounding error `app.utils.money` exists to prevent.
-    """
     total = Decimal(rate) * days
     if days >= 7:
         total *= DISCOUNT_7_PLUS
@@ -361,17 +324,6 @@ def rental_total(rate, days: int) -> Decimal:
 
 
 def _channel(rng: random.Random, days_ago: int) -> str:
-    """Whether a booking was walked in or taken online.
-
-    Not a coin flip. The counter still does most of the volume -- walk-ins are
-    a rental with no planning involved, and a car is usually needed the same
-    day -- but the online share climbs over the eighteen months, because that
-    is the direction a real branch moves in once it has a booking page.
-
-    The trend is a linear ramp across the window rather than a curve, so it
-    stays smooth and obvious on the dashboard's channel chart without making
-    any claim about a real market that this fixture cannot support.
-    """
     online_share = _ONLINE_SHARE_NOW + _ONLINE_RAMP * (days_ago / 180)
     return "online" if rng.random() < online_share else "walk_in"
 
@@ -383,18 +335,6 @@ def _make_maintenance(
     in_workshop: list[Vehicle],
     today: date,
 ) -> list[Maintenance_Record]:
-    """Historical service per vehicle, plus open jobs on the workshop cars.
-
-    All the historical work is `completed`; the open jobs belong to
-    `in_workshop` only. Without open jobs the Today page's workshop table is
-    always empty, and an empty workshop in a demo is indistinguishable from a
-    broken query -- the exact confusion the rest of this seeding avoids.
-
-    `in_workshop` is passed in rather than sliced off the end of `vehicles`
-    here, because the same vehicles are reserved for today's rentals. Picking
-    them in two places independently is how a car ends up marked both
-    `maintenance` and `rented`.
-    """
     for vehicle in vehicles:
         for _ in range(rng.randint(1, 2)):
             description, cost = rng.choice(MAINTENANCE_JOBS)
@@ -445,13 +385,6 @@ def _make_bookings(
     days_back: int = 180,
     today: date,
 ) -> tuple[list[Booking], list[Booking], list[Booking]]:
-    """Six months of rentals.
-
-    Returns (completed, ongoing, pending) so the caller can report on each.
-    A vehicle is never double-booked, and no rental starts in the past, because
-    the app's own availability check would refuse them -- the demo data has to
-    be data the application considers valid.
-    """
     completed: list[Booking] = []
     ongoing: list[Booking] = []
     pending: list[Booking] = []
@@ -461,7 +394,6 @@ def _make_bookings(
     free_after: dict[int, date] = {v.vehicle_id: today - timedelta(days=days_back) for v in vehicles}
 
     def place(vehicle_id: int, start: date, end: date) -> bool:
-        """Claim [start, end) for a vehicle, or report it is already taken."""
         if any(start < e and s < end for s, e in taken[vehicle_id]):
             return False
         if start < free_after[vehicle_id]:
@@ -472,22 +404,6 @@ def _make_bookings(
         free_after[vehicle_id] = end
         return True
 
-    # Vehicles held back from the walk. The walk fills every vehicle's calendar
-    # out to today+14, so a car needed for a rental that is due back now has to
-    # be kept out of the walk entirely -- there is no gap in a fully booked
-    # calendar to put one in.
-    #
-    # The split must line up with `_force_todays_work` and `seed()`: the first
-    # `WORKSHOP_CARS` go to the workshop, the rest carry today's rentals. Slicing
-    # these independently in two places is how a car ends up both in the
-    # workshop and out on rent, so the split is stated once, here.
-    # Two groups are held out of the walk:
-    #
-    #   * the tail, which `seed()` and `_force_todays_work` split between the
-    #     workshop and today's rentals -- the walk fills every calendar out to
-    #     today+14, so there is no gap left to place a car that is due back now;
-    #   * `UNBOOKED_CARS` before it, which get no bookings whatsoever, so the
-    #     branch is not running at 100% and "free to rent" is never zero.
     reserved = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS)) :]
     idle = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS) + UNBOOKED_CARS) : -(
         WORKSHOP_CARS + len(TODAYS_PLANS)
@@ -555,23 +471,6 @@ def _force_todays_work(
     free_after: dict[int, date],
     today: date,
 ) -> None:
-    """Guarantee the cases the Today screen exists to show.
-
-    The random walk above reliably produces rentals that are out now and
-    collections coming up, but it almost never produces a car that is *due back
-    today* and essentially never one that is *overdue* -- both are narrow
-    windows, and a day is a short time to be in one. So the demo would show an
-    empty "Overdue" table and an empty "Due back today" table, and the most
-    useful part of that screen would look broken.
-
-    Two overdue, two due back today, and one rental that started a while ago
-    and is still legitimately running. Each is placed on a vehicle reserved
-    from the random walk, through the same `taken`/`free_after` bookkeeping, so
-    nothing collides and the app still considers the data valid.
-
-    The first `WORKSHOP_CARS` of the reserved slice are skipped: they are in the
-    workshop, and a car cannot be in the workshop and out on rent.
-    """
     reserved = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS)) :]
     for_rent = reserved[WORKSHOP_CARS:]
 
@@ -615,21 +514,6 @@ def _settle_completed(
     staff: list[Users],
     today: date,
 ) -> None:
-    """Give each completed rental a payment history.
-
-    Aiming for a spread the Payments tab can actually be tested against, not a
-    uniformly green one:
-
-      * paid in full, sometimes as a deposit plus a balance;
-      * part-paid, which leaves the booking on the Outstanding tile;
-      * never paid, because customers walk;
-      * paid then refunded, so the refund path has history to reconcile;
-      * a pending GCash transfer or failed card attempt, which is the only
-        thing that exercises a NULL `paid_at`.
-
-    The last two matter more than they look: without a payment that never
-    cleared, nothing in the demo can show what a missing `paid_at` means.
-    """
     for booking in completed:
         taker = rng.choice(staff)
         balance_due = _owing(booking)
@@ -700,21 +584,6 @@ def _settle_ongoing(
     staff: list[Users],
     today: date,
 ) -> None:
-    """Take a deposit on each rental that is currently out.
-
-    `_settle_completed` only looks at finished rentals, which left the demo with
-    no money taken on the current day at all -- a rental collected from the shelf
-    this morning is paid for this morning, and without that the dashboard's
-    revenue card read zero on the one day anyone looks at it.
-
-    It also left every live rental at zero on the Outstanding tile, which is not
-    how a branch works: a car is handed over against a deposit and the balance is
-    settled on return.
-
-    The deposit is a fraction of what is owed, never all of it, so the balance
-    genuinely remains. One in eight is still in flight, which is the case that
-    gives `paid_at IS NULL` something to be about.
-    """
     for booking in ongoing:
         taker = rng.choice(staff)
         owed = _owing(booking)
@@ -756,29 +625,6 @@ def _pay(
     method: str | None = None,
     note: str | None = None,
 ):
-    """Write one payment row against `booking`.
-
-    Two ways to say when the money changed hands:
-
-    ``days_late``
-        Offset from the return date. Negative is *early* -- the deposit taken
-        when the car was collected. So `days_late=-2` lands two days before the
-        booking ends, and the seeder's "paid late" cases use a small positive
-        value, which lands after it.
-
-    ``taken_on``
-        An exact date, for when the answer is "the day it started" rather than
-        anything relative to the return.
-
-    Only a `paid` row gets a `paid_at`: that NULL is what distinguishes an
-    in-flight transfer from money in the drawer, so it is set from the status
-    rather than from the clock.
-
-    ``today`` clamps the result. Without it the fixture invents payments dated
-    in the future -- a rental due back today and paid three days late is
-    stamped three days ahead -- and a dashboard then reports takings that have
-    not happened yet and lists tomorrow's receipts as the most recent ones.
-    """
     if taken_on is not None:
         received = datetime.combine(taken_on, datetime.min.time())
     elif days_late < 0:
@@ -824,7 +670,6 @@ def _add_penalties_and_inspections(
     ongoing: list[Booking],
     staff: list[Users],
 ) -> None:
-    """The noise that makes the data look used."""
     for booking in completed:
         inspector = rng.choice(staff)
         pre_mileage = rng.randint(12_000, 60_000)
@@ -904,14 +749,6 @@ def _add_penalties_and_inspections(
 
 
 def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str, int]:
-    """Populate an empty database. Returns counts for the summary.
-
-    `today` anchors the six-month window. It defaults to the real current date
-    so the demo always looks current, but every generated timestamp derives
-    from it, which is what makes the output reproducible: pin it and you get
-    byte-identical rows on any day, forever. That is what the tests do, and
-    what you want when regenerating reference screenshots.
-    """
     today = today or date.today()
     Base.metadata.create_all(engine)
     rng = random.Random(SEED)
@@ -965,10 +802,6 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
 
         customers = _make_customers(session, rng, 24, today)
         vehicles = _make_vehicles(session, categories)
-        # The tail of the vehicle list is reserved from the random walk: the
-        # first two sit in the workshop, the rest carry today's rentals. Both
-        # groups have to be excluded from the walk, and choosing them once here
-        # is what stops a car being marked `maintenance` and `rented` at once.
         workshop = vehicles[-(WORKSHOP_CARS + len(TODAYS_PLANS)) : -len(TODAYS_PLANS)]
         open_jobs = _make_maintenance(session, rng, vehicles, workshop, today)
 
@@ -998,11 +831,6 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
 
         # Vehicles out on rent right now should say so, or the Fleet tab will
         # show cars as available that are physically gone.
-        #
-        # A car in the workshop is not out, even if a stray booking says
-        # otherwise -- and the two open maintenance jobs are on cars that are
-        # deliberately not rented, so `maintenance` wins cleanly rather than
-        # needing a tiebreak.
         in_workshop = {record.vehicle_id for record in open_jobs}
         for vehicle in vehicles:
             is_out = any(b.vehicle_id == vehicle.vehicle_id for b in ongoing)

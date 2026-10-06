@@ -1,19 +1,3 @@
-"""PDF rental receipts.
-
-This used to compute its own totals inline and read a single payment with
-`.first()`, so a booking settled in two parts printed one payment and a total
-that ignored the deposit. It now renders `payment_service.booking_balance`,
-the same figure every other screen shows, so the receipt cannot disagree with
-the screen it was printed from.
-
-The content is built as a flat list of `(text, style)` rows by `receipt_rows`
-and then drawn by `generate_receipt_pdf`. Splitting it this way means the
-things worth asserting on -- the totals, the balance, the list of payments --
-are ordinary Python values that tests can read, rather than strings buried
-inside a compressed PDF stream. `generate_receipt_pdf` is left with nothing but
-layout, which is the part that does not need testing.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,29 +18,11 @@ RIGHT_MARGIN_X = letter[0] - inch
 
 
 class Row(NamedTuple):
-    """One line of the receipt.
-
-    style is one of:
-        blank     vertical space
-        title     the business name, centred weight
-        heading   a section heading
-        line      body text
-        amount    body text, right-aligned in the figures column
-        total     right-aligned and bold, for totals
-        note      small italic, for detail under a line
-        verdict   large bold, the settled/outstanding line
-    """
-
     text: str
     style: str = "line"
 
 
 def receipt_rows(session, booking: Booking) -> list[Row]:
-    """Build the receipt's content.
-
-    Amounts are rendered through the shared money helpers so the receipt, the
-    screen and the balance all print the same figure the same way.
-    """
     user = booking.user
     vehicle = booking.vehicle
     balance = payment_service.booking_balance(session, booking)
@@ -167,12 +133,6 @@ _GAPS = {
 
 
 def generate_receipt_pdf(session, booking: Booking, dest_dir: Path | None = None) -> str:
-    """Write a receipt for `booking` and return its path.
-
-    Overwrites any previous receipt for the same booking, which is right: a
-    reprinted receipt should reflect the current state of the account, not the
-    state it had the first time it was printed.
-    """
     target = Path(dest_dir) if dest_dir else RECEIPTS_DIR
     target.mkdir(parents=True, exist_ok=True)
     filepath = target / f"receipt_{booking.booking_id}.pdf"

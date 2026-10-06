@@ -1,14 +1,3 @@
-"""Render the dashboard to PNGs for review. Not part of the app.
-
-    python -m app.staff.dashboard_shots [role] [out-dir]
-
-Writes the full window at each of the three shapes the brief asks for -- wide,
-medium and narrow -- plus one PNG per card at the 1440x900 reference, so the
-grid and each card can be looked at separately. Signs in against `demo.db`. The
-default role is `admin`; pass `staff` for the counter view, which shows the same
-five cards without the admin-only actions.
-"""
-
 from __future__ import annotations
 
 import sys

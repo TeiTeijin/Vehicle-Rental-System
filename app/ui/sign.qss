@@ -1,0 +1,105 @@
+* {
+    font-family: @font_family;
+}
+
+QMainWindow, #root, #formPanel {
+    background: @bg_cream;
+}
+
+/* Sign-up right panel is a QScrollArea; the inner holder + viewport are
+   transparent so the cream from #formPanel shows through. */
+#formHolder, QScrollArea, QScrollArea > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+#heroPanel {
+    background: @bg_dark;
+}
+
+#heroPanel QLabel {
+    background: transparent;
+}
+
+#eyebrow {
+    color: @gold;
+    font-size: 12pt;
+    font-weight: 700;
+}
+
+#heroTitle {
+    color: @text_on_dark;
+    font-size: 54pt;
+    font-weight: 700;
+}
+
+#heroSubtitle {
+    color: @text_on_dark_muted;
+    font-size: 16pt;
+}
+
+#card {
+    background: @card_bg;
+    border: 1px solid @card_border;
+    border-radius: 6px;
+}
+
+#card QLabel, #card QCheckBox {
+    background: transparent;
+}
+
+#cardTitle    { color: @text_dark;  font-size: 30pt; font-weight: 700; }  /* "Sign In" */
+#cardSubtitle { color: @text_muted; font-size: 14pt; } /* "Use the email linked to your bookings." */
+#fieldLabel   { color: @text_dark;  font-size: 12pt;  font-weight: 600; }  /* "Email address" and "Password" */
+#hint         { color: @text_muted; font-size: 12pt; }  /* "New customer? Create an account", "Need help?" */
+QCheckBox     { color: @text_muted; font-size: 12pt; } /* "Remember this device" */
+#link         { font-size: 12pt;  }   /* "Forgot password?", "Sign Up", "Contact rental support" */
+
+QLineEdit {
+    background: #FFFFFF;
+    border: 1px solid @input_border;
+    border-radius: 2px;
+    padding: 10px 12px;
+    color: @text_dark;
+    font-size: 11pt;
+}
+QLineEdit:focus { border: 1px solid @gold; }
+
+/* Live validation borders, set from Python via the dynamic "state" property.
+   These come after the focus rule so they win even while the field is focused. */
+QLineEdit[state="error"] { border: 1px solid @danger; }
+QLineEdit[state="ok"]    { border: 1px solid @success; }
+
+/* Inline message under a field when its value is invalid (email / phone). */
+#fieldHint { color: @danger; font-size: 9pt; }
+
+#link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: @text_dark;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#link:hover { color: @gold; }
+
+#note { color: @text_muted; font-size: 9pt; } /* small caption-ish text: password hints, terms */
+
+/* Password strength rows. Only font-size is set here -- the colour is driven
+   at runtime by the RequirementLabel's QPalette so it can animate between
+   muted / green / red without touching the stylesheet. */
+#reqItem { font-size: 9pt; }
+
+#primaryButton {
+    background: @bg_dark;
+    color: @text_on_dark;
+    border: none;
+    border-radius: 2px;
+    padding: 12px 20px;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#primaryButton:hover { background: @btn_hover; }
+#primaryButton:disabled { background: @btn_disabled; color: rgba(255, 255, 255, 140); }
+
+#divider { background: @card_border; }

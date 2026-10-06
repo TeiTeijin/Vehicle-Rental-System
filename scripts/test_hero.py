@@ -1,8 +1,3 @@
-"""Pixel- and geometry-level checks for the hero showcase.
-
-    python -m scripts.test_hero
-"""
-
 from __future__ import annotations
 
 import os
@@ -66,12 +61,10 @@ def hexes(rgb) -> str:
 
 
 def rect_in_window(window, widget) -> QRect:
-    """widget.rect() is widget-local; the grab is in window coordinates."""
     return QRect(widget.mapTo(window, QPoint(0, 0)), widget.size())
 
 
 def closest_pixel(image, rect: QRect, target):
-    """Antialiased text never hits the pure colour, so take the nearest pixel."""
     rect = rect.intersected(image.rect())
     best, best_delta = None, None
     for y in range(rect.top(), rect.bottom() + 1):
@@ -84,7 +77,6 @@ def closest_pixel(image, rect: QRect, target):
 
 
 def _png_bytes(width: int, height: int) -> bytes:
-    """A real, decodable PNG so decode paths are genuinely exercised."""
     from PySide6.QtCore import QBuffer
     from PySide6.QtGui import QImage
 
@@ -100,13 +92,6 @@ def _png_bytes(width: int, height: int) -> bytes:
 
 
 def _run_loader(vehicle, url: str):
-    """Run one ImageLoader's real body and capture the image it emits.
-
-    `ImageLoader.run()` is invoked directly rather than via a pool thread so
-    the result is available synchronously and a failure shows up as a traceback
-    instead of a silent timeout. The code under test is unchanged; only the
-    scheduling differs.
-    """
     from app.ui.hero import ImageLoader
 
     got: dict = {}
@@ -139,10 +124,6 @@ def main() -> int:
     text_ms = (time.time() - started) * 1000
     app.processEvents()
     print(f"  info: text fields usable after {text_ms:.0f} ms")
-    # Bounded by one round trip to the remote Aiven instance, which varies with
-    # network conditions (observed 1.8-2.7s). The budget is loose on purpose:
-    # it only has to be far below the ~10s a regression to all-or-nothing
-    # loading would cost. HTTP avoidance is asserted exactly, further down.
     check("text visible well before the old 10s", text_ms < 6000, True)
     check("text present while photo may still load", bool(hero.name.text()), True)
 
@@ -184,10 +165,6 @@ def main() -> int:
     check("image skeleton sized to the photo slot",
           (hero.image_skeleton.width(), hero.image_skeleton.height()),
           (IMAGE_SIZE.width(), IMAGE_SIZE.height()))
-    # Each text block is a child of the label it stands in for, which is what
-    # keeps it in its row. As layout siblings (the previous version) they were
-    # measured at QRect(640, 276, 640, 480) - floating over the photo, invisible
-    # in practice - so this asserts the real thing: parented, and sized.
     for field, skeleton, label in (
         ("eyebrow", hero.eyebrow_skeleton, hero.eyebrow),
         ("price", hero.price_skeleton, hero.price),
@@ -199,11 +176,6 @@ def main() -> int:
         check(f"{field} skeleton fits inside its label",
               skeleton.width() <= label.width()
               and skeleton.height() <= label.height(), True)
-        # Alignment is inherited from the label, not assumed to be the left edge.
-        # The eyebrow centres its text across the whole 1218px page, so a block
-        # pinned at x=0 sat 542px away from the text it stands in for. Comparing
-        # centres rather than left edges is what lets a wider-than-text block
-        # still count as aligned.
         text_width = QFontMetrics(label.font()).horizontalAdvance(label.text())
         if label.alignment() & Qt.AlignHCenter:
             delta = abs(
@@ -276,10 +248,6 @@ def main() -> int:
           != (centre.red(), centre.green(), centre.blue()), True)
 
     print("\n=== the loading state itself is correct ===")
-    # Every bug in this block was invisible after load, because a loaded hero has
-    # real text in every field. A second, freshly constructed carousel reproduces
-    # the window between construction and the query returning, which is the only
-    # time these states are ever on screen.
     fresh = HeroCarousel()
     fresh.show()
     app.processEvents()
@@ -308,10 +276,6 @@ def main() -> int:
         check("nothing is stranded at the default top-left geometry",
               stray, [])
 
-        # A LabelSkeleton is a child, so it is clipped to its label and sizes
-        # itself to the label's width. Empty, the price label is 16px and specs
-        # is 8px, so both blocks were crushed to a sliver and those two fields
-        # showed no loading state at all.
         for field, skeleton, label, want in (
             ("price", fresh.price_skeleton, fresh.price, SKELETON_WIDTHS["price"]),
             ("specs", fresh.specs_skeleton, fresh.specs, SKELETON_WIDTHS["specs"]),
@@ -445,10 +409,6 @@ def main() -> int:
     app.processEvents()
 
     print("\n=== hero height is stable across slides ===")
-    # The name is pinned by its ink to the top of the photo, so even the tallest
-    # one (VIOS, a 728px line box against a 693px photo) now ends inside the
-    # photo rather than running past it. That is why no space has to be reserved
-    # below the shot, and it is the reason the height no longer varies.
     heights = []
     for index in range(len(hero.slides)):
         hero._index = index
@@ -547,10 +507,6 @@ def main() -> int:
     check("hero background", QColor(shot.pixel(4, 76)).getRgb()[:3], HERO_BG)
     probe("eyebrow rgba(26,26,26,0.90)", hero.eyebrow, blend(INK, 0.90))
 
-    # The name is *behind* the photo, so its own rect samples the picture, not
-    # the type. The only pixels of it a user ever sees are the two overhangs
-    # either side of the image, so that is what gets probed. The right-hand
-    # strip is used because the left one runs off the window at this width.
     name_rect = rect_in_window(window, hero.name)
     photo_left = hero.image.mapTo(window, hero.image.rect().topLeft()).x()
     photo_right = hero.image.mapTo(window, hero.image.rect().topRight()).x()
@@ -653,11 +609,6 @@ def main() -> int:
     check("all checkable", all(b.isCheckable() for b in tabs), True)
 
     print("\n=== ImageLoader: cold downloads, warm does not ===")
-    # Keyed on vehicle identity, so a re-signed URL still hits the cache. This
-    # is asserted directly rather than through a window, because a window run
-    # would populate the cache first and the test could not tell the two paths
-    # apart. (It did, before: an earlier version of this check passed even with
-    # the cache deleted, which made it meaningless.)
     import app.ui.hero as hero_module
     from app.services import image_cache as cache_module
     from app.services.vehicle_service import ShowcaseVehicle

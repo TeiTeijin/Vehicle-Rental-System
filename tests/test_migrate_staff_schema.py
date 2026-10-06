@@ -344,6 +344,18 @@ class TestResultMatchesModels:
                 missing = model_columns - db_columns
                 assert not missing, f"{table.name} is missing {sorted(missing)}"
 
+    def test_adds_the_vehicle_class_columns(self, old_db):
+        """This script only has to create them; the data is the other migration's job.
+
+        It still has to create them. A database this script has migrated but
+        migrate_vehicle_class.py has not yet visited would otherwise leave the ORM
+        unable to INSERT a Vehicle at all, since every INSERT names every column.
+        """
+        engine, run = old_db
+        run()
+        cols = {c["name"] for c in inspect(engine).get_columns("VEHICLE")}
+        assert {"vehicle_class", "engine_cc"} <= cols
+
     def test_the_staff_models_work_against_the_migrated_database(self, old_db):
         """Write a booking, a pending payment and a photo-less inspection.
 

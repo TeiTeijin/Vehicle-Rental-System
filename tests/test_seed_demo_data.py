@@ -464,6 +464,70 @@ class TestMoneyIsConsistent:
             for b in completed
         ), "every completed rental was paid in full"
 
+    def test_every_filter_rail_class_has_vehicles(self, demo):
+        """A checkbox that matches nothing reads as a broken app.
+
+        The New Rental filter rail offers every class the schema allows. The
+        demo fleet has to cover all of them, or ticking one empties the grid and
+        looks like a bug rather than an empty class.
+        """
+        from app.services.vehicle_service import VEHICLE_CLASSES
+
+        assigned = {v.vehicle_class for v in rows_of(demo, Vehicle)} - {None}
+        assert set(VEHICLE_CLASSES) <= assigned, set(VEHICLE_CLASSES) - assigned
+
+    def test_every_cc_bucket_has_vehicles(self, demo):
+        """Same argument for the displacement buckets."""
+        from app.services.vehicle_service import CC_BUCKETS
+
+        for label, low, high in CC_BUCKETS:
+            found = [
+                v
+                for v in rows_of(demo, Vehicle)
+                if v.engine_cc is not None
+                and (low is None or v.engine_cc >= low)
+                and (high is None or v.engine_cc <= high)
+            ]
+            assert found, f"no vehicle in the '{label}' bucket"
+
+    def test_displacement_only_on_motorcycles(self, demo):
+        """A car with a cc on file is a data error, not a detail.
+
+        The rail's CC group greys out unless motorcycles are selected, so a car
+        carrying a displacement would be invisible to the filter that should have
+        matched it.
+        """
+        for vehicle in rows_of(demo, Vehicle):
+            if vehicle.engine_cc is not None:
+                assert vehicle.vehicle_class == "motorcycle", (
+                    f"{vehicle.make} {vehicle.model} has engine_cc "
+                    f"{vehicle.engine_cc} but class {vehicle.vehicle_class!r}"
+                )
+
+    def test_the_class_matches_the_body_style(self, demo):
+        """Where both are known, they must not contradict each other.
+
+        A SUV classed `small` would pass a class filter and fail a body-style one,
+        and nobody could say which was right.
+        """
+        consistent = {
+            "Sedan": {"small", "medium"},
+            "Hatchback": {"small"},
+            "SUV": {"suv"},
+            "MPV": {"van"},
+            "Pickup": {"pickup", "truck"},
+            "Underbone": {"motorcycle"},
+            "Scooter": {"motorcycle"},
+        }
+        for vehicle in rows_of(demo, Vehicle):
+            allowed = consistent.get(vehicle.body_style)
+            if allowed is None:
+                continue
+            assert vehicle.vehicle_class in allowed, (
+                f"{vehicle.make} {vehicle.model}: body_style "
+                f"{vehicle.body_style!r} is not a {vehicle.vehicle_class!r}"
+            )
+
     def test_gcash_payments_carry_a_reference(self, demo):
         """A GCash transfer with no reference cannot be reconciled."""
         for payment in rows_of(demo, Payment, Payment.method == "gcash"):

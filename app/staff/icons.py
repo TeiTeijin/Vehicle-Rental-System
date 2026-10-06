@@ -1,24 +1,3 @@
-"""Outline icons, drawn from SVG source strings.
-
-QtSvg ships with PySide6, so there is no reason to add an icon package or a
-build step for fifteen glyphs. Each one is a 24x24 outline path, stroked at
-1.6px with round caps and joins, held as a string and rendered through
-``QSvgRenderer`` at whatever size is asked for.
-
-Two deliberate constraints:
-
-* **Outline only, no fills.** A filled glyph set has to ship one variant per
-  colour; an outline can be tinted at paint time, so the same string serves the
-  ink sidebar, a cream card and a disabled button.
-* **No hand-drawn corner radii.** Every icon uses the same stroke width and the
-  same cap style. An icon set that varies in weight looks like three different
-  people drew it.
-
-The glyphs are deliberately plain. The brief asked for thin outline icons that
-match the card radius and weight, which is what a 24px grid of 1.6px strokes
-gives; anything more ornate would fight the numbers beside it.
-"""
-
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
@@ -41,7 +20,6 @@ def _round_rect(x: float, y: float, w: float, h: float, r: float) -> str:
 
 
 def _circle(cx: float, cy: float, r: float) -> str:
-    """A circle as two arcs, because SVG `<circle>` needs its own element."""
     return (
         f"M{cx - r} {cy}A{r} {r} 0 1 0 {cx + r} {cy}"
         f"A{r} {r} 0 1 0 {cx - r} {cy}Z"
@@ -160,7 +138,6 @@ PATHS: dict[str, str] = {
 
 
 def svg_source(name: str, colour: str) -> bytes:
-    """One glyph as a standalone SVG document, ready for QSvgRenderer."""
     path = PATHS.get(name)
     if path is None:
         raise KeyError(f"no icon named {name!r}")
@@ -173,7 +150,6 @@ def svg_source(name: str, colour: str) -> bytes:
 
 
 def renderer(name: str, colour: str) -> QSvgRenderer:
-    """A renderer for one glyph. Caller owns the lifetime."""
     r = QSvgRenderer(QByteArray(svg_source(name, colour)))
     if not r.isValid():
         raise ValueError(f"icon {name!r} did not produce a valid SVG")
@@ -181,13 +157,6 @@ def renderer(name: str, colour: str) -> QSvgRenderer:
 
 
 def pixmap(name: str, colour: str, size: int) -> QPixmap:
-    """One glyph as a transparent `size` x `size` pixmap.
-
-    Rendered at 2x and downscaled, because a 1.6px stroke rasterised straight
-    to a 20px icon lands on half-pixels and Qt's SmoothPixmapTransform turns
-    that into a visibly soft, uneven line. The supersample costs nothing at
-    these sizes.
-    """
     scale = 2
     pm = QPixmap(size * scale, size * scale)
     pm.fill(Qt.GlobalColor.transparent)
@@ -208,12 +177,6 @@ def pixmap(name: str, colour: str, size: int) -> QPixmap:
 
 
 def icon(name: str, colour: str, size: int = 20) -> QIcon:
-    """One glyph as a QIcon, for buttons and list items.
-
-    Two pixmaps at the standard two device ratios rather than one: Qt picks by
-    ratio at paint time, and handing it a 1x pixmap for a 2x screen scales it
-    with the fast path, which is exactly the softness above.
-    """
     out = QIcon()
     for ratio in (1, 2):
         key = QPixmap(pixmap(name, colour, size * ratio))

@@ -1,24 +1,3 @@
-"""The staff window: sidebar, routing, and the sign-in gate.
-
-Structure is a ``QStackedWidget`` with login at index 0 and the pages after
-it, so signing in and out is a page switch rather than a teardown. The chrome
-around the stack -- sidebar, demo banner -- is rebuilt per session, and the
-page widgets themselves are discarded on sign-out: a page that outlived the
-session would still hold the previous user's loaded rows.
-
-The sidebar is rebuilt from :data:`default_pages` on every sign-in and sign-out
-rather than being created once, because the visible set depends on the role and
-a stale row is a way to reach a page you should not be able to see. Each page
-also re-checks its own permission on activation, so even a constructed-
-but-hidden page cannot be shown to the wrong role.
-
-The window is resizable at every stage: the sign-in form opens at its own
-smaller size and the dashboard grows to :data:`metrics.WINDOW_MIN_W` by
-:data:`metrics.WINDOW_MIN_H`, but nothing is pinned to a fixed size, so the
-window can always be dragged. The pages decide for themselves how to reflow at
-the width they are given, and the page base scrolls when the height runs out.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -51,18 +30,6 @@ NAV_SECTIONS: tuple[str, ...] = ("General", "Tools")
 
 @dataclass(frozen=True)
 class PageSpec:
-    """One sidebar entry.
-
-    `admin_only` hides the row for staff; the page then re-checks the role on
-    activation, so the check exists in two places on purpose.
-
-    `icon` names a glyph in `app.staff.icons`. It defaults rather than being
-    required because a `PageSpec` is also what a test builds to exercise
-    routing, and a test page should not have to pick a glyph; shipping a page
-    with the wrong glyph is a one-line fix, shipping one with none is a row of
-    leading-edge whitespace.
-    """
-
     key: str
     title: str
     factory: Callable[["StaffShell"], QWidget]
@@ -84,8 +51,6 @@ STUB_SECTIONS: dict[str, tuple[str, str, str]] = {
 
 
 class StaffShell(QMainWindow):
-    """The staff application window."""
-
     def __init__(self, context: StaffContext, pages: list[PageSpec] | None = None) -> None:
         super().__init__()
         self.context = context
@@ -139,11 +104,6 @@ class StaffShell(QMainWindow):
     # -- chrome -----------------------------------------------------------
 
     def _build_sidebar(self) -> Sidebar:
-        """A fresh sidebar for the current role.
-
-        Rebuilt rather than reused so a row that is not allowed for this role
-        cannot be left over from the last session.
-        """
         sidebar = Sidebar(parent=self)
         sidebar.page_requested.connect(self.show_page)
         sidebar.sign_out_requested.connect(self.sign_out)
@@ -152,21 +112,6 @@ class StaffShell(QMainWindow):
         return sidebar
 
     def _sidebar_sections(self) -> list[tuple[str, list[tuple[str, str, str, bool]]]]:
-        """`[(group label, [(key, label, icon, navigable)])]`, in order.
-
-        Real pages carry `enabled=True`. The brief lists Billing, Maintenance and
-        Settings as destinations and this build has no screen for any of them,
-        so they appear as rows that report themselves on press rather than
-        navigating to nothing. Dropping them would have been the alternative and
-        it would make the sidebar look like a different application.
-
-        Groups come from `NAV_SECTIONS` and both lists are walked in order, so
-        the sidebar reads top-to-bottom in declaration order rather than in
-        whichever order a dict happened to hash.
-
-        Admin-only pages are omitted entirely for staff, which is why the sidebar
-        is rebuilt per session rather than mutated in place.
-        """
         rows: dict[str, list[tuple[str, str, str, bool]]] = {
             group: [] for group in NAV_SECTIONS
         }
@@ -220,7 +165,6 @@ class StaffShell(QMainWindow):
         return [p for p in self.pages if p.admin_only is False or self.context.is_admin]
 
     def show_page(self, key: str) -> bool:
-        """Switch to `key`. Returns False if the role does not allow it."""
         spec = next((p for p in self.pages if p.key == key), None)
         if spec is None:
             return False
@@ -264,7 +208,6 @@ class StaffShell(QMainWindow):
     # -- session ----------------------------------------------------------
 
     def _on_signed_in(self, user) -> None:
-        """Build the pages and go to the first one."""
         self.setMinimumSize(metrics.WINDOW_MIN_W, metrics.WINDOW_MIN_H)
         self.resize(*self._windowed_size)
         self._clear_chrome()
@@ -288,15 +231,6 @@ class StaffShell(QMainWindow):
         toast(self, f"Signed in as {self.context.display_name}.")
 
     def _clear_chrome(self) -> None:
-        """Remove and release the sidebar and banner.
-
-        ``setParent(None)`` *without* ``deleteLater``. Doing both is a double
-        free: reparenting hands the C++ widget to Python, and the deferred
-        delete is then posted for an object Python may already have destroyed
-        once the reference below is dropped. Orphan the widget and drop the
-        reference -- the last reference going frees it exactly once -- and the
-        old chrome cannot be reachable from the window in the meantime.
-        """
         if self._banner is not None:
             self._chrome_layout.removeWidget(self._banner)
             self._banner.setParent(None)
@@ -329,31 +263,12 @@ class StaffShell(QMainWindow):
         self.login_view.error.setVisible(False)
 
     def _discard_pages(self) -> None:
-        """Take every page out of the stack and let it go.
-
-        Clearing `_page_widgets` on its own is not enough: the widgets stay in
-        the `QStackedWidget` as hidden children, still holding the previous
-        user's loaded rows. The next sign-in builds fresh pages, so the old
-        ones would sit in the stack for the life of the process -- reachable,
-        and holding data the person who just signed out had access to.
-
-        ``setParent(None)``, not ``deleteLater``: the widget is orphaned from
-        the stack immediately and freed when the last Python reference drops,
-        so it is destroyed once. The two together hand the object to Python and
-        post a deferred delete for it as well, which can free it twice.
-        """
         for key, widget in self._page_widgets.items():
             self.stack.removeWidget(widget)
             widget.setParent(None)
         self._page_widgets.clear()
 
     def _on_refresh_tick(self) -> None:
-        """Re-read the current page's data.
-
-        Only the visible page, and only if it opted in. Refreshing hidden pages
-        would query the database seven times every 30 seconds for screens
-        nobody is looking at.
-        """
         if not self.context.is_signed_in or self._current_key is None:
             return
         spec = next((p for p in self.pages if p.key == self._current_key), None)
@@ -375,18 +290,13 @@ class StaffShell(QMainWindow):
 
 
 def default_pages() -> list[PageSpec]:
-    """The shipped navigation.
-
-    Imported lazily inside the factory lambdas so this module can be imported
-    without pulling in every page's dependencies.
-    """
     from app.staff.pages.bookings import build_bookings_page
     from app.staff.pages.customers import build_customers_page
     from app.staff.pages.dashboard import build_dashboard_page
     from app.staff.pages.fleet import build_fleet_page
     from app.staff.pages.inspections import build_inspections_page
+    from app.staff.pages.new_rental import build_new_rental_page
     from app.staff.pages.payments import build_payments_page
-    from app.staff.pages.today import build_today_page
 
     return [
         PageSpec(
@@ -397,11 +307,10 @@ def default_pages() -> list[PageSpec]:
             auto_refresh=True,
         ),
         PageSpec(
-            "today",
+            "new_rental",
             "New Rental",
-            build_today_page,
+            build_new_rental_page,
             icon="pos",
-            auto_refresh=True,
         ),
         PageSpec("bookings", "Bookings", build_bookings_page, icon="bookings"),
         PageSpec("fleet", "Fleet", build_fleet_page, icon="vehicle"),
@@ -420,11 +329,5 @@ def default_pages() -> list[PageSpec]:
 
 
 def sidebar_page_keys(pages: list[PageSpec] | None = None) -> list[str]:
-    """The keys the sidebar shows for a staff member, in sidebar order.
-
-    Admin-only pages are excluded, matching what `Sidebar` is given at sign-in.
-    The keys that are *not* in this list are the stub rows, which exist in the
-    sidebar but navigate nowhere.
-    """
     specs = default_pages() if pages is None else pages
     return [s.key for s in specs if not s.admin_only]

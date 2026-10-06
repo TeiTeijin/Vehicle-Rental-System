@@ -1,17 +1,3 @@
-"""Entry point for the staff application.
-
-    python -m app.staff                 # live database (DATABASE_URL)
-    python -m app.staff --demo          # demo.db, with a banner saying so
-    python -m app.staff --demo-file x.db
-
-The default is the live database. That is a deliberate asymmetry with the
-demo seeder, which defaults to a scratch file: the staff app is a tool the
-branch uses, and the realistic accident is someone reaching for `--demo`
-during a demo and then reconciling against it, not someone opening the real
-app and being unable to. The banner and the window title both say DEMO when
-the flag is used.
-"""
-
 from __future__ import annotations
 
 import argparse

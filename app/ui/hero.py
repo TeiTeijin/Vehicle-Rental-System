@@ -1,24 +1,3 @@
-"""Hero showcase carousel for the dashboard.
-
-Loading strategy
-----------------
-The hero is scrollable, but the user only ever looks at *one* slide at a time,
-so eagerly downloading all four photos before showing anything wasted most of
-the wait. Instead:
-
-1. One JOIN query returns every slide's text fields. The hero paints names,
-   prices, specs and buttons from this alone, typically in well under a second.
-2. Only the visible slide's photo is fetched first.
-3. The neighbours are prefetched quietly in the background on a small thread
-   pool, so arrowing to an adjacent car is already warm.
-4. Photos are cached on disk by `image_cache`, keyed on the vehicle's
-   identity, which survives CarImages' hourly URL re-signing. A warm launch
-   therefore performs no image HTTP at all.
-
-Network and decode work stays off the GUI thread; only finished `QImage`
-objects cross back, and they become `QPixmap` on the GUI thread as Qt requires.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,15 +5,12 @@ from pathlib import Path
 
 import requests
 from PySide6.QtCore import (
-    QEasingCurve,
-    QEvent,
     QObject,
     QPropertyAnimation,
     QRunnable,
     QSize,
     Qt,
     QThreadPool,
-    QVariantAnimation,
     Signal,
     Slot,
 )
@@ -44,9 +20,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QIcon,
     QImage,
-    QLinearGradient,
     QPainter,
-    QPainterPath,
     QPixmap,
 )
 from PySide6.QtWidgets import (
@@ -68,6 +42,7 @@ from app.services.vehicle_service import (
     showcase_vehicle_rows,
     to_showcase,
 )
+from app.widgets.skeleton import SKELETON_FADE_MS, LabelSkeleton, Skeleton
 
 ICONS_DIR = Path(__file__).with_name("icons")
 
@@ -103,14 +78,6 @@ IMAGE_TIMEOUT = 30
 # Four slides means "all of them": one thread per slide.
 PREFETCH_THREADS = 4
 
-SKELETON_BASE = "#DDD8CD"
-SKELETON_SHIMMER = "#F4F1E8"
-SKELETON_RADIUS = 6
-SKELETON_SHIMMER_MS = 1100
-SKELETON_BAND = 0.55
-SKELETON_SHIMMER_ALPHA = 120
-SKELETON_FADE_MS = 150
-
 
 @dataclass(frozen=True)
 class HeroSlide:
@@ -119,7 +86,6 @@ class HeroSlide:
 
 
 def fit_cover(image: QImage, size: QSize) -> QImage:
-    """Scale to fill `size` then centre-crop, so the result is exactly `size`."""
     scaled = image.scaled(
         size, Qt.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation
     )
@@ -142,21 +108,12 @@ def _decode(data: bytes) -> QImage | None:
 
 
 class _LoaderSignals(QObject):
-    """`ready` carries the text-only slides; `image` adds photos as they land."""
-
     ready = Signal(list)
     image = Signal(int, QImage)
     failed = Signal(str)
 
 
 class HeroLoader(QRunnable):
-    """Text fields for every slide, then the visible photo first, then neighbours.
-
-    Each photo is fetched by its own `ImageLoader` so the pool can work on
-    several at once. The metadata step keeps a single short-lived session; the
-    image tasks deliberately do not touch the database.
-    """
-
     def __init__(self, first_index: int = 0, include_3d: bool = False) -> None:
         super().__init__()
         self.signals = _LoaderSignals()
@@ -188,26 +145,16 @@ class HeroLoader(QRunnable):
         self.signals.ready.emit(slides)
 
     def _fetch_url(self, session, vehicle) -> str | None:
-        """Populate the media rows for a vehicle that has no photo URL yet."""
         try:
             rows = media_service.get_or_fetch_media(
                 session, vehicle, include_3d=self._include_3d
             )
         except Exception:
             return None
-        return next(
-            (r.image_url for r in rows if r.view_angle == "front34" and r.image_url),
-            None,
-        ) or next((r.image_url for r in rows if r.image_url), None)
+        return media_service.pick_photo_url(rows)
 
 
 class ImageLoader(QRunnable):
-    """One photo: disk cache first, then HTTP, then disk again.
-
-    The `image` signal is emitted on success only. A miss falls back to a
-    transparent placeholder so a broken photo never blanks the whole slide.
-    """
-
     def __init__(self, index: int, vehicle: ShowcaseVehicle, url: str | None) -> None:
         super().__init__()
         self.index = index
@@ -253,122 +200,7 @@ class ImageLoader(QRunnable):
         self.signals.image.emit(self.index, fit_cover(image, IMAGE_SIZE))
 
 
-class Skeleton(QWidget):
-    """A rounded grey block with a highlight sweeping across it while loading.
-
-    Cosmetic only. It makes a wait legible instead of leaving a black gap. The
-    sweep is driven by the animation's own value rather than a timer, so a
-    hidden block costs nothing and stops entirely.
-    """
-
-    def __init__(self, parent: QWidget | None = None, radius: int = SKELETON_RADIUS) -> None:
-        super().__init__(parent)
-        self._radius = radius
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-
-        self._animation = QVariantAnimation(self)
-        self._animation.setDuration(SKELETON_SHIMMER_MS)
-        self._animation.setLoopCount(-1)
-        # Linear: an eased sweep stalls at each end and reads as a stutter.
-        self._animation.setEasingCurve(QEasingCurve.Type.Linear)
-        # Required: without start/end values the animation never interpolates.
-        self._animation.setStartValue(0.0)
-        self._animation.setEndValue(1.0)
-        self._animation.valueChanged.connect(self._on_value)
-
-    def set_busy(self, busy: bool) -> None:
-        """Show this block and start the sweep, or hide it and stand down."""
-        self.setVisible(busy)
-        if busy:
-            if not self._animation.state() == self._animation.State.Running:
-                self._animation.start()
-        else:
-            self._animation.stop()
-
-    def _on_value(self, value) -> None:
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(SKELETON_BASE))
-        painter.drawRoundedRect(self.rect(), self._radius, self._radius)
-
-        if self.width() <= 0 or self.height() <= 0:
-            return
-
-        band = max(1.0, self.width() * SKELETON_BAND)
-        # currentValue() is None until the first tick; float(None) would raise.
-        value = self._animation.currentValue()
-        t = 0.0 if value is None else float(value)
-        start = -band + (self.width() + 2 * band) * t
-
-        highlight = QColor(SKELETON_SHIMMER)
-        highlight.setAlpha(SKELETON_SHIMMER_ALPHA)
-        gradient = QLinearGradient(start, 0.0, start + band, 0.0)
-        gradient.setColorAt(0.0, QColor(0, 0, 0, 0))
-        gradient.setColorAt(0.5, highlight)
-        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
-
-        clip = QPainterPath()
-        clip.addRoundedRect(self.rect(), self._radius, self._radius)
-        painter.save()
-        painter.setClipPath(clip)
-        painter.fillRect(self.rect(), gradient)
-        painter.restore()
-
-    def hideEvent(self, event) -> None:
-        self._animation.stop()
-        super().hideEvent(event)
-
-
-class LabelSkeleton(Skeleton):
-    """A `Skeleton` that keeps itself sized to the label it stands in for.
-
-    The label is the parent, so the block is always clipped to its own row and
-    cannot drift away from it. Height follows the label's font line height; width
-    is the smaller of a hand-set estimate and the label's own width, which makes
-    it self-correcting: a label that hugs its text (price, specs) gets a bar
-    exactly as wide as the text, while one that stretches (eyebrow) uses the
-    estimate.
-    """
-
-    def __init__(self, label: QLabel, width: int, radius: int = SKELETON_RADIUS) -> None:
-        super().__init__(label, radius)
-        self._width = width
-        label.installEventFilter(self)
-        self._sync()
-
-    def eventFilter(self, watched, event) -> bool:
-        if watched is self.parentWidget() and event.type() in (
-            QEvent.Type.Resize,
-            QEvent.Type.Show,
-            QEvent.Type.FontChange,
-            QEvent.Type.LayoutRequest,
-        ):
-            self._sync()
-        return super().eventFilter(watched, event)
-
-    def _sync(self) -> None:
-        host = self.parentWidget()
-        if host is None:
-            return
-        box = host.contentsRect()
-        line = max(1, host.fontMetrics().height())
-        height = min(line, max(1, box.height()))
-        width = min(self._width, max(1, box.width()))
-        # The eyebrow centres its text across the page, so the block must centre too.
-        centred = bool(host.alignment() & Qt.AlignmentFlag.AlignHCenter)
-        x = (box.width() - width) // 2 if centred else 0
-        y = (box.height() - height) // 2
-        self.setGeometry(x, y, width, height)
-        self.raise_()
-
-
 class ElidedLabel(QLabel):
-    """Centred label that shortens its text instead of clipping it."""
-
     def __init__(self) -> None:
         super().__init__()
         self._full = ""
@@ -392,8 +224,6 @@ class ElidedLabel(QLabel):
 
 
 class HeroCarousel(QWidget):
-    """One vehicle at a time: metadata, photo, price, actions."""
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("hero")
@@ -492,11 +322,6 @@ class HeroCarousel(QWidget):
     # ---------- construction helpers ----------
 
     def _media_row(self) -> QHBoxLayout:
-        """Holds only the photo.
-
-        The arrows are deliberately *not* in here: they are pinned to the hero's
-        outer edges by hand, so they must not contribute to its minimum width.
-        """
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
@@ -508,12 +333,6 @@ class HeroCarousel(QWidget):
     # ---------- hand-placed children ----------
 
     def _name_font(self, text: str) -> QFont:
-        """Scale the name so it comes out `NAME_TARGET_WIDTH` px wide.
-
-        Always measured at `NAME_PX`, never at the label's current size: this
-        label's font is the thing being replaced, so measuring it would feed the
-        previous slide's size into the next slide's ratio and run away.
-        """
         font = QFont(self.name.font())
         font.setPixelSize(NAME_PX)
         natural = QFontMetrics(font).horizontalAdvance(text)
@@ -525,26 +344,15 @@ class HeroCarousel(QWidget):
         return font
 
     def _photo_top(self) -> int:
-        """Top of the photo, with a layout fallback before the first layout pass."""
         return self.image.y() or (self.eyebrow.height() + SECTION_GAP)
 
     def _name_box(self, text: str) -> tuple[int, int, int]:
-        """Width, height and ink offset for `text` at its display size.
-
-        The ink offset is how far the top of the line box sits above the first
-        pixel of the name's glyphs. A 270px font has a 327px line box, so ~62px
-        of that box is empty air above the cap height, and a 600px font has ~140px
-        of it. Measuring the box instead of the letters is what made the gap to
-        the eyebrow read as 85px for one vehicle and 161px for another, when both
-        were specified as 20px.
-        """
         metrics = QFontMetrics(self._name_font(text))
         # Ink-only bounds; boundingRect() returns the full line box and zeroes it.
         ink_offset = metrics.ascent() + metrics.tightBoundingRect(text).top()
         return metrics.horizontalAdvance(text) + 2, metrics.height(), ink_offset
 
     def _set_name(self, text: str) -> None:
-        """Write the name and remember the box it needs."""
         self.name.setFont(self._name_font(text))
         self.name.setText(text)
         # Two spare px: a narrower label would start eliding.
@@ -555,25 +363,11 @@ class HeroCarousel(QWidget):
         self._position_name()
 
     def _name_top(self) -> int:
-        """Top of the name's line box, positioned so the glyphs tuck under the eyebrow.
-
-        The name is pinned by its ink, not by its box: the ink is placed at the
-        photo's top edge, which is `SECTION_GAP` below the eyebrow and the closest
-        the name can sit to it while still being fully hidden behind the photo.
-        Anything higher and a sliver of letter tops would show above the photo,
-        reading as the name floating in front of it instead of behind it.
-        """
         if self._name_ink_offset is None:
             return self._photo_top()
         return self._photo_top() - self._name_ink_offset
 
     def _position_name(self) -> None:
-        """Centre the name block horizontally on the photo, hung off the eyebrow.
-
-        `media_stack` is a layout and has no geometry, but the stacked widgets are
-        reparented onto the hero, so the image's rect is already in hero
-        coordinates.
-        """
         centre_x = self.image.x() + self.image.width() // 2
         if self._name_size is None:
             self.name.hide()
@@ -590,11 +384,6 @@ class HeroCarousel(QWidget):
         self.image.raise_()
 
     def _position_arrows(self) -> None:
-        """Pin the arrows to the hero's own left and right edges.
-
-        They follow the window because the hero does, and because they are not
-        in a layout they cannot drag the hero's minimum width up with them.
-        """
         centre_y = self.image.y() + self.image.height() // 2
         top = centre_y - ARROW_SIZE // 2
         self.arrow_prev.move(PAGE_MARGIN, top)
@@ -606,15 +395,6 @@ class HeroCarousel(QWidget):
         self._position_arrows()
 
     def _reserve_name_height(self) -> None:
-        """Pad below the photo so a tall name is never clipped.
-
-        The name is pinned by its ink, so each one starts at the same line but its
-        line box starts a different amount higher (the ink offset scales with the
-        font). The bottom is therefore per-slide and has to be measured per-slide
-        rather than as one shared top plus one shared height. Reserving the
-        largest shortfall keeps the hero's height identical on every slide instead
-        of jumping as you arrow.
-        """
         if not self._slides:
             return
         photo_top = self._photo_top()
@@ -736,7 +516,6 @@ class HeroCarousel(QWidget):
             self._show_photo()
 
     def _all_skeletons(self) -> tuple:
-        """Every block that participates in the loading state, in paint order."""
         return (
             self.eyebrow_skeleton,
             self.price_skeleton,
@@ -747,7 +526,6 @@ class HeroCarousel(QWidget):
         )
 
     def set_skeletons_busy(self, busy: bool) -> None:
-        """Show or hide the grey blocks, text ones and the photo one together."""
         for skeleton in self._all_skeletons():
             skeleton.set_busy(busy)
         # The block would cover the caption, so the caption steps aside.
@@ -763,7 +541,6 @@ class HeroCarousel(QWidget):
         return any(skeleton.isVisible() for skeleton in self._all_skeletons())
 
     def _show_photo(self) -> None:
-        """Swap in the real photo, with a short fade so the change is soft."""
         pixmap = self._pixmaps[self._index] if self._index < len(self._pixmaps) else None
         if pixmap is None:
             self.media_stack.setCurrentWidget(self.image_skeleton)
@@ -792,14 +569,6 @@ class HeroCarousel(QWidget):
         self.media_stack.setCurrentWidget(self.image)
 
     def _prefetch(self, index: int) -> None:
-        """Load `index`, then its neighbours, skipping anything in flight.
-
-        The visible slide is fetched on its own first. CarImages throttles
-        concurrent large downloads hard: measured side by side, three parallel
-        fetches finished in ~1.5s of each other but took 35s in total, versus
-        ~2s for a single fetch. So neighbours only start once the photo the
-        user is actually looking at has landed.
-        """
         total = len(self._slides)
         if not total:
             return
@@ -833,11 +602,9 @@ class HeroCarousel(QWidget):
 
     @property
     def max_name_height(self) -> int:
-        """Tallest name across every slide, in px."""
         return self._max_name_height
 
     def media_row_extra(self) -> int:
-        """Space reserved below the photo for a tall name, in px."""
         return self._media_row_layout.contentsMargins().bottom()
 
     @property

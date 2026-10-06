@@ -1,21 +1,3 @@
-"""Backfill the hero spec columns on VEHICLE for databases that predate them.
-
-A *fresh* database does not need this script. `scripts/init_db.py` builds
-VEHICLE straight from the ORM, which already declares seats / transmission /
-fuel_type / body_style, and `scripts/seed_data.py` already populates them for
-every seeded vehicle. This exists only to upgrade a VEHICLE table created
-before those columns were added to the model.
-
-Idempotent: every step inspects current state first, so re-running is safe.
-
-    python -m scripts.migrate_vehicle_specs --dry-run
-    python -m scripts.migrate_vehicle_specs
-
-Schema only. Vehicle rows are seeded by `scripts/seed_data.py`, not here --
-this script used to also insert the showcase Fortuner, which duplicated the row
-seed_data already creates and so could never be relied on.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -52,12 +34,6 @@ BACKFILL: dict[tuple[str, str], dict] = {
 
 
 def existing_columns() -> set[str]:
-    """Column names on VEHICLE, on any backend.
-
-    Uses SQLAlchemy's inspector rather than information_schema, which only
-    exists on MySQL and made this script crash with a raw driver error on
-    SQLite.
-    """
     inspector = inspect(engine)
     if TABLE not in inspector.get_table_names():
         return set()

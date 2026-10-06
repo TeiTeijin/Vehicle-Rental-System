@@ -92,10 +92,6 @@ def test_database_round_trip() -> None:
 
         from app.models import Users
 
-        # seed_data.py generates a random password unless SEED_PASSWORD_CUSTOMER
-        # is exported, so a hardcoded literal only passed by coincidence of a
-        # previous manual export. Assert the hash is a real bcrypt hash instead,
-        # and only verify the plaintext when the seed password is known.
         customer = session.query(Users).filter_by(role="customer").one()
         assert customer.password_hash.startswith("$2"), "customer password is not bcrypt-hashed"
 

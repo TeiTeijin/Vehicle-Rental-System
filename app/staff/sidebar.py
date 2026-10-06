@@ -1,27 +1,3 @@
-"""The left-hand navigation column.
-
-A fixed 210px panel floating 16px from the window edge, rather than a bar across
-the top. The floating part matters: on the cream page a bar pinned to the top
-edge and a panel inset from it read as two different objects, and the brief asks
-for the panel. The 16px inset is what makes it one.
-
-**The active state is two things at once**, and they are painted rather than left
-to the stylesheet because a stylesheet cannot do both:
-
-* a 3px bar down the leading edge, and
-* the label going bold.
-
-There is deliberately no pill behind the current row: the panel is white and the
-row is marked by the bar and the weight alone, so a merely hovered row cannot be
-mistaken for the page you are on. The bar is a filled rounded rect rather than a
-`border-left`, because a border's rounded ends get clipped and leave a mark with
-soft corners instead of a clean indicator running the full height of the row.
-
-Nav items carry a `page_key` dynamic property. Every row is `autoExclusive`, so
-the active set is the button's own checked state rather than a "clear the others"
-loop, and two items can never both look active at once.
-"""
-
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
@@ -37,7 +13,6 @@ from PySide6.QtWidgets import (
 
 from app.staff import branding, icons, theme
 from app.staff.metrics import (
-    NAV_ACTIVE_BAR,
     NAV_GAP,
     NAV_ICON,
     NAV_ROW_H,
@@ -45,22 +20,10 @@ from app.staff.metrics import (
     SIDEBAR_RADIUS,
     SIDEBAR_W,
 )
+from app.staff.section_row import paint_active_row
 
 
 class NavItem(QAbstractButton):
-    """One row: the active bar, the icon, the label.
-
-    A `QAbstractButton` rather than a `QFrame` with a `mousePressEvent`, because
-    a hand-rolled row is not reachable from the keyboard and the old navbar's
-    `QPushButton` rows were. `QAbstractButton` gives the checkable state, the
-    Space/Enter handling and the focus ring for nothing, and the paint is
-    overridden anyway -- so the only thing left to hand-roll is the drawing.
-
-    Checkable rather than merely clickable so "which page am I on" is the
-    button's own state instead of a flag beside it that two widgets can disagree
-    about.
-    """
-
     def __init__(
         self,
         key: str,
@@ -110,62 +73,21 @@ class NavItem(QAbstractButton):
         return self.isChecked()
 
     def nextCheckState(self) -> None:  # noqa: N802
-        """Do not let a stub row become checked.
-
-        Qt's hook for "this button does not toggle", and the right place for it:
-        the row is `autoExclusive`, and an auto-exclusive button that is the
-        only checked one in its group refuses to uncheck itself. So calling
-        `setChecked(False)` after the click -- which is what an ordinary
-        `clicked` handler would do -- silently does nothing, and the sidebar
-        goes on claiming to be on a page that does not exist.
-        """
         if self._page_enabled:
             super().nextCheckState()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            radius = float(SIDEBAR_RADIUS) * 0.42
-            active = self.isChecked()
-            hovered = self._hovered or self.hasFocus()
-
-            if hovered:
-                painter.setBrush(QColor(theme.SURFACE))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawRoundedRect(self.rect(), radius, radius)
-
-            if active:
-                painter.setBrush(QColor(theme.INK))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawRoundedRect(
-                    QRectF(4.0, 4.0, float(NAV_ACTIVE_BAR), self.height() - 8.0),
-                    1.5,
-                    1.5,
-                )
-
-            icon_colour = theme.INK
-            text_colour = theme.INK
-
-            glyph = icons.pixmap(self._icon_name, icon_colour, NAV_ICON)
-            painter.drawPixmap(16, (self.height() - glyph.height()) // 2, glyph)
-
-            font = QFont("Inter")
-            font.setPixelSize(13)
-            font.setWeight(
-                QFont.Weight.DemiBold if active else QFont.Weight.Medium
-            )
-            painter.setFont(font)
-            painter.setPen(QColor(text_colour))
-            painter.drawText(
-                QRectF(
-                    16 + NAV_ICON + 12,
-                    0,
-                    self.width() - NAV_ICON - 40,
-                    self.height(),
-                ),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                self._label_text,
+            glyph = icons.pixmap(self._icon_name, theme.INK, NAV_ICON)
+            paint_active_row(
+                painter,
+                self.rect(),
+                active=self.isChecked(),
+                hovered=self._hovered or self.hasFocus(),
+                label=self._label_text,
+                label_x=16,
+                glyph=glyph,
             )
         finally:
             painter.end()
@@ -182,15 +104,6 @@ class NavItem(QAbstractButton):
 
 
 class Sidebar(QFrame):
-    """The navigation panel: wordmark, grouped items, and log out at the foot.
-
-    The item list lives in a `QScrollArea` because the two groups plus the
-    wordmark add up to about 720px, which is more than the 640px the window can
-    be dragged down to. Without it the log-out button is the part that goes
-    missing, and the item that goes missing is the one nobody can reach a
-    workaround for.
-    """
-
     page_requested = Signal(str)
     sign_out_requested = Signal()
     #: (label, reason) for a placeholder row that was pressed.
@@ -251,18 +164,6 @@ class Sidebar(QFrame):
     def build(
         self, sections: list[tuple[str, list[tuple[str, str, str, bool]]]]
     ) -> None:
-        """(Re)build the item list.
-
-        `sections` is a list of `(group label, items)`, each item being
-        `(key, label, icon name, enabled)`.
-
-        A whole new list widget per session rather than draining the old one, for
-        the reason the navbar used to be rebuilt: the visible set depends on the
-        role, and a row left over from the last sign-in is a way to reach a page
-        that should not be reachable. Swapping the widget also disposes of every
-        previous row at once, so there is no path where one of them is removed
-        from the layout but still a live child.
-        """
         self._items.clear()
 
         self._list = QWidget()
@@ -298,7 +199,6 @@ class Sidebar(QFrame):
         self._list_layout.addStretch(1)
 
     def _on_row(self, key: str) -> None:
-        """A row was pressed. Placeholders say so instead of navigating."""
         row = self._items.get(key)
         if row is not None and not row.page_enabled:
             row.setChecked(False)
@@ -313,7 +213,6 @@ class Sidebar(QFrame):
             row.set_active(row_key == key)
 
     def item_labels(self) -> list[str]:
-        """Every item's label, in order. The tests read the nav through this."""
         return [row.label for row in self._items.values()]
 
     def item(self, key: str) -> NavItem | None:

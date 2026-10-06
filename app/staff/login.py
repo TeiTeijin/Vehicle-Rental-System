@@ -1,22 +1,3 @@
-"""The staff sign-in screen.
-
-Sign-in is the role gate. ``auth_service.sign_in`` accepts any user in the
-table, so this view is where a `customer` row is turned away -- the check is
-here as well as in ``StaffContext.require_staff`` because refusing at the door
-gives a clearer message than refusing on the first page.
-
-Three details worth keeping:
-
-  * The error is shown in one fixed place above the button, not as a popup, so
-    the password field keeps focus and the user can just try again.
-  * The email is lowercased on the way in, matching ``sign_in``, so an address
-    typed with capitals still works instead of failing with "incorrect
-    password" for a reason that is not about the password.
-  * The window is a fixed size while this is showing. The app behind it opens
-    at 1180x760 for tables of bookings, and a sign-in form stretched to that
-    width is a form stretched to that width.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -92,13 +73,6 @@ REVEAL_FADE_MS = 180
 
 
 def _tinted(source: QPixmap, colour: str) -> QPixmap:
-    """A copy of `source` recoloured to `colour`, keeping its alpha.
-
-    The tint is baked into a pixmap rather than done with a painter
-    composition on the widget, because `CompositionMode_SourceIn` intersects
-    with everything already on the device and would erase the rest of the
-    button along with the icon.
-    """
     out = QPixmap(source.size())
     out.fill(QColor(0, 0, 0, 0))
     painter = QPainter(out)
@@ -110,13 +84,6 @@ def _tinted(source: QPixmap, colour: str) -> QPixmap:
 
 
 class RevealToggle(QAbstractButton):
-    """The eye in the password field: masked by default, one click to show.
-
-    The two icons cross-fade rather than snapping, because a hard swap while
-    the caret is blinking reads as a glitch. The incoming eye also eases up
-    from 88% so the change has somewhere to happen.
-    """
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName(OBJ_LOGIN_REVEAL)
@@ -150,22 +117,11 @@ class RevealToggle(QAbstractButton):
 
     @property
     def dominant_icon(self) -> str:
-        """Which eye the fade is mostly showing, for tests to pin the mapping.
-
-        Mid-fade both are painted at partial opacity, so there is no single
-        answer; this reports the one that has the larger share.
-        """
         if self._progress >= 0.5:
             return REVEAL_ICON_SHOWN
         return REVEAL_ICON_HIDDEN
 
     def nextCheckState(self) -> None:
-        """Qt calls this on a click; the button is the single source of truth.
-
-        Deriving the fade from the same flag that drives the check state is
-        what keeps the eye and the field from drifting apart -- they used to
-        carry their own copies of "is it showing".
-        """
         revealed = not self._revealed
         self._revealed = revealed
         self.setChecked(revealed)
@@ -178,7 +134,6 @@ class RevealToggle(QAbstractButton):
         self._fade.start()
 
     def set_revealed(self, revealed: bool, *, animated: bool = True) -> None:
-        """Set the state without waiting for a click."""
         if revealed == self._revealed:
             return
         self._revealed = revealed
@@ -254,13 +209,6 @@ class RevealToggle(QAbstractButton):
 
 
 class FloatingField(QLineEdit):
-    """A line edit whose label starts inside as a placeholder and lifts out.
-
-    The label is a child of the edit rather than a sibling in a layout, because
-    it has to cross the field's top edge. Sizing comes from `sizeHint` after the
-    font is set, so the two states are measured rather than guessed.
-    """
-
     def __init__(
         self,
         caption: str,
@@ -294,7 +242,6 @@ class FloatingField(QLineEdit):
         self._restack(animate=False)
 
     def _restack(self, *, animate: bool = True) -> None:
-        """Put the label where it belongs for the current focus/text state."""
         self._lifted = self.hasFocus() or bool(self.text())
         font = QFont(self.font())
         font.setPixelSize(LABEL_LIFTED_PX if self._lifted else LABEL_REST_PX)
@@ -332,17 +279,6 @@ class FloatingField(QLineEdit):
             )
 
     def paintEvent(self, event) -> None:
-        """Draw a masked field's own dots instead of Qt's oversized ones.
-
-        The text is swapped for a same-length run of `MASK_CHAR` only for the
-        duration of the paint, and the real value is put back afterwards, so
-        the widget keeps the genuine text the whole time it is not painting.
-        Editing, selection, undo, paste and the caret all stay Qt's problem.
-
-        Painting the same number of characters in the same font also means Qt
-        positions the caret and the selection for us, which it could not do if
-        we drew the dots on top of a paint of the real text.
-        """
         if not self._masked:
             super().paintEvent(event)
             return
@@ -378,8 +314,6 @@ class FloatingField(QLineEdit):
 
 
 class LoginView(QWidget):
-    """Wordmark, caption, two fields, a button, then a callback with the user."""
-
     def __init__(
         self,
         context: StaffContext,
@@ -468,12 +402,6 @@ class LoginView(QWidget):
     # -- behaviour -----------------------------------------------------------
 
     def _on_reveal_toggled(self, checked: bool) -> None:
-        """Show the password, or mask it again.
-
-        Clicking the control, not the field, is what shows it -- the field
-        keeps its own click behaviour so a click inside it still just places
-        the caret.
-        """
         self.password._masked = not checked
         self.password.update()
 
@@ -482,13 +410,6 @@ class LoginView(QWidget):
         self.password.selectAll()
 
     def attempt_sign_in(self) -> Users | None:
-        """Authenticate, then hand the user to the shell.
-
-        Returns the user on success and ``None`` on any failure, having already
-        shown the reason. A button handler returning ``None`` is easy to
-        misread as a no-op, so callers that care should check
-        :attr:`context.user`.
-        """
         self.error.setVisible(False)
         email = self.email.text().strip().lower()
         password = self.password.text()
