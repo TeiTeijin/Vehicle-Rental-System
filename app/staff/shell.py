@@ -41,11 +41,10 @@ class PageSpec:
     section: str = NAV_SECTIONS[0]
 
 
-#: Brief's rows with no screen behind them: key -> (label, icon, group).
+#: The one brief row with no screen behind it: key -> (label, icon, group).
+#: Billing was dropped (Payments covers the money side), Maintenance and
+#: Reports grew real pages, so none keeps a stub row leading nowhere.
 STUB_SECTIONS: dict[str, tuple[str, str, str]] = {
-    "reports": ("Reports", "reports", "General"),
-    "billing": ("Billing", "billing", "Tools"),
-    "maintenance": ("Maintenance", "maintenance", "Tools"),
     "settings": ("Settings", "settings", "Tools"),
 }
 
@@ -218,10 +217,10 @@ class StaffShell(QMainWindow):
         self._body_layout.setContentsMargins(
             metrics.SIDEBAR_MARGIN,
             metrics.SIDEBAR_MARGIN,
-            0,
+            metrics.SIDEBAR_GAP,
             metrics.SIDEBAR_MARGIN,
         )
-        self._body_layout.setSpacing(metrics.SIDEBAR_MARGIN)
+        self._body_layout.setSpacing(metrics.SIDEBAR_GAP)
         self._body_layout.insertWidget(0, self._sidebar)
 
         self._refresh_timer.start()
@@ -295,8 +294,10 @@ def default_pages() -> list[PageSpec]:
     from app.staff.pages.dashboard import build_dashboard_page
     from app.staff.pages.fleet import build_fleet_page
     from app.staff.pages.inspections import build_inspections_page
+    from app.staff.pages.maintenance import build_maintenance_page
     from app.staff.pages.new_rental import build_new_rental_page
     from app.staff.pages.payments import build_payments_page
+    from app.staff.pages.reports import build_reports_page
 
     return [
         PageSpec(
@@ -324,6 +325,19 @@ def default_pages() -> list[PageSpec]:
         ),
         PageSpec(
             "inspections", "Inspections", build_inspections_page, icon="check"
+        ),
+        PageSpec(
+            "maintenance",
+            "Maintenance",
+            build_maintenance_page,
+            icon="maintenance",
+            section="Tools",
+        ),
+        PageSpec(
+            "reports",
+            "Reports",
+            build_reports_page,
+            icon="reports",
         ),
     ]
 

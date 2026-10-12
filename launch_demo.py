@@ -50,8 +50,9 @@ def main() -> int:
             view.attempt_sign_in()
         print(f"signed in: {context.user}", flush=True)
 
-        # Land on New Rental, the page this work was about.
-        print(f"opened new_rental: {shell.show_page('new_rental')}", flush=True)
+        # Land on the requested page (default: New Rental).
+        page = sys.argv[1] if len(sys.argv) > 1 else "new_rental"
+        print(f"opened {page}: {shell.show_page(page)}", flush=True)
 
     # One turn of the loop after show, so the login view is laid out and its
     # fields can take text.

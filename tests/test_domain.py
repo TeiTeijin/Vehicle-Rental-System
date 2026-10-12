@@ -58,9 +58,15 @@ class TestOverlapSemantics:
     def test_no_bookings_means_available(self):
         assert AvailabilityChecker.is_available(None, D1, D5, []) is True
 
-    @pytest.mark.parametrize("start,end", [(D5, D1), (D5, D5)])
-    def test_zero_or_negative_range_rejected(self, start, end):
-        with pytest.raises(ValueError, match="end_date must be after start_date"):
+    def test_same_day_occupies_the_whole_day(self):
+        # [D5, D5] reads as [D5, D6): inside an existing stay it clashes,
+        # on a turnaround edge it does not.
+        assert AvailabilityChecker.is_available(None, D5, D5, [booking(D1, D10)]) is False
+        assert AvailabilityChecker.is_available(None, D10, D10, [booking(D1, D10)]) is True
+
+    @pytest.mark.parametrize("start,end", [(D5, D1)])
+    def test_negative_range_rejected(self, start, end):
+        with pytest.raises(ValueError, match="end_date cannot be before start_date"):
             AvailabilityChecker.is_available(None, start, end, [])
 
     def test_previous_inclusive_rule_would_have_blocked_turnaround(self):
@@ -95,9 +101,12 @@ class TestRentalDays:
     def test_one_day_rental(self):
         assert RentalCalculator.rental_days(D1, D6) == 5
 
-    @pytest.mark.parametrize("start,end", [(D5, D1), (D5, D5)])
-    def test_rejects_empty_ranges(self, start, end):
-        with pytest.raises(ValueError, match="end_date must be after start_date"):
+    def test_same_day_pickup_and_return_counts_one_day(self):
+        assert RentalCalculator.rental_days(D5, D5) == 1
+
+    @pytest.mark.parametrize("start,end", [(D5, D1)])
+    def test_rejects_reversed_ranges(self, start, end):
+        with pytest.raises(ValueError, match="end_date cannot be before start_date"):
             RentalCalculator.rental_days(start, end)
 
     def test_range_rule_matches_availability_rule(self):

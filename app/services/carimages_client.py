@@ -223,6 +223,34 @@ def get_moto_image_payload(make: str, model: str, gen: str) -> dict:
     return resp.json()
 
 
+def follow_model_redirect(endpoint_url: str) -> str | None:
+    """Resolve a `.../model?redirect=1` endpoint URL to the playable CDN URL.
+
+    The endpoint needs key + secret, which a browser must never see, so this
+    runs server-side: first hop carries auth and is never followed blindly
+    (requests would re-send the secret to the CDN), the CDN hop goes out
+    clean. Returns None when anything in the chain fails.
+    """
+    if not endpoint_url:
+        return None
+    try:
+        first = requests.get(
+            endpoint_url,
+            params={"api_key": CI_API_KEY},
+            headers=_rest_headers(),
+            timeout=TIMEOUT,
+            allow_redirects=False,
+        )
+    except Exception:
+        return None
+    if first.status_code not in (301, 302, 303, 307, 308):
+        return None
+    location = first.headers.get("location") or ""
+    if not location:
+        return None
+    return location
+
+
 def download_model_glb(glb_url: str) -> bytes:
     parsed = urlsplit(glb_url)
     if parsed.scheme != "https" or parsed.netloc not in ALLOWED_DOWNLOAD_HOSTS:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -24,11 +25,12 @@ from app.staff import theme
 from app.staff.brand_rows import BrandSection
 from app.staff.feedback import describe
 from app.staff.filter_popover import FilterPopover
+from app.staff.vehicle_details import VehicleDetailsOverlay
+from app.staff.widgets import toast
 from app.staff.metrics import (
     BRAND_ROW_GAP,
     FILTER_BAR_H,
     FILTER_GAP,
-    FILTER_ROW_H,
     LOAD_MORE_PX,
     SECTION_TRACK_MS,
 )
@@ -43,6 +45,21 @@ BRANDS_PER_PAGE = 4
 #: Long enough that clicking three boxes in a row is one set of queries, short
 #: enough that the greying still feels attached to the click.
 AVAILABILITY_DEBOUNCE_MS = 90
+
+
+def popover_position(anchor: QPoint, size: QSize, available: QRect) -> QPoint:
+    """Top-left for a popup of `size` opening at `anchor`, kept on-screen.
+
+    The popup drops below the anchor and is pulled back inside `available` on
+    every edge (`QRect` edges are inclusive, hence the +1). When the popup is
+    bigger than the work area it is pinned to the top-left corner rather than
+    hanging off both edges at once.
+    """
+    w = min(size.width(), available.width())
+    h = min(size.height(), available.height())
+    x = min(max(anchor.x(), available.left()), available.right() - w + 1)
+    y = min(max(anchor.y(), available.top()), available.bottom() - h + 1)
+    return QPoint(max(x, available.left()), max(y, available.top()))
 
 
 class NewRentalPage(StaffPage):
@@ -69,6 +86,15 @@ class NewRentalPage(StaffPage):
         self._brand_total = 0
         self._matched = 0
         self._total = 0
+        #: Vehicle picked via a details dialog's Rent button (Phase 1 handoff
+        #: for the future write-a-rental form), plus the checked window the
+        #: pick was made against, if the checker ran.
+        self._selected_vehicle_id: int | None = None
+        self._selected_window = None
+        self._details_overlay = None
+        #: Customer id pushed from the Customers tab ("New rental"): the next
+        #: wizard run pre-resolves Step 3 to them, checks included.
+        self._pending_customer_id: int | None = None
 
         self._build_filter_bar()
         self._build_popover()
@@ -115,7 +141,7 @@ class NewRentalPage(StaffPage):
         self.search.textChanged.connect(self._on_search_changed)
         self._pinned_layout.addWidget(self.search)
 
-        self.filters_button = QPushButton("Filters", bar)
+        self.filters_button = QPushButton("Filters \u25be", bar)
         self.filters_button.setObjectName(theme.OBJ_FILTER_BUTTON)
         self.filters_button.setFixedHeight(FILTER_BAR_H)
         self.filters_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -133,7 +159,7 @@ class NewRentalPage(StaffPage):
 
         self.clear_button = QPushButton("Clear all", bar)
         self.clear_button.setObjectName("filterClear")
-        self.clear_button.setFixedHeight(FILTER_ROW_H)
+        self.clear_button.setFixedHeight(FILTER_BAR_H)
         self.clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_button.clicked.connect(self.clear_filters)
         self._pinned_layout.addWidget(self.clear_button)
@@ -142,12 +168,20 @@ class NewRentalPage(StaffPage):
 
     def _build_popover(self) -> None:
         self.filter_popover = FilterPopover(self)
-        self.filter_popover.setWindowFlags(Qt.WindowType.Popup)
+        # setWindowFlags replaces: keep the popover's frameless hint so the
+        # rounded card is the only frame (see FilterPopover.__init__).
+        self.filter_popover.setWindowFlags(
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        )
         self.filter_popover.filters_changed.connect(self._on_filters_changed)
         # Ticking a box inside a `Qt.Popup` otherwise closes it on the mouse
         # release that delivered the click, which would make every single
         # adjustment dismiss the panel.
         self.filter_popover.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        # Pinned Apply/Clear footer (filter-layout.md `.filter-actions`):
+        # Apply re-publishes the draft (live preview already did) and closes;
+        # Clear resets via the popover (which publishes once).
+        self.filter_popover.apply_btn.clicked.connect(self.close_popover)
 
     def toggle_popover(self) -> None:
         if self.filter_popover.isVisible():
@@ -156,24 +190,29 @@ class NewRentalPage(StaffPage):
             self.open_popover()
 
     def open_popover(self) -> None:
+        popover = self.filter_popover
         anchor = self.filters_button.mapToGlobal(
             QPoint(0, self.filters_button.height())
         )
-        screen = self.window().screen() if self.window() else None
-        available = (
-            screen.availableGeometry() if screen is not None else None
-        )
-        x, y = anchor.x(), anchor.y()
-        if available is not None:
-            if x + self.filter_popover.width() > available.right():
-                x = max(available.left(), available.right() - self.filter_popover.width())
-            # And downwards, which is the edge a short window runs into: the panel
-            # is 420px tall and the fleet sheet is not always that deep.
-            if y + self.filter_popover.height() > available.bottom():
-                y = max(available.top(), available.bottom() - self.filter_popover.height())
+        # The screen under the anchor, not the window's: on multi-monitor or
+        # mixed-DPI setups the window's screen can be a different display
+        # with different geometry, which is how the panel ended up hanging
+        # off the right edge it was clamped against.
+        screen = QGuiApplication.screenAt(anchor)
+        if screen is None and self.window() is not None:
+            screen = self.window().screen()
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
 
-        self.filter_popover.move(x, y)
-        self.filter_popover.show()
+        if screen is not None:
+            popover.move(
+                popover_position(
+                    anchor, popover.size(), screen.availableGeometry()
+                )
+            )
+        else:
+            popover.move(anchor)
+        popover.show()
         # The brand pane's own search takes the focus so a clerk can type a make
         # straight away, but only when the Brand column is the one open.
         if self.filter_popover.current_category() == "makes":
@@ -203,6 +242,61 @@ class NewRentalPage(StaffPage):
     @property
     def matched(self) -> int:
         return self._matched
+
+    @property
+    def selected_vehicle_id(self) -> int | None:
+        return self._selected_vehicle_id
+
+    @property
+    def selected_window(self):
+        return self._selected_window
+
+    def set_pending_customer(self, user_id: int) -> None:
+        """Attach a customer from the Customers tab to the next wizard run."""
+        self._pending_customer_id = user_id
+
+    def _open_vehicle_details(self, vehicle_id: int) -> None:
+        # Embedded overlay inside the staff window: no new OS window opens.
+        if self._details_overlay is not None:
+            self._details_overlay.hide_overlay()
+            self._details_overlay.deleteLater()
+            self._details_overlay = None
+        window = self.window()
+        overlay = VehicleDetailsOverlay(
+            self.context, vehicle_id, window if window is not None else self
+        )
+        overlay.panel.rent_requested.connect(self._on_rent_requested)
+        overlay.panel.close_requested.connect(overlay.hide_overlay)
+        overlay.show_overlay()
+        self._details_overlay = overlay
+
+    def _on_rent_requested(self, vehicle_id: int) -> None:
+        from PySide6.QtCore import QDate
+
+        from app.staff.rental_wizard import RentalWizard
+
+        self._selected_vehicle_id = vehicle_id
+        overlay = self._details_overlay
+        window = None
+        if overlay is not None:
+            self._selected_window = overlay.panel.checked_window
+            window = overlay.panel.checked_window
+        start, end = window if window is not None else (None, None)
+        if start is None or end is None:
+            today = QDate.currentDate()
+            start, end = today, today.addDays(1)
+        self._wizard = RentalWizard(
+            self.context,
+            overlay,
+            vehicle_id,
+            start,
+            end,
+            navigate=self.shell.show_page,
+            notify=lambda message: toast(self, message, "ok"),
+            customer_id=self._pending_customer_id,
+        )
+        self._pending_customer_id = None
+        self._wizard.start()
 
     def clear_filters(self) -> None:
         blocked = self.search.blockSignals(True)
@@ -327,6 +421,8 @@ class NewRentalPage(StaffPage):
             self._rows_layout.insertWidget(insert_at, section)
             insert_at += 1
             self._sections.append(section)
+            for slot in section.slots:
+                slot.details_requested.connect(self._open_vehicle_details)
             vehicles.extend(brand_vehicles)
 
         self._offset += len(page_brands)
@@ -337,10 +433,54 @@ class NewRentalPage(StaffPage):
         # grid loads. Rebuilding it from the sections on screen would both empty
         # the axis on every filter change and drop brands the clerk can still see.
         self._request_media(vehicles)
+        self._update_filter_thumbs(vehicles)
         self._update_count()
         self._sync_empty_state()
         QTimer.singleShot(0, self._fill_viewport)
         QTimer.singleShot(0, self._track_section)
+
+    def _update_filter_thumbs(self, vehicles) -> None:
+        """Feed real fleet photos into the brand / car-type cards.
+
+        Uses the synchronous image cache only (no network in the dropdown);
+        a cache miss keeps the silhouette placeholder, which the media
+        pipeline may fill on later pages.
+        """
+        try:
+            from app.services import image_cache
+        except Exception:  # noqa: BLE001
+            return
+        brand_pix: dict[str, QPixmap] = {}
+        type_pix: dict[str, QPixmap] = {}
+        for vehicle in vehicles:
+            if vehicle.make in brand_pix and (
+                not vehicle.vehicle_class or vehicle.vehicle_class in type_pix
+            ):
+                continue
+            try:
+                cached = image_cache.load(
+                    vehicle.make, vehicle.model, vehicle.year
+                )
+            except Exception:  # noqa: BLE001
+                cached = None
+            if cached is None or not getattr(cached, "data", None):
+                continue
+            image = QImage()
+            if not image.loadFromData(cached.data):
+                continue
+            pixmap = QPixmap.fromImage(image)
+            if pixmap.isNull():
+                continue
+            brand_pix.setdefault(vehicle.make, pixmap)
+            if vehicle.vehicle_class:
+                type_pix.setdefault(vehicle.vehicle_class, pixmap)
+        try:
+            if brand_pix:
+                self.filter_popover.set_brand_photos(brand_pix)
+            if type_pix:
+                self.filter_popover.set_type_photos(type_pix)
+        except Exception:  # noqa: BLE001
+            return
 
     def _fill_viewport(self) -> None:
         if self._loading or self._exhausted or self._list_overflows():

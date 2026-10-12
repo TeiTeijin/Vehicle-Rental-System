@@ -126,6 +126,9 @@ def seed_users(session) -> None:
                 license_number=u["license"],
                 license_expiry=u["license_expiry"],
                 role=u["role"],
+                birthdate=date(1990, 1, 1),
+                source="walk_in",
+                is_active=True,
                 created_at=datetime.now(),
             )
         )
@@ -219,6 +222,7 @@ def seed_bookings_and_children(session) -> None:
         Maintenance_Record(
             vehicle_id=camry.vehicle_id,
             description="Oil change and brake pad replacement.",
+            maintenance_type="routine",
             cost="4500.00",
             start_date=date(2026, 11, 1),
             end_date=date(2026, 11, 3),

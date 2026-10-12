@@ -1,4 +1,5 @@
 from app.models.booking import Booking
+from app.models.customer_note import Customer_Note
 from app.models.inspection_report import Inspection_Report
 from app.models.maintenance_record import Maintenance_Record
 from app.models.payment import Payment
@@ -7,9 +8,11 @@ from app.models.user import Users
 from app.models.vehicle import Vehicle
 from app.models.vehicle_category import Vehicle_Category
 from app.models.vehicle_media import Vehicle_Media
+from app.models.vehicle_rate_log import Vehicle_Rate_Log
 
 __all__ = [
     "Booking",
+    "Customer_Note",
     "Inspection_Report",
     "Maintenance_Record",
     "Payment",
@@ -18,4 +21,5 @@ __all__ = [
     "Vehicle",
     "Vehicle_Category",
     "Vehicle_Media",
+    "Vehicle_Rate_Log",
 ]

@@ -41,11 +41,18 @@ from app.staff.theme import (
 
 
 class Card(QFrame):
-    def __init__(self, parent: QWidget | None = None, *, dark: bool = False) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        dark: bool = False,
+        radius: int = CARD_RADIUS,
+    ) -> None:
         super().__init__(parent)
         self.setProperty(PROP_DARK, dark)
         self.setProperty("class", "card")
         self._dark = dark
+        self._radius = float(radius)
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
@@ -66,10 +73,16 @@ class Card(QFrame):
         return self._dark
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        radius = float(CARD_RADIUS)
+        radius = self._radius
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            # Rounded fill first: the QSS background would fill the whole
+            # square and leave sharp corners, so the sheet stays transparent
+            # and the paint owns the rounded fill.
+            painter.setBrush(QColor("#171717" if self._dark else PAPER))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(self.rect(), radius, radius)
             if self._dark:
                 shadow = QColor(0x1A, 0x14, 0x0A, 0x1F)
             else:
@@ -375,6 +388,9 @@ class MoneyNumber(QLabel):
         font.setFeature(QFont.Tag("tnum"), 1)
         self.setFont(font)
         self.setTextFormat(Qt.TextFormat.RichText)
+        # Transparent so no blanket-widget background paints a box behind the
+        # figure: on the white cards this reads as plain white.
+        self.setStyleSheet("background: transparent;")
         self.setText(self._markup(0, 2))
 
     def _markup(self, amount: Decimal | float, decimals: int) -> str:
@@ -507,11 +523,16 @@ class SectionLabel(QLabel):
         size: int = 16,
     ) -> None:
         super().__init__(text, parent)
+        self.setFontSize(size)
+        self.setStyleSheet(f"color: {colour}; background: transparent;")
+
+    def setFontSize(  # noqa: N802 - Qt naming
+        self, size: int, weight: QFont.Weight = QFont.Weight.DemiBold
+    ) -> None:
         font = QFont("Inter")
         font.setPixelSize(size)
-        font.setWeight(QFont.Weight.DemiBold)
+        font.setWeight(weight)
         self.setFont(font)
-        self.setStyleSheet(f"color: {colour}; background: transparent;")
 
 
 class FadeIn(QWidget):

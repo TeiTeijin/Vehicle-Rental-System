@@ -328,13 +328,22 @@ class TestShellRouting:
         assert {"One", "Two", "Secret"} <= labels
 
     def test_the_sidebar_shows_the_stub_rows_to_both_roles(self, shell, qapp):
-        """The brief lists Billing, Maintenance and Settings. This build has no
-        screen for them, so they appear and say so on press -- for everyone."""
+        """Settings is the last brief row with no screen, so it appears and
+        says so on press -- for everyone. (Billing was dropped; Maintenance
+        and Reports grew real pages, so none keeps a stub row.)"""
+        from app.staff.shell import sidebar_page_keys
+
+        assert "maintenance" in sidebar_page_keys()
+        assert "reports" in sidebar_page_keys()
         for role in ("staff", "admin"):
             sign_in(shell.context, role=role)
             shell._on_signed_in(shell.context.user)
             labels = shell._sidebar.item_labels()
-            assert {"Reports", "Billing", "Maintenance", "Settings"} <= set(labels)
+            # This shell carries fake pages, so only the remaining stub
+            # row can appear here; the real Reports/Maintenance labels
+            # are pinned by sidebar_page_keys above.
+            assert "Settings" in set(labels)
+            assert "Billing" not in set(labels)
             shell.context.sign_out()
 
     def test_the_current_page_is_marked_in_the_sidebar(self, shell, qapp):
@@ -351,9 +360,9 @@ class TestShellRouting:
         sign_in(shell.context, role="admin")
         shell._on_signed_in(shell.context.user)
         before = shell.current_page_key
-        shell._sidebar.item("billing").click()
+        shell._sidebar.item("settings").click()
         assert shell.current_page_key == before
-        assert not shell._sidebar.item("billing").is_active()
+        assert not shell._sidebar.item("settings").is_active()
 
     def test_the_sidebar_is_rebuilt_per_session(self, shell, qapp):
         """A row left over from the last sign-in is a way to reach a page

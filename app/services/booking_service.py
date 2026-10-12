@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,6 +28,181 @@ CANCELLABLE_STATUSES = ("pending", "confirmed")
 
 #: Default late fee. Per day, per booking.
 LATE_PENALTY_PER_DAY = money(1000.00, field="late_penalty_per_day")
+
+#: Non-refundable scheduling fee, in pesos. Part of the rental total: the
+#: minimum first payment that locks the dates. Forfeited on cancellation
+#: (rental-kind payments are never auto-refunded).
+SCHEDULING_FEE = money(100.00, field="scheduling_fee")
+
+#: Refundable security deposit by vehicle class. One tunable dict: the
+#: counter always collects the deposit upfront, even on the fee-only path.
+DEPOSIT_BY_CLASS: dict[str, Decimal] = {
+    "motorcycle": money(1500.00, field="deposit"),
+    "small": money(2000.00, field="deposit"),
+    "medium": money(2500.00, field="deposit"),
+    "suv": money(3000.00, field="deposit"),
+    "van": money(3500.00, field="deposit"),
+    "pickup": money(4000.00, field="deposit"),
+    "truck": money(5000.00, field="deposit"),
+}
+
+#: Deposit when the vehicle has no class on file.
+DEFAULT_DEPOSIT = money(2500.00, field="deposit")
+
+
+def deposit_for_vehicle(vehicle: Vehicle) -> Decimal:
+    """Refundable deposit for one vehicle, by its class."""
+    return DEPOSIT_BY_CLASS.get(
+        (getattr(vehicle, "vehicle_class", None) or "").strip().lower(),
+        DEFAULT_DEPOSIT,
+    )
+
+
+#: Booking states an extension may start from. Completed/cancelled history
+#: is never rewritten; shortening is not an extension (cancel + rebook).
+EXTENDABLE_STATUSES = ("pending", "confirmed", "ongoing")
+
+
+def extension_quote(
+    session: Session, booking: Booking, new_end_date: date
+) -> tuple[Decimal, Decimal]:
+    """Validate an extension and price it, without writing anything.
+
+    Returns (old_total, new_total); the difference is simply new balance.
+    """
+    if booking.status not in EXTENDABLE_STATUSES:
+        raise StateError(
+            f"A {booking.status} booking cannot be extended."
+        )
+    if new_end_date <= booking.end_date:
+        raise ValidationError(
+            "The new return date must be after the current one.",
+            field="new_end_date",
+        )
+    vehicle = booking.vehicle
+    others = [
+        row
+        for row in active_bookings(session, vehicle)
+        if row.booking_id != booking.booking_id
+    ]
+    if AvailabilityChecker.find_conflict(booking.end_date, new_end_date, others):
+        raise ConflictError(
+            f"{vehicle.make} {vehicle.model} is already booked inside "
+            f"{booking.end_date:%d %b} to {new_end_date:%d %b %Y}."
+        )
+    workshop = fleet_service.maintenance_conflict(
+        session, vehicle, booking.end_date, new_end_date
+    )
+    if workshop is not None:
+        raise ConflictError(
+            f"{vehicle.make} {vehicle.model} enters the workshop "
+            f"({workshop.start_date:%d %b} to {workshop.end_date:%d %b %Y}): "
+            f"{workshop.description}"
+        )
+    old_total = money(booking.total_cost, field="total_cost")
+    new_total = money(
+        RentalCalculator.total_cost(
+            _to_domain_vehicle(vehicle), booking.start_date, new_end_date
+        ),
+        field="total_cost",
+    )
+    return old_total, new_total
+
+
+def extend_booking(
+    session: Session, booking: Booking, new_end_date: date
+) -> tuple[Booking, Decimal, Decimal]:
+    """Push the return date forward, repriced over the whole range.
+
+    The total is recomputed with the one pricing function so discount tiers
+    stay consistent. Returns (booking, old_total, new_total) for the confirm
+    preview; the difference simply becomes balance, payable normally.
+    """
+    old_total, new_total = extension_quote(session, booking, new_end_date)
+    booking.end_date = new_end_date
+    booking.total_cost = new_total
+    session.flush()
+    return booking, old_total, new_total
+
+
+def quote_for(session: Session, vehicle: Vehicle, start_date: date, end_date: date) -> tuple[int, Decimal]:
+    """Live price preview for the counter: (days, total) through the same
+    calculator `create_booking` charges with. Raises like it does."""
+    assert_available(session, vehicle, start_date, end_date)
+    days = RentalCalculator.rental_days(start_date, end_date)
+    total = money(
+        RentalCalculator.total_cost(_to_domain_vehicle(vehicle), start_date, end_date),
+        field="total_cost",
+    )
+    return days, total
+
+
+def complete_counter_rental(
+    session: Session,
+    *,
+    user,
+    vehicle: Vehicle,
+    start_date: date,
+    end_date: date,
+    rental_amount,
+    method: str,
+    staff_id: int | None,
+    reference_no: str | None = None,
+    channel: str = "walk_in",
+    flag_override_note: str | None = None,
+    flag_override_by: int | None = None,
+) -> tuple[Booking, bool]:
+    """The wizard's Pay button: booking + payments + confirm-if-settled.
+
+    `rental_amount` is the rental-kind payment: anything from SCHEDULING_FEE
+    (minimum that locks the dates) up to the full total. The deposit is
+    always collected in full alongside it. Returns (booking, confirmed).
+    The caller commits: any raise rolls everything back, nothing half-written.
+    """
+    booking = create_booking(
+        session, user, vehicle, start_date, end_date,
+        created_by=staff_id, channel=channel,
+    )
+    if (flag_override_note or "").strip():
+        from datetime import datetime as _datetime
+
+        booking.flag_override_note = flag_override_note.strip()
+        booking.flag_override_by = flag_override_by
+        booking.flag_override_at = _datetime.now()
+    total = money(booking.total_cost, field="total_cost")
+    pay = money(rental_amount, field="rental_amount")
+    if pay < SCHEDULING_FEE:
+        raise ValidationError(
+            f"At least the {SCHEDULING_FEE} scheduling fee is due today.",
+            field="rental_amount",
+        )
+    if pay > total:
+        raise ValidationError(
+            "That is more than the rental total.", field="rental_amount"
+        )
+    if method == "gcash" and not (reference_no or "").strip():
+        raise ValidationError(
+            "A GCash reference number is required.", field="reference_no"
+        )
+    payment_service.record_payment(
+        session, booking, pay, method,
+        recorded_by=staff_id,
+        reference_no=reference_no,
+        note="Counter payment",
+    )
+    deposit = deposit_for_vehicle(vehicle)
+    payment_service.record_payment(
+        session, booking, deposit, method,
+        kind="deposit",
+        recorded_by=staff_id,
+        reference_no=reference_no if method == "gcash" else None,
+        note="Refundable security deposit",
+    )
+    # Walk-ins are verified in person, so they skip the pending review that
+    # online reservations wait in. Payment state lives separately in the
+    # balance: a fee-only walk-in is confirmed with OUTSTANDING due.
+    confirm_booking(session, booking)
+    return booking, True
 
 FUEL_LEVELS = ("empty", "quarter", "half", "three_quarter", "full")
 
@@ -63,6 +239,8 @@ def is_reserved_between(
 
 
 def check_licence(session: Session, user, on_date: date) -> None:
+    if not getattr(user, "is_active", True):
+        raise ConflictError("This customer is deactivated.")
     expiry = getattr(user, "license_expiry", None)
     if expiry is None:
         raise ValidationError(
@@ -78,9 +256,9 @@ def check_licence(session: Session, user, on_date: date) -> None:
 def assert_available(
     session: Session, vehicle: Vehicle, start_date: date, end_date: date
 ) -> None:
-    if end_date <= start_date:
+    if end_date < start_date:
         raise ValidationError(
-            "The return date must be after the pick-up date.", field="end_date"
+            "The return date cannot be before the pick-up date.", field="end_date"
         )
 
     workshop = fleet_service.maintenance_conflict(session, vehicle, start_date, end_date)
@@ -168,6 +346,9 @@ def cancel_booking(
         )
     booking.status = "cancelled"
     booking.cancel_reason = (reason or "").strip() or "No reason given"
+    # The deposit always comes back on cancellation; rental-kind payments
+    # (including the non-refundable scheduling fee) stay recorded.
+    payment_service.settle_deposit(session, booking)
     session.flush()
 
     return booking
@@ -314,6 +495,10 @@ def check_out(
     )
     session.add(report)
     session.flush()
+
+    # Deposit first: penalties consume it, the remainder is returned, and only
+    # then is the settlement verdict read.
+    payment_service.settle_deposit(session, booking)
 
     if require_settlement:
         balance = payment_service.booking_balance(session, booking)

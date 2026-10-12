@@ -19,10 +19,10 @@ from app.staff.feedback import describe
 from app.staff.metrics import (
     AVATAR,
     HEADER_H,
-    
     PAGE_MARGIN_X,
     PAGE_MARGIN_Y,
     PAGE_PANEL_PAD,
+    SIDEBAR_GAP,
 )
 
 
@@ -137,7 +137,9 @@ class StaffPage(QWidget):
 
         layout = QVBoxLayout(self)
         if self.PANEL:
-            # Padding comes out of the page margin, keeping grid width unchanged.
+            # 8+8 split with the shell gap: sidebar-right (SIDEBAR_GAP) +
+            # page-left (SIDEBAR_GAP) = SIDEBAR_MARGIN, visually equal to
+            # the window-to-sidebar margin on the far left.
             self.panel = QFrame(self)
             self.panel.setObjectName(theme.OBJ_PAGE_PANEL)
             inner = QVBoxLayout(self.panel)
@@ -150,9 +152,9 @@ class StaffPage(QWidget):
             inner.addWidget(self._pinned)
             inner.addWidget(self._scroll, 1)
             layout.setContentsMargins(
-                PAGE_MARGIN_X - PAGE_PANEL_PAD,
+                SIDEBAR_GAP,
                 0,
-                PAGE_MARGIN_X - PAGE_PANEL_PAD,
+                SIDEBAR_GAP,
                 0,
             )
             layout.setSpacing(0)

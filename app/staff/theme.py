@@ -83,11 +83,14 @@ METHOD_LABELS = {
 STATUS_COLOURS = {
     "available": OK,
     "rented": WARN,
+    "reserved": WARN,
     "maintenance": DANGER,
     "retired": MUTED,
     "pending": WARN,
     "confirmed": OK,
     "ongoing": WARN,
+    "in_progress": WARN,
+    "scheduled": WARN,
     "completed": MUTED,
     "cancelled": DANGER,
     "paid": OK,
@@ -105,6 +108,7 @@ OBJ_DEMO_BANNER = "demoBanner"
 OBJ_STATUS = "statusPill"
 OBJ_EMPTY = "emptyState"
 OBJ_ERROR = "errorState"
+OBJ_TABLE_HOST = "tableHost"
 
 # -- the sidebar -------------------------------------------------------------
 
@@ -181,13 +185,24 @@ OBJ_SEARCH_FIELD = "searchField"
 OBJ_FILTER_POPOVER = "filterPopover"
 #: The button in the pinned bar that opens the popover.
 OBJ_FILTER_BUTTON = "filterButton"
-#: One filter group: a heading and its checkboxes.
+#: One filter group: a heading and its options. Follows filter-layout.md:
+#: `.filter-section` == group, `.filter-card` == selectable box.
 OBJ_FILTER_GROUP = "filterGroup"
 OBJ_FILTER_GROUP_HEADING = "filterGroupHeading"
 OBJ_FILTER_CHECK = "filterCheck"
 OBJ_FILTER_SPIN = "filterSpin"
 OBJ_FILTER_COUNT = "filterCount"
 OBJ_FILTER_CLEAR = "filterClear"
+OBJ_FILTER_APPLY = "filterApply"
+OBJ_FILTER_CONTENT = "filterContent"
+OBJ_FILTER_SIDE_CARD = "filterSideCard"
+OBJ_FILTER_CONTENT_CARD = "filterContentCard"
+OBJ_FILTER_CARD = "filterCard"
+OBJ_FILTER_CARD_IMG = "filterCardImg"
+OBJ_FILTER_CARD_LABEL = "filterCardLabel"
+OBJ_FILTER_CARD_TICK = "filterCardTick"
+OBJ_FILTER_STEPPER_BTN = "filterStepperBtn"
+OBJ_FILTER_STEPPER_VALUE = "filterStepperValue"
 
 
 def _money_from_env(name: str, fallback: str) -> Decimal:
@@ -203,6 +218,33 @@ SALES_TARGET = _money_from_env("RENTWHEELS_SALES_TARGET", "6000000")
 
 def colour_for(status: str | None) -> QColor:
     return QColor(STATUS_COLOURS.get((status or "").strip().lower(), MUTED))
+
+
+#: Stored booking/vehicle status code -> on-screen label. Display only: the
+#: database, groupmate queries, and every filter keep using the codes, so a
+#: full rename later is a one-time data migration, never a code hunt.
+STATUS_LABELS = {
+    "pending": "Pending",
+    "confirmed": "Confirmed",
+    "ongoing": "Active",
+    "in_progress": "In Progress",
+    "scheduled": "Scheduled",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+    "available": "Available",
+    "reserved": "Reserved",
+    "rented": "Rented",
+    "maintenance": "Maintenance",
+    "retired": "Retired",
+}
+
+
+def status_label(status: str | None) -> str:
+    """Human label for a stored status code. Unknown codes title-case."""
+    key = (status or "").strip().lower()
+    if key in STATUS_LABELS:
+        return STATUS_LABELS[key]
+    return key.replace("_", " ").title() if key else "—"
 
 
 def stylesheet_path() -> Path:

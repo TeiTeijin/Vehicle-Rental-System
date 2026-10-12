@@ -50,6 +50,10 @@ class Toast(QFrame):
         layout.addWidget(self._label)
 
         self._fade: QPropertyAnimation | None = None
+        self._dismiss_fade: QPropertyAnimation | None = None
+        #: Bumps on every retarget so a stale fade-out cannot hide/delete
+        #: a toast that has since been reused for a newer message.
+        self._gen = 0
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(TOAST_MS)
@@ -80,18 +84,47 @@ class Toast(QFrame):
             parent.height() - self.height() - margin,
         )
 
+    def retarget(self, message: str, kind: str = "ok", duration_ms: int | None = None) -> None:
+        """Replace text/kind in place and restart the timer.
+
+        Used by toast() so a second error updates the visible toast
+        instead of stacking a new widget over it.
+        """
+        self._gen += 1
+        self._timer.stop()
+        if self._fade is not None:
+            self._fade.stop()
+        if self._dismiss_fade is not None:
+            self._dismiss_fade.stop()
+            self._dismiss_fade = None
+        self._label.setText(message)
+        self._label.setProperty("kind", kind)
+        border = kind_colour(kind)
+        self.setStyleSheet(
+            f"QFrame#toast {{ border-left: 3px solid {border}; "
+            f"border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}"
+        )
+        self.style().unpolish(self._label)
+        self.style().polish(self._label)
+        self.show_for(duration_ms)
+
     def dismiss(self) -> None:
         if not self.isVisible():
             return
         self._timer.stop()
+        gen = self._gen
         fade = QPropertyAnimation(self, b"windowOpacity", self)
         fade.setDuration(180)
         fade.setStartValue(self.windowOpacity())
         fade.setEndValue(0.0)
-        fade.finished.connect(self._finish_dismiss)
+        fade.finished.connect(lambda: self._finish_dismiss(gen))
+        self._dismiss_fade = fade
         fade.start()
 
-    def _finish_dismiss(self) -> None:
+    def _finish_dismiss(self, gen: int) -> None:
+        if gen != self._gen:
+            return
+        self._dismiss_fade = None
         self.hide()
         self.deleteLater()
 
@@ -101,6 +134,14 @@ def theme_margin() -> int:
 
 
 def toast(parent: QWidget, message: str, kind: str = "ok") -> Toast:
+    # One live toast per window: a second error updates the visible one
+    # (text + kind + timer restart) instead of stacking a new widget on
+    # the same bottom-right anchor. Call-sites in base/shell/pages all
+    # resolve to the same window even when parented to different pages.
+    host = parent.window() or parent
+    for existing in active_toasts(host):
+        existing.retarget(message, kind)
+        return existing
     widget = Toast(parent, message, kind)
     widget.show_for()
     return widget
@@ -181,3 +222,53 @@ class InfoDialog(QDialog):
 
 def active_toasts(parent: QWidget) -> list[Toast]:
     return [c for c in parent.findChildren(Toast) if c.isVisible()]
+
+
+# -- modal dim backdrop ------------------------------------------------------
+
+
+class DimOverlay(QWidget):
+    """Dark glass over a window while a modal dialog is up.
+
+    Covers `window` edge to edge and tracks its resizes (event filter), so a
+    popup reads as floating above a dimmed app. Non-modal itself: the dialog
+    is a separate top-level window and stays on top.
+    """
+
+    def __init__(self, window: QWidget, parent: QWidget | None = None) -> None:
+        super().__init__(parent or window)
+        self._window = window
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setStyleSheet("background: rgba(23, 23, 23, 110); border: none;")
+        self.hide()
+        window.installEventFilter(self)
+
+    def show_for(self) -> None:
+        self.setGeometry(self._window.rect())
+        self.raise_()
+        self.show()
+
+    def hide(self) -> None:  # noqa: N802 - Qt naming
+        self._window.removeEventFilter(self)
+        super().hide()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming
+        from PySide6.QtCore import QEvent
+
+        # Same teardown hardening as VehicleDetailsOverlay.eventFilter: never
+        # let a straggler event during destruction raise out of the loop.
+        try:
+            is_window_resize = (
+                watched is self._window and event.type() == QEvent.Type.Resize
+            )
+        except (AttributeError, RuntimeError):
+            return False
+        if is_window_resize:
+            try:
+                self.setGeometry(self._window.rect())
+            except (AttributeError, RuntimeError):
+                pass
+        try:
+            return super().eventFilter(watched, event)
+        except RuntimeError:
+            return False

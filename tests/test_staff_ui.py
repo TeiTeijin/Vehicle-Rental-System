@@ -237,6 +237,93 @@ class TestLoadStates:
         assert table.cell_text(0, 1) == ""
 
 
+class TestShimmer:
+    def test_no_shimmer_by_default(self, qapp):
+        table = make_table(qapp, lambda: [("One", "1.00")])
+        assert table._shimmer is None
+        table.show_loading()
+        assert table._stack.currentIndex() == 0
+
+    def test_loading_shows_the_shimmer(self, qapp):
+        table = make_table(qapp, lambda: [("One", "1.00")], shimmer_rows=3)
+        assert table._shimmer is not None
+        # Header mimic plus one bar per row.
+        assert len(table._shimmer_bars) == 4
+        table.show_loading()
+        assert table.state is LoadState.LOADING
+        assert table._stack.currentIndex() == 3
+        table.set_rows([("One", "1.00")])
+        assert table.state is LoadState.LOADED
+        assert table._stack.currentIndex() == 0
+        assert table.row_count() == 1
+
+    def test_empty_result_leaves_the_shimmer(self, qapp):
+        table = make_table(qapp, lambda: [], shimmer_rows=2)
+        table.show_loading()
+        table.set_rows([])
+        assert table.state is LoadState.EMPTY
+        assert table._stack.currentIndex() == 1
+
+    def test_failure_leaves_the_shimmer(self, qapp):
+        table = make_table(qapp, lambda: [], shimmer_rows=2)
+        table.show_loading()
+        table.set_failed(ValueError("boom"))
+        assert table.state is LoadState.FAILED
+        assert table._stack.currentIndex() == 2
+
+
+class TestAsyncTable:
+    def test_rows_land_and_stale_generations_drop(self, qapp):
+        import time
+
+        from PySide6.QtCore import QThreadPool
+        from PySide6.QtTest import QTest
+
+        from app.staff.async_load import AsyncTable
+
+        table = make_table(qapp, lambda: [], shimmer_rows=2)
+        pool = QThreadPool()
+        pool.setMaxThreadCount(1)
+        nations = AsyncTable(pool, table, table)
+        seen = []
+
+        def _land(rows):
+            table.set_rows(rows)
+            seen.append(rows)
+
+        nations.request(lambda: [("old", "0")])
+        nations.request(lambda: [("new", "1")], on_done=_land)
+        pool.waitForDone(15000)
+        deadline = time.monotonic() + 15
+        while nations.done_gen != nations.load_gen and time.monotonic() < deadline:
+            QTest.qWait(5)
+        assert nations.done_gen == nations.load_gen == 2
+        assert table.cell_text(0, 0) == "new"
+        assert seen == [[("new", "1")]]
+
+    def test_a_worker_failure_shows_failed(self, qapp):
+        import time
+
+        from PySide6.QtCore import QThreadPool
+        from PySide6.QtTest import QTest
+
+        from app.staff.async_load import AsyncTable
+
+        def boom():
+            raise RuntimeError("gone")
+
+        table = make_table(qapp, lambda: [], shimmer_rows=2)
+        pool = QThreadPool()
+        pool.setMaxThreadCount(1)
+        nations = AsyncTable(pool, table, table)
+        nations.request(boom)
+        pool.waitForDone(15000)
+        deadline = time.monotonic() + 15
+        while nations.done_gen != nations.load_gen and time.monotonic() < deadline:
+            QTest.qWait(5)
+        assert table.state is LoadState.FAILED
+
+
 class TestStatusPills:
     def test_a_status_column_becomes_a_pill(self, qapp):
         from app.staff.theme import OBJ_STATUS

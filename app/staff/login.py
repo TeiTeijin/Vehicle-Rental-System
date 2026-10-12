@@ -418,6 +418,12 @@ class LoginView(QWidget):
             self._show_error("Enter your email address and password.")
             return None
 
+        import re as _re
+
+        if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            self._show_error("Enter a valid email address.")
+            return None
+
         # Snapshot inside the session: read-session rollback expires attributes.
         try:
             with self.context.reading() as session:

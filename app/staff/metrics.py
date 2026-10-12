@@ -10,6 +10,10 @@ WINDOW_MIN_H = 640
 # -- the sidebar ------------------------------------------------------------
 SIDEBAR_W = 210
 SIDEBAR_MARGIN = 16
+#: Gap between the sidebar and the page sheet. Half of SIDEBAR_MARGIN so
+#: that sidebar-right (8) + page-left (8) = 16, visually equal to the
+#: window-to-sidebar margin on the far left.
+SIDEBAR_GAP = 8
 SIDEBAR_RADIUS = 28
 SIDEBAR_PAD = 18
 
@@ -26,8 +30,10 @@ SECTION_ROW_H = 44
 # -- the page ---------------------------------------------------------------
 PAGE_MARGIN_X = 26
 PAGE_MARGIN_Y = 22
-PAGE_PANEL_RADIUS = 36
+PAGE_PANEL_RADIUS = 28
 PAGE_PANEL_PAD = 16
+#: Inner table radius, concentric with the panel: outer - padding.
+TABLE_RADIUS = PAGE_PANEL_RADIUS - PAGE_PANEL_PAD
 HEADER_H = 44
 AVATAR = 36
 
@@ -44,6 +50,11 @@ CARD_PADDING = 26
 
 #: 16px between cards.
 CARD_GUTTER = 16
+
+#: Uniform height for the Bookings tools rows (filter + actions): 13px
+#: text + field padding + borders. Normalizes QLineEdit (7px pad) vs
+#: ghostButton (6px) vs dangerButton (8px), which otherwise differ by ~4px.
+TOOL_ROW_H = 36
 
 # -- the card grid ----------------------------------------------------------
 ROW1_H = 230
@@ -123,9 +134,16 @@ FILTER_POPOVER_H = 420
 #: Inset inside the popover's card, as (left, top, right, bottom). Matches
 #: CARD_PADDING so the options sit on the same inset as the card's own content.
 FILTER_POPOVER_PAD = (16, 16, 16, 16)
-#: The left category column. Narrower than the nav sidebar (210) because these
-#: labels are one or two words.
-POPOVER_CATEGORY_W = 180
+#: The left category column (the scroll inside the floating side card). Room
+#: for an icon plus the longest label ("Transmission type"); the card itself
+#: runs ~20px wider with its padding.
+POPOVER_CATEGORY_W = 176
+#: Height of one selectable filter card (picture + label + tick), one per row.
+FILTER_CARD_H = 44
+#: Square car thumbnail inside a brand / car-type card.
+FILTER_THUMB = 32
+#: Pinned Clear/Apply footer at the bottom of the dropdown.
+FILTER_FOOTER_H = 52
 #: Cap on either column's scroll area, so a long brand list cannot push the
 #: popover past FILTER_POPOVER_H.
 POPOVER_PANE_MAX_H = 340

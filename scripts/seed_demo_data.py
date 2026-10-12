@@ -107,22 +107,21 @@ VEHICLE_SPECS = [
     ("Kawasaki", "Moto 600", 2023, "DEM-207", "1600.00", "Motorcycle", 2, "Manual", "Petrol", "Underbone", "motorcycle", 600),
 ]
 
-#: `MaintenanceRecord.status` is an Enum column. `in_progress` is not one of its
-#: values -- the open state is `ongoing` -- and writing it anyway raises a
-#: LookupError on read, not on insert, so a typo here would surface much later.
-MAINTENANCE_OPEN_STATUS = "ongoing"
+#: `Maintenance_Record.status` values for the open states.
+MAINTENANCE_OPEN_STATUS = "in_progress"
 MAINTENANCE_SCHEDULED_STATUS = "scheduled"
 MAINTENANCE_OPEN_STATES = (MAINTENANCE_SCHEDULED_STATUS, MAINTENANCE_OPEN_STATUS)
 
+#: (description, cost, maintenance_type) triples for the service log.
 MAINTENANCE_JOBS = [
-    ("Oil and filter change", "3000.00"),
-    ("Brake pad replacement", "4500.00"),
-    ("Tire rotation", "1500.00"),
-    ("Air conditioning service", "3500.00"),
-    ("Battery replacement", "5500.00"),
-    ("Suspension check", "4000.00"),
-    ("Wheel alignment", "2000.00"),
-    ("Transmission oil change", "5000.00"),
+    ("Oil and filter change", "3000.00", "routine"),
+    ("Brake pad replacement", "4500.00", "tire_brake"),
+    ("Tire rotation", "1500.00", "tire_brake"),
+    ("Air conditioning service", "3500.00", "repair"),
+    ("Battery replacement", "5500.00", "repair"),
+    ("Suspension check", "4000.00", "inspection_registration"),
+    ("Wheel alignment", "2000.00", "tire_brake"),
+    ("Transmission oil change", "5000.00", "routine"),
 ]
 
 PENALTY_REASONS = {
@@ -224,6 +223,9 @@ def _staff_member(rng: random.Random, index: int, role: str) -> Users:
         license_number=f"DL{index:06d}",
         license_expiry=date(2030, 12, 31),
         role=role,
+        birthdate=date(1990, 1, 1),
+        source="walk_in",
+        is_active=True,
         created_at=datetime(2026, 1, 2, 8, 0),
     )
 
@@ -255,6 +257,9 @@ def _make_customers(
                 license_number=f"LC{i + 1:07d}",
                 license_expiry=expiry,
                 role="customer",
+                birthdate=date(1990 + (i % 15), (i % 12) + 1, (i % 27) + 1),
+                source="online" if i % 3 == 0 else "walk_in",
+                is_active=True,
                 created_at=datetime(2026, 1, 5, 9, 0),
             )
         )
@@ -337,27 +342,33 @@ def _make_maintenance(
 ) -> list[Maintenance_Record]:
     for vehicle in vehicles:
         for _ in range(rng.randint(1, 2)):
-            description, cost = rng.choice(MAINTENANCE_JOBS)
+            description, cost, kind = rng.choice(MAINTENANCE_JOBS)
             start = today - timedelta(days=rng.randint(20, 170))
+            ended = start + timedelta(days=rng.randint(1, 4))
             session.add(
                 Maintenance_Record(
                     vehicle=vehicle,
                     description=description,
+                    maintenance_type=kind,
                     cost=cost,
                     start_date=start,
-                    end_date=start + timedelta(days=rng.randint(1, 4)),
+                    end_date=ended,
                     status="completed",
+                    odometer=(vehicle.mileage or 0) + rng.randint(0, 500),
+                    next_due_date=ended + timedelta(days=rng.choice([90, 90, 180, 365])),
+                    next_due_odometer=(vehicle.mileage or 0) + rng.choice([5000, 10000]),
                 )
             )
 
     open_jobs = []
     for vehicle in in_workshop:
-        description, cost = rng.choice(MAINTENANCE_JOBS)
+        description, cost, kind = rng.choice(MAINTENANCE_JOBS)
         started = today - timedelta(days=rng.randint(0, 3))
         record = Maintenance_Record(
             vehicle=vehicle,
             description=description,
-            cost=cost,
+            maintenance_type=kind,
+            estimate_cost=cost,
             start_date=started,
             # An end date in the future is the "expected back" figure, which
             # is what the Fleet screen's blocked-by column quotes.
@@ -784,6 +795,9 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
             license_number="DL000001",
             license_expiry=date(2030, 12, 31),
             role="staff",
+            birthdate=date(1990, 1, 1),
+            source="walk_in",
+            is_active=True,
             created_at=datetime(2026, 1, 2, 8, 0),
         )
         admin = Users(
@@ -795,6 +809,9 @@ def seed(engine, *, days_back: int = 180, today: date | None = None) -> dict[str
             license_number="DL000000",
             license_expiry=date(2030, 12, 31),
             role="admin",
+            birthdate=date(1990, 1, 1),
+            source="walk_in",
+            is_active=True,
             created_at=datetime(2026, 1, 2, 8, 0),
         )
         session.add_all(staff + [counter, admin])

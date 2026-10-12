@@ -22,6 +22,12 @@ class Booking(Base):
     #: Free-text reason the booking was cancelled.
     cancel_reason = Column(String(255), nullable=True)
 
+    #: Flag override audit trail: staff-typed reason for proceeding past a
+    #: customer flag, plus who/when. NULL means no flag was overridden.
+    flag_override_note = Column(String(255), nullable=True)
+    flag_override_by = Column(Integer, ForeignKey("USERS.user_id"), nullable=True)
+    flag_override_at = Column(DateTime, nullable=True)
+
     #: Walk-in vs online; NULL means never recorded, not walk-in.
     channel = Column(Enum('walk_in', 'online'), nullable=True)
 

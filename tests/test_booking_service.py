@@ -45,9 +45,12 @@ class TestCreateBooking:
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         assert booking.created_by is None
 
-    def test_rejects_a_return_on_or_before_pickup(self, session, customer, vehicle):
-        with pytest.raises(ValidationError):
-            booking_service.create_booking(session, customer, vehicle, D6, D6)
+    def test_same_day_pickup_and_return_books_one_day(self, session, customer, vehicle):
+        booking = booking_service.create_booking(session, customer, vehicle, D6, D6)
+        assert booking.status == "pending"
+        assert booking.total_cost == 2500
+
+    def test_rejects_a_return_before_pickup(self, session, customer, vehicle):
         with pytest.raises(ValidationError):
             booking_service.create_booking(session, customer, vehicle, D6, D1)
 
@@ -96,7 +99,8 @@ class TestCreateBooking:
     def test_reserved_between_tracks_a_future_booking(self, session, customer, vehicle):
         booking_service.create_booking(session, customer, vehicle, D1, D6)
         assert booking_service.is_reserved_between(session, vehicle, D1, D6) is True
-        assert booking_service.is_reserved_between(session, vehicle, D8, D6) is False
+        with pytest.raises(ValueError):
+            booking_service.is_reserved_between(session, vehicle, D8, D6)
 
 
 class TestBookingRefusals:

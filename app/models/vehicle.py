@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Enum, ForeignKey, DECIMAL, DateTime
+from sqlalchemy import Column, Integer, String, Enum, ForeignKey, DECIMAL, DateTime, Date
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -22,10 +22,17 @@ class Vehicle(Base):
     vehicle_class = Column(Enum('small', 'medium', 'suv', 'van', 'pickup', 'truck', 'motorcycle'), nullable=True)
     #: Engine displacement in cc. Only motorcycles carry one; a car is NULL.
     engine_cc = Column(Integer, nullable=True)
-    status = Column(Enum('available', 'reserved', 'rented', 'maintenance'), nullable=False, default='available')
+    color = Column(String(50), nullable=True)
+    registration_expiry = Column(Date, nullable=True)
+    insurance_expiry = Column(Date, nullable=True)
+    #: When the vehicle was retired (deactivated). NULL while in service.
+    #: History-safe: bookings keep their vehicle_id FK forever.
+    retired_at = Column(Date, nullable=True)
+    status = Column(Enum('available', 'reserved', 'rented', 'maintenance', 'retired'), nullable=False, default='available')
     created_at = Column(DateTime, nullable=False)
 
     category = relationship("Vehicle_Category", back_populates="vehicles")
     bookings = relationship("Booking", back_populates="vehicle")
     media = relationship("Vehicle_Media", back_populates="vehicle")
     maintenance_records = relationship("Maintenance_Record", back_populates="vehicle")
+    rate_logs = relationship("Vehicle_Rate_Log", back_populates="vehicle")

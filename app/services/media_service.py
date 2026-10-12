@@ -42,7 +42,10 @@ def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
                 model = ci.get_vehicle_model_3d_payload(vehicle.make, vehicle.model, gen)
                 glb = (model.get("model") or {}).get("glb")
                 if glb:
-                    model_url = glb
+                    # The payload hands back the auth-gated endpoint, not a
+                    # playable file: resolve it server-side once and store
+                    # the signed CDN URL the viewer can load directly.
+                    model_url = ci.follow_model_redirect(glb) or None
                     watermarked = bool((model.get("model") or {}).get("watermarked"))
         except ci.CarImagesError:
             pass
@@ -107,6 +110,24 @@ def pick_photo_url(rows: list[Vehicle_Media]) -> str | None:
     ) or next((r.image_url for r in rows if r.image_url), None)
 
 
+def playable_model_url(session, row: Vehicle_Media) -> str:
+    """URL the embedded viewer can load for one media row.
+
+    Old rows store the auth-gated `.../model?redirect=1` endpoint (a browser
+    gets 401 on it): resolve once server-side and persist the signed CDN URL
+    so later views cost nothing. Already-playable URLs pass through.
+    """
+    url = row.model_3d_url or ""
+    if "/api/v1/" in url and "/model" in url:
+        resolved = ci.follow_model_redirect(url)
+        if resolved and resolved != url:
+            row.model_3d_url = resolved
+            session.flush()
+            return resolved
+        return ""
+    return url
+
+
 def get_or_fetch_media(session, vehicle, include_3d: bool = False) -> list[Vehicle_Media]:
     cached = _fresh_rows(session, vehicle)
     if cached:
@@ -126,3 +147,49 @@ def get_or_fetch_media(session, vehicle, include_3d: bool = False) -> list[Vehic
         .order_by(Vehicle_Media.media_id)
         .all()
     )
+
+
+def _is_not_found(error: BaseException) -> bool:
+    """True only for the API's unknown-make/model answer.
+
+    `CarImagesError` itself is the 400/403/404 bucket; its subclasses
+    (`_RESTKeyError`, `_RateLimitedError`) and every `requests` failure
+    mean the check itself could not run.
+    """
+    return type(error) is ci.CarImagesError
+
+
+def probe_media(make: str, model: str, year: int | None, category_name: str | None) -> str:
+    """Would this make/model get photos? Read-only, never writes rows.
+
+    Returns `"ok"`, `"not_found"` (check the spelling), or `"unreachable"`
+    (the API or keys could not be reached -- never block a save on this).
+    Mirrors the photo half of `get_or_fetch_media`.
+    """
+    if not (make or "").strip() or not (model or "").strip():
+        return "not_found"
+    try:
+        if (category_name or "").strip() == "Motorcycle":
+            try:
+                gen = ci.resolve_moto_generation_slug(make, model, year)
+            except ci.CarImagesError as exc:
+                return "not_found" if _is_not_found(exc) else "unreachable"
+            if gen:
+                try:
+                    payload = ci.get_moto_image_payload(make, model, gen)
+                except ci.CarImagesError as exc:
+                    return "not_found" if _is_not_found(exc) else "unreachable"
+                if (payload.get("images") or {}).get("webp"):
+                    return "ok"
+            try:
+                ci.get_signed_image_url(make, model, year, type="moto")
+            except ci.CarImagesError as exc:
+                return "not_found" if _is_not_found(exc) else "unreachable"
+            return "ok"
+        try:
+            ci.get_signed_image_url(make, model, year)
+        except ci.CarImagesError as exc:
+            return "not_found" if _is_not_found(exc) else "unreachable"
+        return "ok"
+    except Exception:  # noqa: BLE001 - a probe never raises; doubt means retry later
+        return "unreachable"

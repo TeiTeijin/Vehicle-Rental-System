@@ -134,6 +134,23 @@ class TestReceiptContent:
         assert "Rear bumper" in text
         assert "PHP 2,500.00" in text
 
+    def test_shows_the_held_deposit(self, session, customer, vehicle, staff):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        payment_service.record_payment(
+            session, booking, 2000, "cash", kind="deposit"
+        )
+        text = lines(session, booking)
+        assert "Security deposit" in text
+        assert "PHP 2,000.00" in text
+
+    def test_marks_deposit_payments(self, session, customer, vehicle, staff):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        payment_service.record_payment(
+            session, booking, 2000, "cash", kind="deposit"
+        )
+        text = lines(session, booking)
+        assert "(deposit)" in text
+
 
 class TestReceiptFile:
     def test_writes_a_pdf(self, session, customer, vehicle, staff, receipts_dir):

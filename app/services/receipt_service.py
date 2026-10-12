@@ -3,18 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models import Booking
 from app.services import payment_service
+from app.services.booking_service import SCHEDULING_FEE
 from app.utils.money import pesos_ascii as pesos
 
 RECEIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "receipts"
-
-#: Right-hand column position, in points from the left edge.
-RIGHT_MARGIN_X = letter[0] - inch
 
 
 class Row(NamedTuple):
@@ -73,6 +73,15 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
         rows.append(Row(pesos(penalty.amount), "amount"))
         if penalty.description:
             rows.append(Row(penalty.description, "note"))
+    if balance.deposit_held > 0 or balance.deposit_returned > 0:
+        rows.append(Row("", "blank"))
+        rows.append(Row("Security deposit (refundable hold)", "heading"))
+        if balance.deposit_held > 0:
+            rows.append(Row("Deposit held", "line"))
+            rows.append(Row(pesos(balance.deposit_held), "amount"))
+        if balance.deposit_returned > 0:
+            rows.append(Row("Deposit returned", "line"))
+            rows.append(Row(pesos(balance.deposit_returned), "amount"))
     rows += [
         Row("Total Due", "total"),
         Row(pesos(balance.total_due), "total"),
@@ -84,7 +93,8 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
     if settled:
         for payment in settled:
             when = f"{payment.paid_at:%d %b %Y, %H:%M}" if payment.paid_at else ""
-            rows.append(Row(f"{when} via {payment.method}".strip(), "line"))
+            kind = " (deposit)" if payment.kind == "deposit" else ""
+            rows.append(Row(f"{when} via {payment.method}{kind}".strip(), "line"))
             rows.append(Row(pesos(payment.amount), "amount"))
             if payment.recorder is not None:
                 detail = f"Taken by {payment.recorder.full_name}"
@@ -95,6 +105,8 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
         rows.append(Row(pesos(balance.amount_paid), "total"))
     else:
         rows.append(Row("No payments recorded against this booking.", "note"))
+    rows.append(Row("", "blank"))
+    rows.append(Row(f"Includes {pesos(SCHEDULING_FEE)} non-refundable scheduling fee.", "note"))
     rows.append(Row("", "blank"))
 
     rows.append(
@@ -119,7 +131,7 @@ _FONTS = {
     "verdict": ("Helvetica-Bold", 13),
 }
 
-#: How far down the page each style moves the cursor.
+#: How far down the page each style moves the cursor (kept: tests import it).
 _GAPS = {
     "title": 0.30,
     "heading": 0.24,
@@ -131,28 +143,309 @@ _GAPS = {
     "blank": 0.18,
 }
 
+#: Section grid colours. Sand heading, hairline rules, ink text -- the same
+#: family as the staff app, so the paper reads as one product with it.
+_GRID = colors.HexColor(0xD8CCBB)
+_SHADE = colors.HexColor(0xEEEAE1)
+_INK = colors.HexColor(0x1A1A1A)
+_MUTED = colors.HexColor(0x8A8175)
+
+
+def _para(text: str, style: str, *, align: str = "LEFT") -> Paragraph:
+    font, size = _FONTS[style]
+    return Paragraph(
+        text.replace("&", "&amp;"),
+        ParagraphStyle(
+            f"receipt_{style}_{align}",
+            fontName=font,
+            fontSize=size,
+            leading=size * 1.35,
+            textColor=_INK,
+            alignment={"LEFT": 0, "RIGHT": 2}[align],
+        ),
+    )
+
+
+def _note_para(text: str) -> Paragraph:
+    font, size = _FONTS["note"]
+    return Paragraph(
+        text.replace("&", "&amp;"),
+        ParagraphStyle(
+            "receipt_note",
+            fontName=font,
+            fontSize=size,
+            leading=size * 1.35,
+            textColor=_MUTED,
+            leftIndent=12,
+        ),
+    )
+
+
+def _section_table(
+    title: str, body: list[list], spans: list[int], totals: list[int]
+) -> Table:
+    """One boxed money grid: shaded title row, hairline rules, bold totals.
+
+    Only money sections get a grid. `spans` holds the 0-based body-row
+    indexes stretching across both columns (note rows); `totals` holds the
+    indexes getting a rule above (Total Due / Total Paid). The title row
+    always spans.
+    """
+    data = [[_para(title, "heading"), ""]] + body
+    table = Table(data, colWidths=[5.0 * inch, 2.0 * inch])
+    style = [
+        ("BOX", (0, 0), (-1, -1), 1, _GRID),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, _GRID),
+        ("BACKGROUND", (0, 0), (-1, 0), _SHADE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("SPAN", (0, 0), (1, 0)),
+    ]
+    for index in spans:
+        style.append(("SPAN", (0, index + 1), (1, index + 1)))
+    for index in totals:
+        style.append(("LINEABOVE", (0, index + 1), (-1, index + 1), 1, _INK))
+    table.setStyle(TableStyle(style))
+    return table
+
+
+#: Sections carrying money get a grid; everything else prints as plain lines.
+MONEY_SECTIONS = ("Charges", "Security deposit (refundable hold)", "Payments")
+
 
 def generate_receipt_pdf(session, booking: Booking, dest_dir: Path | None = None) -> str:
     target = Path(dest_dir) if dest_dir else RECEIPTS_DIR
     target.mkdir(parents=True, exist_ok=True)
     filepath = target / f"receipt_{booking.booking_id}.pdf"
 
-    c = canvas.Canvas(str(filepath), pagesize=letter)
-    y = letter[1] - inch
+    # The content model stays the contract (tests assert on receipt_rows);
+    # only the drawing changes: money sections fold into boxed grids,
+    # everything else prints as plain lines on one compact page.
+    title_rows: list = []
+    sections: list[tuple[str, list[list], list[int], list[int]]] = []
+    current_title: str | None = None
+    current_body: list[list] = []
+    current_spans: list[int] = []
+    current_totals: list[int] = []
+    pending_left: str | None = None
+    verdict = ""
+
+    def flush() -> None:
+        nonlocal current_title, current_body, current_spans, current_totals
+        nonlocal pending_left
+        if pending_left is not None:
+            current_body.append([_para(pending_left, "line"), ""])
+            pending_left = None
+        if current_title is not None:
+            sections.append(
+                (current_title, current_body, current_spans, current_totals)
+            )
+            current_title, current_body = None, []
+            current_spans, current_totals = [], []
 
     for row in receipt_rows(session, booking):
         if not row.text:
-            y -= _GAPS["blank"] * inch
+            flush()
             continue
-        font, size = _FONTS[row.style]
-        c.setFont(font, size)
+        if row.style == "title":
+            title_rows.append(row.text)
+            continue
+        if row.style == "heading":
+            flush()
+            current_title = row.text
+            continue
+        if row.style == "verdict":
+            flush()
+            verdict = row.text
+            continue
+        if row.style == "note":
+            if pending_left is not None:
+                current_body.append([_para(pending_left, "line"), ""])
+                pending_left = None
+            current_spans.append(len(current_body))
+            current_body.append([_note_para(row.text), ""])
+            continue
         if row.style in ("amount", "total"):
-            c.drawRightString(RIGHT_MARGIN_X, y, row.text)
-        elif row.style == "note":
-            c.drawString(inch + 0.2 * inch, y, row.text)
-        else:
-            c.drawString(inch, y, row.text)
-        y -= _GAPS[row.style] * inch
+            left = pending_left if pending_left is not None else ""
+            pending_left = None
+            if row.style == "total":
+                current_totals.append(len(current_body))
+            left_para = _para(left, "total" if row.style == "total" else "line")
+            current_body.append([left_para, _para(row.text, row.style, align="RIGHT")])
+            continue
+        # Plain line: may pair with a following amount row.
+        if pending_left is not None:
+            current_body.append([_para(pending_left, "line"), ""])
+        pending_left = row.text
+    flush()
 
-    c.save()
+    story: list = []
+    for text in title_rows:
+        story.append(_para(text, "title"))
+    if title_rows:
+        story.append(Spacer(1, 0.08 * inch))
+    for section_title, body, spans, totals in sections:
+        if section_title in MONEY_SECTIONS:
+            story.append(_section_table(section_title, body, spans, totals))
+        else:
+            # Plain info section: heading + lines, no grid.
+            story.append(_para(section_title, "heading"))
+            for left, right in body:
+                if isinstance(right, Paragraph) and right.text.strip():
+                    story.append(
+                        _para(f"{left.text}  {right.text}", "line")
+                    )
+                else:
+                    story.append(left)
+        story.append(Spacer(1, 0.08 * inch))
+    if verdict:
+        story.append(_para(verdict, "verdict"))
+        story.append(Spacer(1, 0.06 * inch))
+
+    doc = SimpleDocTemplate(
+        str(filepath),
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+        title=f"Rental Receipt #{booking.booking_id}",
+    )
+    doc.build(story)
+    return str(filepath)
+
+
+def statement_rows(session, customer) -> list[Row]:
+    """Customer history for disputes: every booking with money + payments."""
+    from app.services import customer_service
+
+    rows: list[Row] = [
+        Row("Vehicle Rental System", "title"),
+        Row("Customer Statement", "line"),
+        Row("", "blank"),
+
+        Row("Customer", "heading"),
+        Row(f"Name: {customer.full_name}"),
+        Row(f"Email: {customer.email}"),
+        Row(f"Phone: {customer.phone or '-'}"),
+        Row(f"Licence: {customer.license_number}"),
+        Row("", "blank"),
+    ]
+    bookings = (
+        session.query(Booking)
+        .filter(Booking.user_id == customer.user_id)
+        .order_by(Booking.start_date.desc())
+        .all()
+    )
+    if not bookings:
+        rows.append(Row("No rentals on record.", "note"))
+        return rows
+    for booking in bookings:
+        vehicle = booking.vehicle
+        balance = payment_service.booking_balance(session, booking)
+        rows += [
+            Row(
+                f"Booking #{booking.booking_id} · "
+                f"{booking.status.replace('_', ' ').title()}",
+                "heading",
+            ),
+            Row(
+                f"{vehicle.make} {vehicle.model} ({vehicle.year}) · "
+                f"{booking.start_date:%d %b %Y} → {booking.end_date:%d %b %Y}"
+            ),
+            Row("Total", "line"),
+            Row(pesos(balance.total_due), "amount"),
+            Row("Paid", "line"),
+            Row(pesos(balance.amount_paid), "amount"),
+            Row("Owed", "line"),
+            Row(pesos(balance.balance), "amount"),
+        ]
+        for payment in booking.payments:
+            when = payment.paid_at.strftime("%d %b %Y") if payment.paid_at else "pending"
+            rows.append(
+                Row(f"{when} · {payment.method} · {payment.status} · {payment.kind}", "note")
+            )
+            rows.append(Row(pesos(payment.amount), "amount"))
+        rows.append(Row("", "blank"))
+    rows.append(Row("Total outstanding", "total"))
+    rows.append(
+        Row(pesos(customer_service.outstanding_for(session, customer)), "total")
+    )
+    return rows
+
+
+def generate_statement_pdf(session, customer, dest_dir: Path | None = None) -> str:
+    """Same grid recipe as receipts (styles frozen); new content function."""
+    target = Path(dest_dir) if dest_dir else RECEIPTS_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    filepath = target / f"statement_{customer.user_id}.pdf"
+    story: list = [_para("Vehicle Rental System", "title")]
+    body: list[list] = []
+    spans: list[int] = []
+    totals: list[int] = []
+    pending_left: str | None = None
+
+    def flush_section(title: str | None) -> None:
+        nonlocal body, spans, totals, pending_left
+        if pending_left is not None:
+            body.append([_para(pending_left, "line"), ""])
+            pending_left = None
+        if title is not None:
+            story.append(_section_table(title, body, spans, totals))
+            story.append(Spacer(1, 0.08 * inch))
+            body, spans, totals = [], [], []
+
+    current_title: str | None = None
+    for row in statement_rows(session, customer):
+        if not row.text:
+            if current_title is not None:
+                flush_section(current_title)
+                current_title = None
+            continue
+        if row.style == "title":
+            story.append(_para(row.text, "title"))
+            continue
+        if row.style == "heading":
+            if current_title is not None:
+                flush_section(current_title)
+            current_title = row.text
+            continue
+        if row.style == "note":
+            if pending_left is not None:
+                body.append([_para(pending_left, "line"), ""])
+                pending_left = None
+            spans.append(len(body))
+            body.append([_note_para(row.text), ""])
+            continue
+        if row.style in ("amount", "total"):
+            left = pending_left if pending_left is not None else ""
+            pending_left = None
+            if row.style == "total":
+                totals.append(len(body))
+            body.append(
+                [
+                    _para(left, "total" if row.style == "total" else "line"),
+                    _para(row.text, row.style, align="RIGHT"),
+                ]
+            )
+            continue
+        if pending_left is not None:
+            body.append([_para(pending_left, "line"), ""])
+        pending_left = row.text
+    if current_title is not None:
+        flush_section(current_title)
+
+    doc = SimpleDocTemplate(
+        str(filepath),
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+        title=f"Customer Statement #{customer.user_id}",
+    )
+    doc.build(story)
     return str(filepath)

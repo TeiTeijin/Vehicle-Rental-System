@@ -85,6 +85,9 @@ class RentalVehicle:
     #: on. Both optional: a pre-migration row has neither.
     vehicle_class: str | None = None
     engine_cc: int | None = None
+    #: Fleet truth (available/reserved/rented/maintenance), shown as the
+    #: photo-corner badge. Defaults so older constructors keep working.
+    status: str = "available"
 
     @property
     def name(self) -> str:
@@ -111,6 +114,7 @@ def to_rental_vehicle(vehicle, photo_url: str | None = None) -> RentalVehicle:
         photo_url=photo_url,
         vehicle_class=vehicle.vehicle_class,
         engine_cc=vehicle.engine_cc,
+        status=(getattr(vehicle, "status", None) or "available"),
     )
 
 
@@ -205,6 +209,37 @@ class VehiclePhoto(QWidget):
         self.details.setGraphicsEffect(self._effect)
         self.set_reveal(0.0)
 
+        # Fleet-truth badge, pinned top-left: an 8px box with a square chip,
+        # never a stadium. Mouse-transparent so the card behaves exactly as
+        # before; positioned manually like the details button.
+        self._badge = QFrame(self)
+        self._badge.setObjectName("vehicleStatusBadge")
+        self._badge.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        badge_lay = QHBoxLayout(self._badge)
+        badge_lay.setContentsMargins(8, 5, 10, 5)
+        badge_lay.setSpacing(6)
+        self._badge_chip = QLabel("", self._badge)
+        self._badge_chip.setObjectName("vehicleStatusChip")
+        self._badge_chip.setFixedSize(8, 8)
+        badge_lay.addWidget(
+            self._badge_chip, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        self._badge_text = QLabel("", self._badge)
+        self._badge_text.setObjectName("vehicleStatusText")
+        # Explicit font, not QSS: badge metrics must not depend on which
+        # global stylesheet (if any) the session loaded.
+        badge_font = QFont("Inter")
+        badge_font.setPixelSize(11)
+        badge_font.setWeight(QFont.Weight.DemiBold)
+        self._badge_text.setFont(badge_font)
+        badge_lay.addWidget(
+            self._badge_text, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        self._badge_status = "available"
+        self._place_badge()
+
     def get_zoom(self) -> float:
         return self._zoom
 
@@ -239,6 +274,21 @@ class VehiclePhoto(QWidget):
         super().resizeEvent(event)
         self._rescale()
         self._place_details()
+        self._place_badge()
+
+    def set_status(self, status: str | None) -> None:
+        """Fleet-truth badge text + chip. Unknown states read muted."""
+        state = (status or "available").strip().lower() or "available"
+        self._badge_status = state
+        self._badge_text.setText(state.title())
+        colour = theme.STATUS_COLOURS.get(state, theme.MUTED)
+        self._badge_chip.setStyleSheet(
+            f"QLabel#vehicleStatusChip {{ background: {colour}; }}"
+        )
+        self._place_badge()
+
+    def status(self) -> str:
+        return self._badge_status
 
     def _rescale(self) -> None:
         if self._image is None or self.width() <= 0 or self.height() <= 0:
@@ -255,6 +305,10 @@ class VehiclePhoto(QWidget):
         y = self.height() - VEHICLE_BTN_H - 12 + offset
         x = (self.width() - self.details.width()) // 2
         self.details.move(x, y)
+
+    def _place_badge(self) -> None:
+        self._badge.adjustSize()
+        self._badge.move(8, 8)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
@@ -358,6 +412,7 @@ class VehicleCard(QFrame):
 
         self.photo = VehiclePhoto()
         self.photo.setFixedHeight(VEHICLE_IMAGE_H)
+        self.photo.set_status(vehicle.status)
         body.addWidget(self.photo)
 
         self.name = ElidedLabel(
@@ -507,6 +562,10 @@ class VehicleCard(QFrame):
 
 
 class VehicleSlot(QWidget):
+    #: Relayed from the built card's own `details_requested`, so the page can
+    #: connect once per slot instead of chasing the lazily-built card.
+    details_requested = Signal(int)
+
     def __init__(self, vehicle: RentalVehicle, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("vehicleSlot")
@@ -536,6 +595,7 @@ class VehicleSlot(QWidget):
         self._pool = pool
         self.card = VehicleCard(self.vehicle)
         self.card.image_ready.connect(self._reveal)
+        self.card.details_requested.connect(self.details_requested.emit)
         self._stack.addWidget(self.card)
         self.card.load_photo(pool, self._photo_url)
 

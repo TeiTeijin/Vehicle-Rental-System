@@ -13,6 +13,13 @@ class Payment(Base):
     amount = Column(DECIMAL(10, 2), nullable=False)
     method = Column(Enum('cash', 'card', 'gcash'), nullable=False, default='cash')
 
+    #: What the money is: the rental charges, or the refundable security
+    #: deposit held against damage/late return. Deposits are absorbed credit,
+    #: never revenue -- see payment_service.booking_balance. The server
+    #: default keeps raw-SQL inserts and table rebuilds honest: anything
+    #: written before the column existed was rental money.
+    kind = Column(Enum('rental', 'deposit'), nullable=False, default='rental', server_default='rental')
+
     #: `pending`/`failed` rows have no paid_at.
     status = Column(Enum('pending', 'paid', 'failed', 'refunded'), nullable=False, default='pending')
     paid_at = Column(DateTime, nullable=True)

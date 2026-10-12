@@ -19,6 +19,10 @@ RECORDABLE_STATUSES = ("pending", "paid", "failed")
 
 METHODS = ("cash", "card", "gcash")
 
+#: What a payment row is for. The deposit is a refundable hold against
+#: damage/late return -- absorbed credit, never revenue.
+KINDS = ("rental", "deposit")
+
 
 @dataclass(frozen=True)
 class BookingBalance:
@@ -27,6 +31,10 @@ class BookingBalance:
     total_due: Decimal
     amount_paid: Decimal
     balance: Decimal
+    #: Refundable deposit currently held (paid, not returned).
+    deposit_held: Decimal
+    #: Deposit already handed back (history rows, never touches balance).
+    deposit_returned: Decimal
 
     @property
     def is_settled(self) -> bool:
@@ -40,17 +48,47 @@ def amount_paid(session: Session, booking: Booking) -> Decimal:
     )
 
 
+def deposit_held(session: Session, booking: Booking) -> Decimal:
+    """Refundable deposit currently held: deposit rows paid, minus every peso
+    already handed back (`refunded` history rows from `settle_deposit`)."""
+    paid = sum(
+        (
+            payment.amount
+            for payment in booking.payments
+            if payment.kind == "deposit" and payment.status == "paid"
+        ),
+        ZERO,
+    )
+    return paid - deposit_returned(session, booking)
+
+
+def deposit_returned(session: Session, booking: Booking) -> Decimal:
+    """Deposit handed back: `refunded`-status history rows (see settle_deposit)."""
+    return sum(
+        (
+            payment.amount
+            for payment in booking.payments
+            if payment.kind == "deposit" and payment.status == "refunded"
+        ),
+        ZERO,
+    )
+
+
 def booking_balance(session: Session, booking: Booking) -> BookingBalance:
     rental = money(booking.total_cost, field="total_cost")
     penalties = sum((p.amount for p in booking.penalties), ZERO)
     due = money(rental + penalties, field="total_due")
     paid = money(amount_paid(session, booking), field="amount_paid")
+    held = money(deposit_held(session, booking), field="deposit_held")
+    given_back = money(deposit_returned(session, booking), field="deposit_returned")
     return BookingBalance(
         rental_cost=rental,
         penalty_total=penalties,
         total_due=due,
         amount_paid=paid,
         balance=money(due - paid, field="balance"),
+        deposit_held=held,
+        deposit_returned=given_back,
     )
 
 
@@ -60,6 +98,7 @@ def record_payment(
     amount,
     method: str,
     *,
+    kind: str = "rental",
     recorded_by: int | None = None,
     reference_no: str | None = None,
     note: str | None = None,
@@ -70,6 +109,12 @@ def record_payment(
             f"Unknown payment method: {method}. Choose one of "
             f"{', '.join(METHODS)}.",
             field="method",
+        )
+    if kind not in KINDS:
+        raise ValidationError(
+            f"Unknown payment kind: {kind}. Choose one of "
+            f"{', '.join(KINDS)}.",
+            field="kind",
         )
     if status not in RECORDABLE_STATUSES:
         raise ValidationError(
@@ -90,6 +135,7 @@ def record_payment(
         booking=booking,
         amount=value,
         method=method,
+        kind=kind,
         status=status,
         paid_at=datetime.now() if status == "paid" else None,
         recorded_by=recorded_by,
@@ -99,6 +145,62 @@ def record_payment(
     session.add(payment)
     session.flush()
     return payment
+
+
+def settle_deposit(session: Session, booking: Booking) -> Decimal:
+    """Close out the held deposit at check-out.
+
+    Deposit rows stay `paid` forever (their value is absorbed credit through
+    `amount_paid`); every peso handed back is a new `refunded`-status history
+    row, so `deposit_held = paid - refunded` is always exact and the balance
+    math never drifts:
+    - No penalties: one history row returns the full held amount.
+    - Penalties: the deposit offsets them in the balance; each tranche of
+      cash physically handed back is a history row with the story in `note`.
+    - Shortfall (penalties exceed the deposit): no cash back; the deposit
+      rows are annotated and the remainder stays OUTSTANDING.
+    Returns the deposit still held afterwards.
+    """
+    held = money(deposit_held(session, booking), field="deposit_held")
+    if held <= ZERO:
+        return ZERO
+    penalties = sum((p.amount for p in booking.penalties), ZERO)
+    if penalties <= ZERO:
+        back = Payment(
+            booking=booking,
+            amount=held,
+            method="cash",
+            kind="deposit",
+            status="refunded",
+            paid_at=None,
+            note="Clean return: deposit refunded in full.",
+        )
+        session.add(back)
+        session.flush()
+        return ZERO
+    change = money(held - penalties, field="deposit_change")
+    if change > ZERO:
+        back = Payment(
+            booking=booking,
+            amount=change,
+            method="cash",
+            kind="deposit",
+            status="refunded",
+            paid_at=None,
+            note=f"Deposit change returned: {penalties} applied to penalties.",
+        )
+        session.add(back)
+        session.flush()
+        # Still held (absorbed against the penalties): paid minus returned.
+        return money(penalties, field="deposit_held")
+    for payment in booking.payments:
+        if payment.kind == "deposit" and payment.status == "paid":
+            payment.note = (
+                f"{(payment.note or '').strip()} | "
+                f"APPLIED to penalties (shortfall {money(penalties - held)} remains)."
+            ).strip(" |")
+    session.flush()
+    return ZERO
 
 
 def refund_payment(
@@ -129,6 +231,7 @@ def list_payments(
     session: Session,
     *,
     method: str | None = None,
+    kind: str | None = None,
     status: str | None = None,
     recorded_by: int | None = None,
     from_date: datetime | None = None,
@@ -136,10 +239,13 @@ def list_payments(
 ) -> list[Payment]:
     stmt = select(Payment).options(
         joinedload(Payment.booking).joinedload(Booking.vehicle),
+        joinedload(Payment.booking).joinedload(Booking.user),
         joinedload(Payment.recorder),
     )
     if method:
         stmt = stmt.where(Payment.method == method)
+    if kind:
+        stmt = stmt.where(Payment.kind == kind)
     if status:
         stmt = stmt.where(Payment.status == status)
     if recorded_by is not None:
@@ -152,5 +258,6 @@ def list_payments(
 
 
 def takings(session: Session, *, from_date: datetime | None = None, to_date: datetime | None = None) -> Decimal:
-    payments = list_payments(session, status="paid", from_date=from_date, to_date=to_date)
+    # Held deposits are not revenue: only rental-kind takings count.
+    payments = list_payments(session, kind="rental", status="paid", from_date=from_date, to_date=to_date)
     return money(sum((p.amount for p in payments), ZERO), field="takings")

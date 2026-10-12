@@ -26,6 +26,62 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
             "VARCHAR(8) NULL",
             "walked in at the counter or taken online; needed by the dashboard",
         ),
+        (
+            "flag_override_note",
+            "VARCHAR(255) NULL",
+            "staff-typed reason for proceeding past a customer flag. "
+            "Data in scripts/migrate_customer_management.py",
+        ),
+        (
+            "flag_override_by",
+            "INT NULL",
+            "who overrode the flag. Same: data lives elsewhere",
+        ),
+        (
+            "flag_override_at",
+            "DATETIME NULL",
+            "when the flag was overridden. Same: data lives elsewhere",
+        ),
+    ],
+    "USERS": [
+        (
+            "birthdate",
+            "DATE NULL",
+            "needed by the renting-age check; legacy rows stay NULL until "
+            "the wizard's inline fix fills them",
+        ),
+        (
+            "emergency_contact",
+            "VARCHAR(255) NULL",
+            "who to call. Optional on the form",
+        ),
+        (
+            "source",
+            "VARCHAR(10) NULL",
+            "walk_in or online. Backfilled by migrate_customer_management",
+        ),
+        (
+            "is_active",
+            "BOOL NOT NULL DEFAULT TRUE",
+            "deactivate instead of delete; history keeps its FK",
+        ),
+        (
+            "flag_reason",
+            "VARCHAR(255) NULL",
+            "staff flag / blacklist reason; NULL means unflagged",
+        ),
+        ("flagged_at", "DATETIME NULL", "when the flag was set"),
+        ("flagged_by", "INT NULL", "which staff member set the flag"),
+        (
+            "licence_front_path",
+            "VARCHAR(255) NULL",
+            "disk path to the licence-front copy, never a BLOB",
+        ),
+        (
+            "licence_back_path",
+            "VARCHAR(255) NULL",
+            "disk path to the licence-back copy, never a BLOB",
+        ),
     ],
     "VEHICLE": [
         (
@@ -41,12 +97,86 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
             "displacement, which the rail's CC buckets read. Same: schema here, "
             "data in migrate_vehicle_class",
         ),
+        (
+            "color",
+            "VARCHAR(50) NULL",
+            "paint colour for the fleet form and details",
+        ),
+        (
+            "registration_expiry",
+            "DATE NULL",
+            "paperwork date for the fleet form and details",
+        ),
+        (
+            "insurance_expiry",
+            "DATE NULL",
+            "paperwork date for the fleet form and details",
+        ),
+        (
+            "retired_at",
+            "DATE NULL",
+            "when the vehicle was retired; NULL while in service. "
+            "History-safe deactivate, like customers",
+        ),
     ],
     "INSPECTION_REPORT": [
         (
             "photo_url",
             "VARCHAR(255) NULL",
             "was NOT NULL, forcing '' for rentals that were never photographed",
+        ),
+    ],
+    "MAINTENANCE_RECORD": [
+        (
+            "maintenance_type",
+            "VARCHAR(32) NOT NULL DEFAULT 'routine'",
+            "routine, repair, tire_brake, inspection_registration, cleaning, "
+            "damage_repair. Data in scripts/migrate_maintenance_lifecycle.py",
+        ),
+        (
+            "estimate_cost",
+            "DECIMAL(10,2) NULL",
+            "quote while a job is open; the final lands in cost",
+        ),
+        (
+            "odometer",
+            "INTEGER NULL",
+            "odometer at service, for mileage-based schedules",
+        ),
+        (
+            "next_due_date",
+            "DATE NULL",
+            "next service date, stamped at completion",
+        ),
+        (
+            "next_due_odometer",
+            "INTEGER NULL",
+            "next service odometer, stamped at completion",
+        ),
+        (
+            "shop",
+            "VARCHAR(128) NULL",
+            "shop or mechanic who did the work",
+        ),
+        (
+            "logged_by",
+            "INT NULL",
+            "staff member who logged the row, like Payments",
+        ),
+        (
+            "booking_id",
+            "INT NULL",
+            "incident repairs tie back to the rental here",
+        ),
+        (
+            "cancel_reason",
+            "VARCHAR(255) NULL",
+            "cancel keeps the row; the reason stays with it",
+        ),
+        (
+            "created_at",
+            "DATETIME NULL",
+            "did not exist; defaulted in the model for new rows",
         ),
     ],
 }
@@ -118,6 +248,69 @@ def add_columns(dry_run: bool) -> None:
             print(f"      {note}")
 
 
+#: New tables, per dialect (the ADDITIONS above only cover columns).
+TABLES: dict[str, dict[str, str]] = {
+    "CUSTOMER_NOTE": {
+        "mysql": """CREATE TABLE IF NOT EXISTS CUSTOMER_NOTE (
+        note_id INTEGER NOT NULL AUTO_INCREMENT,
+        customer_id INTEGER NOT NULL,
+        author_id INTEGER NULL,
+        note VARCHAR(1000) NOT NULL,
+        created_at DATETIME NOT NULL,
+        PRIMARY KEY (note_id),
+        FOREIGN KEY(customer_id) REFERENCES USERS (user_id),
+        FOREIGN KEY(author_id) REFERENCES USERS (user_id)
+    )""",
+        "sqlite": """CREATE TABLE IF NOT EXISTS CUSTOMER_NOTE (
+        note_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES USERS (user_id),
+        author_id INTEGER NULL REFERENCES USERS (user_id),
+        note VARCHAR(1000) NOT NULL,
+        created_at DATETIME NOT NULL
+    )""",
+    },
+    "VEHICLE_RATE_LOG": {
+        "mysql": """CREATE TABLE IF NOT EXISTS VEHICLE_RATE_LOG (
+        rate_log_id INTEGER NOT NULL AUTO_INCREMENT,
+        vehicle_id INTEGER NOT NULL,
+        old_rate DECIMAL(10, 2) NOT NULL,
+        new_rate DECIMAL(10, 2) NOT NULL,
+        changed_by INTEGER NULL,
+        changed_at DATETIME NOT NULL,
+        is_bulk BOOL NOT NULL DEFAULT FALSE,
+        note VARCHAR(255) NULL,
+        PRIMARY KEY (rate_log_id),
+        FOREIGN KEY(vehicle_id) REFERENCES VEHICLE (vehicle_id),
+        FOREIGN KEY(changed_by) REFERENCES USERS (user_id)
+    )""",
+        "sqlite": """CREATE TABLE IF NOT EXISTS VEHICLE_RATE_LOG (
+        rate_log_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        vehicle_id INTEGER NOT NULL REFERENCES VEHICLE (vehicle_id),
+        old_rate DECIMAL(10, 2) NOT NULL,
+        new_rate DECIMAL(10, 2) NOT NULL,
+        changed_by INTEGER NULL REFERENCES USERS (user_id),
+        changed_at DATETIME NOT NULL,
+        is_bulk BOOLEAN NOT NULL DEFAULT FALSE,
+        note VARCHAR(255) NULL
+    )""",
+    },
+}
+
+
+def create_tables(dry_run: bool) -> None:
+    dialect = "mysql" if _dialect().startswith("mysql") else "sqlite"
+    for table, ddls in TABLES.items():
+        if table in _inspector().get_table_names():
+            print(f"  = {table:<16} already exists")
+            continue
+        if dry_run:
+            print(f"  + {table:<16} WOULD CREATE")
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(ddls[dialect]))
+        print(f"  + {table:<16} created")
+
+
 def backfill_created_at(dry_run: bool) -> None:
     if "PAYMENT" not in _inspector().get_table_names():
         return
@@ -142,12 +335,14 @@ def backfill_created_at(dry_run: bool) -> None:
                 "WHERE created_at IS NULL AND paid_at IS NOT NULL"
             )
         )
-        conn.execute(
-            text(
-                "UPDATE PAYMENT SET created_at = (SELECT MIN(created_at) FROM PAYMENT) "
-                "WHERE created_at IS NULL"
+        # MySQL forbids naming the updated table in a subquery (error 1093),
+        # so read the floor first and write it back as a literal.
+        floor = conn.execute(text("SELECT MIN(created_at) FROM PAYMENT")).scalar()
+        if floor is not None:
+            conn.execute(
+                text("UPDATE PAYMENT SET created_at = :floor WHERE created_at IS NULL"),
+                {"floor": floor},
             )
-        )
     print(f"  ~ PAYMENT.created_at  backfilled {nulls} row(s)")
 
 
@@ -257,7 +452,18 @@ def verify() -> bool:
 
     expected = {
         "PAYMENT": ["recorded_by", "reference_no", "note", "created_at"],
-        "BOOKING": ["created_by", "cancel_reason", "channel"],
+        "BOOKING": [
+            "created_by", "cancel_reason", "channel",
+            "flag_override_note", "flag_override_by", "flag_override_at",
+        ],
+        "USERS": [
+            "birthdate", "emergency_contact", "source", "is_active",
+            "flag_reason", "flagged_at", "flagged_by",
+            "licence_front_path", "licence_back_path",
+        ],
+        "VEHICLE": [
+            "color", "registration_expiry", "insurance_expiry", "retired_at",
+        ],
     }
     for table, columns in expected.items():
         present = _columns(table)
@@ -265,6 +471,10 @@ def verify() -> bool:
             if column not in present:
                 print(f"  x {table}.{column} is missing")
                 ok = False
+    for table in ("CUSTOMER_NOTE", "VEHICLE_RATE_LOG"):
+        if table not in _inspector().get_table_names():
+            print(f"  x {table} table is missing")
+            ok = False
 
     # The one that bites hardest: a staff app that cannot write a pending
     # payment cannot record a GCash transfer that has not landed yet.
@@ -313,6 +523,10 @@ def main() -> None:
     print()
     print("=== 4. indexes ===")
     add_indexes(args.dry_run)
+
+    print()
+    print("=== 5. new tables ===")
+    create_tables(args.dry_run)
 
     print()
     if args.dry_run:

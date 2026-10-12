@@ -159,6 +159,10 @@ def month_sales(
         )
         .where(
             Payment.status.in_(_MONEY_IN),
+            # One revenue definition everywhere (see report_service):
+            # money received for the rental itself. Refundable deposits
+            # are holds, never revenue.
+            Payment.kind == "rental",
             Payment.paid_at >= datetime.combine(first, datetime.min.time()),
             Payment.paid_at <= datetime.combine(until, datetime.max.time()),
         )
@@ -220,6 +224,7 @@ def revenue_on(session: Session, day: date) -> Decimal:
     total = session.execute(
         select(func.coalesce(func.sum(Payment.amount), 0)).where(
             Payment.status.in_(_MONEY_IN),
+            Payment.kind == "rental",
             Payment.paid_at >= datetime.combine(day, datetime.min.time()),
             Payment.paid_at <= datetime.combine(day, datetime.max.time()),
         )
@@ -238,6 +243,7 @@ def revenue_by_day(
         select(func.date(Payment.paid_at), func.sum(Payment.amount))
         .where(
             Payment.status.in_(_MONEY_IN),
+            Payment.kind == "rental",
             Payment.paid_at >= datetime.combine(from_date, datetime.min.time()),
             Payment.paid_at <= datetime.combine(to_date, datetime.max.time()),
         )

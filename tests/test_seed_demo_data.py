@@ -289,7 +289,7 @@ class TestGeneratedDataIsValid:
             for record in rows_of(
                 demo,
                 Maintenance_Record,
-                Maintenance_Record.status.in_(("scheduled", "ongoing")),
+                Maintenance_Record.status.in_(("scheduled", "in_progress")),
             )
         }
         for vehicle in rows_of(demo, Vehicle):
@@ -308,7 +308,7 @@ class TestGeneratedDataIsValid:
             for record in rows_of(
                 demo,
                 Maintenance_Record,
-                Maintenance_Record.status.in_(("scheduled", "ongoing")),
+                Maintenance_Record.status.in_(("scheduled", "in_progress")),
             )
         }
         assert in_workshop, "demo should show something in the workshop"
@@ -381,7 +381,7 @@ class TestTodayScreenHasSomethingToShow:
         open_jobs = rows_of(
             demo,
             Maintenance_Record,
-            Maintenance_Record.status.in_(("scheduled", "ongoing")),
+            Maintenance_Record.status.in_(("scheduled", "in_progress")),
         )
         assert len(open_jobs) >= 2, "the Workshop table would be empty"
 

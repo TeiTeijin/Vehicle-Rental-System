@@ -11,21 +11,48 @@ QMainWindow, QWidget {
     font-family: "Inter 18pt";
 }
 
+/* TEXT NEVER CARRIES A PATCH
+   The blanket cream above matches every plain QLabel (Caption, SectionLabel,
+   HeroNumber...) and every QCheckBox text, and would draw a cream rectangle
+   behind each line of text on a white card. Text paints nothing and shows
+   its surface through instead -- identical on cream, white on cards, ink on
+   dark cards. Boxes and inputs keep their own backgrounds; more specific
+   rules below (statusPill, emptyState...) still win where one is intended. */
+QLabel, QCheckBox {
+    background: transparent;
+}
+
+/* REPORTS INTERIOR: WHITE EXCEPT THE TABLES
+   The data box is a white pagePanel, but the plain hosts inside it -- the
+   report-type list, its rows, the stacked pages, the panel roots, and the
+   charts (which paint nothing themselves) -- all catch the blanket cream
+   above and draw cream blocks inside the white box. Only the data tables
+   keep a painted background, so these layers stay transparent and show the
+   white box through. Scoped by object name: the dashboard's own ActiveRows
+   and charts are untouched. */
+QWidget#reportListHost,
+QWidget#reportPanelHost,
+QWidget#reportChart,
+QWidget#reportStack,
+QAbstractButton#reportRow {
+    background: transparent;
+}
+
 QWidget#page {
     background: #F1E8D8;
 }
 
 /* THE PAGE SHEET
    The dashboard lays its title and its five cards on one white rounded sheet
-   over the cream page. The radius is PAGE_PANEL_RADIUS, deliberately larger
-   than a card's, so the sheet and the cards on it read as nested shapes rather
-   than the same box twice. The scroll area and its content have to be told to
+   over the cream page. The radius is PAGE_PANEL_RADIUS, unified with the
+   sidebar and the cards (28px) so all large sheets read as one family.
+   The scroll area and its content have to be told to
    paint nothing: the blanket `QWidget { background: #F1E8D8 }` above matches
    them too and would otherwise draw a cream block inside the white sheet. */
 QFrame#pagePanel {
     background: #FFFFFF;
     border: 1px solid #D8CCBB;
-    border-radius: 36px;
+    border-radius: 28px;
 }
 
 QScrollArea, #pageViewport, #pageContent {
@@ -114,6 +141,32 @@ QPushButton#ghostButton:disabled {
     border-color: #D8CCBB;
 }
 
+/* BOOKINGS TOOLS (concentric corners: 28px panel - 16px pad = 12px).
+   Only the panel-facing outer corners round up; inner corners keep 6px.
+   Single-row tools (Fleet, Customers) touch top AND bottom, so they use
+   the combined values. */
+QLineEdit#searchField[corner="topLeft"] {
+    border-top-left-radius: 12px;
+}
+
+QLineEdit#searchField[corner="topLeftBottomLeft"] {
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
+}
+
+QPushButton#ghostButton[corner="topRight"] {
+    border-top-right-radius: 12px;
+}
+
+QPushButton#ghostButton[corner="topRightBottomRight"] {
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+QPushButton#ghostButton[corner="bottomLeft"] {
+    border-bottom-left-radius: 12px;
+}
+
 /* DEMO BANNER
    Deliberately loud. The only realistic way to end up reconciling against
    fiction is to forget which database is open, so the window says so. */
@@ -148,15 +201,43 @@ QLabel#pageSubtitle {
    An empty table is ambiguous: it can mean "no rows" or "the query failed".
    The failure state gets its own colour and its own retry button. */
 
+QWidget#tableHost {
+    background: transparent;
+    border: none;
+}
+
+/* BOOKINGS SKELETON (whole-page shimmer: tools + table mimics).
+   Row hosts stay transparent so the blanket cream never squares in
+   behind the shimmer bars; the mimic panels keep pagePanel white. */
+QWidget#bookingsSkeletonRow {
+    background: transparent;
+    border: none;
+}
+
+/* FLEET DETAILS (gallery strip + 3D host)
+   Transparent hosts so the blanket cream never bands behind the
+   thumbnails or the viewer; the white card shows straight through. */
+QWidget#fleetGalleryStrip, QWidget#fleetViewerHost {
+    background: transparent;
+    border: none;
+}
+
 QTableView {
     background: #FFFFFF;
     alternate-background-color: #FAF6EF;
-    border: 1px solid #D8CCBB;
-    border-radius: 6px;
+    border: none;
+    border-radius: 12px;
     gridline-color: #EDE6D9;
     selection-background-color: #EDE6D9;
     selection-color: #1A1A1A;
     font-size: 13px;
+}
+
+QHeaderView {
+    background: transparent;
+    border: none;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
 }
 
 QHeaderView::section {
@@ -168,15 +249,24 @@ QHeaderView::section {
     font-weight: 700;
 }
 
+QHeaderView::section:first {
+    border-top-left-radius: 12px;
+}
+
+QHeaderView::section:last {
+    border-top-right-radius: 12px;
+}
+
 QTableView QTableCornerButton::section {
     background: #EEEAE1;
     border: none;
+    border-top-left-radius: 12px;
 }
 
 QLabel#emptyState {
     background: #FFFFFF;
     border: 1px solid #D8CCBB;
-    border-radius: 6px;
+    border-radius: 12px;
     color: #8A8175;
     font-size: 14px;
 }
@@ -184,7 +274,7 @@ QLabel#emptyState {
 QLabel#errorState {
     background: #FFFFFF;
     border: 1px solid #A8452F;
-    border-radius: 6px;
+    border-radius: 12px;
     color: #A8452F;
     font-size: 14px;
     font-weight: 600;
@@ -216,7 +306,7 @@ QPushButton#retryButton:hover {
    colour depends on the value and a stylesheet cannot select on cell text. */
 
 QLabel#statusPill {
-    border-radius: 9px;
+    border-radius: 6px;
     padding: 2px 9px;
     font-size: 11px;
     font-weight: 700;
@@ -224,7 +314,8 @@ QLabel#statusPill {
 
 /* INPUTS */
 
-QLineEdit, QDateEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit {
+QLineEdit, QDateEdit, QDateTimeEdit, QComboBox, QSpinBox, QDoubleSpinBox,
+QTextEdit {
     background: #FFFFFF;
     border: 1px solid #D8CCBB;
     border-radius: 6px;
@@ -234,13 +325,20 @@ QLineEdit, QDateEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit {
     selection-color: #1A1A1A;
 }
 
-QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QSpinBox:focus,
-QDoubleSpinBox:focus, QTextEdit:focus {
+QLineEdit:focus, QDateEdit:focus, QDateTimeEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
     border: 1px solid #171717;
 }
 
-QLineEdit:disabled, QDateEdit:disabled, QComboBox:disabled, QSpinBox:disabled,
-QDoubleSpinBox:disabled, QTextEdit:disabled {
+/* Compact date edits (Bookings From/To): less vertical padding so the
+   yyyy section has room inside a fixed-height row. */
+QDateEdit[compact="true"] {
+    padding: 4px 10px;
+}
+
+QLineEdit:disabled, QDateEdit:disabled, QDateTimeEdit:disabled,
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled,
+QTextEdit:disabled {
     background: #F4EFE5;
     color: #C4BBA9;
 }
@@ -537,6 +635,69 @@ QFrame[class="card"] {
     background: #FFFFFF;
 }
 
+/* Check-details card: the same card recipe at an 8px radius (ID wins over
+   the class rule above; the painted shadow follows Card's own radius). */
+QFrame#vehicleDetailsCard {
+    border-radius: 8px;
+    border: 1px solid #D8CCBB;
+    background: transparent;
+}
+
+/* Check-details hosts: the blanket QWidget cream would otherwise paint a
+   sharp square behind the rounded card (visible in the 8px corner cutouts).
+   Same pattern as #pageViewport / #vehicleRailViewport. */
+QScrollArea#vehicleDetailsScroll, #vehicleDetailsViewport, #vehicleDetailsPanel {
+    background: transparent;
+    border: none;
+}
+
+/* Frosted-glass picture behind the check-details card. The blur + dim live
+   in the pixmap itself; the rule only keeps the blanket cream off it. */
+QLabel#vehicleDetailsBackdrop {
+    background: transparent;
+    border: none;
+}
+
+/* RENTAL WIZARD (Steps 2-5, same overlay card)
+   Step hosts stay transparent like the details panel, so the blanket cream
+   never squares in behind the rounded card. Option boxes copy the filter
+   cards: white 8px boxes, ink border when picked. Square chips, no stadiums,
+   no circles. */
+QWidget#wizardStep {
+    background: transparent;
+    border: none;
+}
+
+QFrame#wizardBox {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+}
+
+QLabel#wizardChip {
+    border-radius: 2px;
+}
+
+QPushButton#wizardChoice {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    color: #1A1A1A;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 12px;
+    text-align: left;
+}
+
+QPushButton#wizardChoice:hover {
+    background: #FFFFFF;
+    border-color: #B8A68A;
+}
+
+QPushButton#wizardChoice:checked {
+    border: 1px solid #171717;
+}
+
 QFrame[class="card"][dark="true"] {
     border-radius: 28px;
     /* No border on the dark cards. A one-pixel outline the same family as the
@@ -622,6 +783,37 @@ QPushButton#vehicleDetailsButton:hover {
     border-color: #EEEAE1;
 }
 
+/* FLEET STATUS BADGE (New Rental)
+   Fleet truth on the photo corner: white 8px box, square chip, no stadium.
+   Colours come from STATUS_COLOURS in theme.py, set inline per vehicle. */
+QFrame#vehicleStatusBadge {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+}
+
+QLabel#vehicleStatusChip {
+    border-radius: 2px;
+}
+
+QLabel#vehicleStatusText {
+    background: transparent;
+    color: #1A1A1A;
+}
+
+/* FROSTED OVERLAY (generic host, e.g. Bookings action panels)
+   Same discipline as the check-details overlay: only the overlay itself
+   may carry the dim; every host layer stays transparent. */
+QLabel#frostedBackdrop {
+    background: transparent;
+    border: none;
+}
+
+QScrollArea#frostedScroll, #frostedViewport {
+    background: transparent;
+    border: none;
+}
+
 /* BRAND ROWS (New Rental)
    The fleet is grouped by make: a heading over a side-scrolling rail. The rail
    hides its vertical bar and shows a thin horizontal one, so a long brand is
@@ -661,18 +853,132 @@ QScrollArea#vehicleRail QScrollBar::sub-page:horizontal {
 }
 
 /* THE FILTER POPOVER (New Rental)
-   White, 28px radius, 1px border: `class="card"`, the dashboard card's recipe, so
-   the panel reads as a card lifted off the page rather than a native dropdown.
-   No tint anywhere inside it either -- the 1px rule between the two columns and
-   the ActiveRow ink bar are the only separators, because a filled second panel
-   would make a 520px box look like two unrelated boxes. */
+   filter-layout.md: `.filter-dropdown` with a narrow `.filter-side` (surface)
+   and a wider `.filter-content` (paper, one continuous scroll, rules between
+   sections). White box, 8px radius, 1px border. Selected boxes get a dark
+   border + filled tick; backgrounds never change. */
+/* The dropdown's outer box IS the app background: transparent here, so the
+   page shows straight through. The two floating cards paint their own
+   rounded frames (see _PanelCard). Square window corners are cut by
+   WA_TranslucentBackground on the popover. */
 QFrame#filterPopover {
-    background: #FFFFFF;
+    background: transparent;
+    border: none;
+}
+
+/* Floating panels: transparent in the sheet so the painted card frames show.
+   Without these the blanket QWidget cream would square-fill behind them. */
+QFrame#filterSideCard, QFrame#filterContentCard {
+    background: transparent;
+    border: none;
 }
 
 QFrame#filterPopoverDivider {
-    background: #E4DCD0;
+    background: #D8CCBB;
     border: none;
+}
+
+/* Scroll regions sit inside the painted cards, so they stay transparent and
+   let the card white show through. */
+QScrollArea#filterCategoryScroll, QWidget#filterCategoryHost,
+QScrollArea#filterPaneScroll, QWidget#filterContent {
+    background: transparent;
+    border: none;
+}
+
+/* Selectable option boxes: `.filter-card` (picture) and text-only variant.
+   Selected == dark border + filled tick; background stays white. */
+QAbstractButton#filterCard {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    text-align: left;
+}
+
+QAbstractButton#filterCard:hover {
+    background: #FFFFFF;
+    border-color: #B8A68A;
+}
+
+QAbstractButton#filterCard[selected="true"] {
+    border: 1px solid #171717;
+}
+
+QAbstractButton#filterCard:disabled {
+    color: #B5ADA1;
+    border-color: #E4DCD0;
+}
+
+QLabel#filterCardLabel {
+    background: transparent;
+    border: none;
+    color: #1A1A1A;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QLabel#filterCardLabel[muted="true"] {
+    color: #B5ADA1;
+}
+
+QLabel#filterCardImg {
+    background: #EEEAE1;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
+}
+
+QLabel#filterCardTick {
+    background: #171717;
+    border: none;
+    border-radius: 9px;
+    color: #FFFFFF;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* Passenger stepper: `[ - ] value [ + ]`. */
+QPushButton#filterStepperBtn {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    color: #1A1A1A;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QPushButton#filterStepperBtn:hover:enabled {
+    background: #E6E1D6;
+    border-color: #B8A68A;
+}
+
+QPushButton#filterStepperBtn:disabled {
+    color: #B5ADA1;
+    border-color: #E4DCD0;
+}
+
+QLabel#filterStepperValue {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 8px;
+    color: #1A1A1A;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+/* Pinned footer actions: Clear (quiet) + Apply (primary ink). */
+QPushButton#filterApply {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 8px;
+    color: #FFFFFF;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 16px;
+}
+
+QPushButton#filterApply:hover {
+    background: #302F2D;
+    border-color: #302F2D;
 }
 
 /* The Filters button in the pinned bar. A quiet pill, not a primary action: it is
@@ -692,7 +998,7 @@ QPushButton#filterButton:hover {
 }
 
 QWidget#pagePinned QLineEdit#searchField {
-    border-top-left-radius: 20px;
+    border-top-left-radius: 12px;
     border-bottom-left-radius: 0px;
     border-top-right-radius: 0px;
     border-bottom-right-radius: 0px;
@@ -710,7 +1016,7 @@ QWidget#pagePinned QPushButton#filterButton {
 QWidget#pagePinned QPushButton#filterClear {
     border-top-left-radius: 0px;
     border-bottom-left-radius: 0px;
-    border-top-right-radius: 20px;
+    border-top-right-radius: 12px;
     border-bottom-right-radius: 0px;
 }
 
@@ -725,11 +1031,18 @@ QLabel#filterGroupHeading {
     background: transparent;
 }
 
-QWidget#filterPane, QWidget#filterPaneHost, QWidget#filterCategoryHost,
-QWidget#filterGroup, QWidget#filterPaneScroll, QWidget#filterCategoryScroll,
-QWidget#filterPanes, QWidget#pagePinned {
+QWidget#filterPane, QWidget#filterPaneHost,
+QWidget#filterGroup, QWidget#filterPanes, QWidget#pagePinned,
+QWidget#filterContent, QLabel#filterCardLabel,
+QLabel#filterCardTick {
     background: transparent;
     border: none;
+}
+
+QLabel#filterCardImg {
+    background: #EEEAE1;
+    border: 1px solid #D8CCBB;
+    border-radius: 6px;
 }
 
 QLabel#filterCount {
@@ -785,5 +1098,39 @@ QLabel#nrEmpty {
     color: #8A8175;
     font-size: 15px;
     background: transparent;
+}
+
+/* CALENDAR POPUP (QDateEdit dropdowns: Bookings From/To, wizard, details)
+   The generic input rule (7px padding, 13px) leaks into the calendar's own
+   nav-bar widgets: the year QSpinBox wants ~29px inside a ~20-25px bar, so
+   typed years clip top/bottom and the month arrow sits low. Compact
+   overrides scoped to the popup only; form fields keep their metrics. */
+QCalendarWidget QSpinBox, QCalendarWidget QLineEdit {
+    padding: 0px 2px;
+    font-size: 12px;
+    border: 1px solid #D8CCBB;
+    border-radius: 4px;
+    background: #FFFFFF;
+}
+
+QCalendarWidget QToolButton {
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+}
+
+QCalendarWidget QToolButton::menu-indicator {
+    width: 0;
+}
+
+QCalendarWidget QAbstractSpinBox::up-button,
+QCalendarWidget QAbstractSpinBox::down-button {
+    width: 14px;
+}
+
+QCalendarWidget QAbstractItemView {
+    selection-background-color: #EDE6D9;
+    selection-color: #1A1A1A;
 }
 

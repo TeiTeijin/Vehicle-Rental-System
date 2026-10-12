@@ -62,9 +62,10 @@ class LoadStateTable(QWidget):
         *,
         empty_message: str = "Nothing here yet.",
         parent: QWidget | None = None,
+        shimmer_rows: int = 0,
     ) -> None:
         super().__init__(parent)
-        self.setObjectName("page")
+        self.setObjectName(theme.OBJ_TABLE_HOST)
         self._loader = loader
         self._empty_message = empty_message
         self.state = LoadState.LOADING
@@ -110,6 +111,7 @@ class LoadStateTable(QWidget):
         error_column.addStretch(1)
 
         self._error_panel = QWidget(self)
+        self._error_panel.setObjectName(theme.OBJ_TABLE_HOST)
         self._error_panel.setLayout(error_column)
 
         self._stack = QStackedLayout(self)
@@ -117,8 +119,19 @@ class LoadStateTable(QWidget):
         self._stack.addWidget(self._table)       # 0 LOADED
         self._stack.addWidget(self._placeholder)  # 1 EMPTY
         self._stack.addWidget(self._error_panel)  # 2 FAILED
+        #: Shimmer shown while an async reload is in flight (index 3).
+        #: Built only when asked: without it LOADING shows the table, exactly
+        #: as before, so existing synchronous users are untouched.
+        self._shimmer = (
+            self._build_shimmer(shimmer_rows) if shimmer_rows > 0 else None
+        )
+        if self._shimmer is not None:
+            self._stack.addWidget(self._shimmer)
 
         self.load()
+
+    def set_loader(self, loader: Callable[[], Iterable[Sequence[object]]]) -> None:
+        self._loader = loader
 
     # -- construction -----------------------------------------------------
 
@@ -132,9 +145,16 @@ class LoadStateTable(QWidget):
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setWordWrap(False)
+        # No bar widgets at all for a cleaner look (same pattern as the
+        # sidebar): wheel / keys / scrollToItem keep working.
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         header = table.horizontalHeader()
         header.setHighlightSections(False)
+        # Last column absorbs leftover viewport width so no empty gap
+        # shows on the right when content is narrower than the panel.
+        header.setStretchLastSection(True)
         for index, column in enumerate(self._columns):
             if column.stretch:
                 header.setSectionResizeMode(index, QHeaderView.ResizeMode.Stretch)
@@ -152,22 +172,36 @@ class LoadStateTable(QWidget):
         try:
             rows = list(self._loader())
         except Exception as error:  # noqa: BLE001 - this is the whole point
-            self.last_error = error
-            self.state = LoadState.FAILED
-            message, _field, _kind = describe(error)
-            self._error.setText(f"Could not load this list.\n{message}")
-            self._error_detail.setText(
-                "Nothing has been changed. Retrying is safe."
-                if not isinstance(error, KeyboardInterrupt)
-                else ""
-            )
-            self._table.setRowCount(0)
-            self._sync_stack()
-            return self.state
+            return self.set_failed(error)
 
         self.last_error = None
+        self.set_rows(rows)
+        return self.state
+
+    def show_loading(self) -> None:
+        """Enter LOADING for an async reload; rows land via set_rows."""
+        self.state = LoadState.LOADING
+        self._sync_stack()
+
+    def set_rows(self, rows) -> LoadState:
+        self.last_error = None
+        rows = list(rows)
         self._populate(rows)
         self.state = LoadState.LOADED if rows else LoadState.EMPTY
+        self._sync_stack()
+        return self.state
+
+    def set_failed(self, error: BaseException) -> LoadState:
+        self.last_error = error
+        self.state = LoadState.FAILED
+        message, _field, _kind = describe(error)
+        self._error.setText(f"Could not load this list.\n{message}")
+        self._error_detail.setText(
+            "Nothing has been changed. Retrying is safe."
+            if not isinstance(error, KeyboardInterrupt)
+            else ""
+        )
+        self._table.setRowCount(0)
         self._sync_stack()
         return self.state
 
@@ -188,23 +222,57 @@ class LoadStateTable(QWidget):
     def _make_item(self, row: int, column: int, value) -> QTableWidgetItem:
         column_spec = self._columns[column]
         if column_spec.title.lower() in ("status", "state") and isinstance(value, str):
-            pill = StatusPill(value.replace("_", " ").title(), value)
+            pill = StatusPill(theme.status_label(value), value)
             self._table.setCellWidget(row, column, pill)
             return QTableWidgetItem("")
         return QTableWidgetItem("" if value is None else str(value))
 
     def _sync_stack(self) -> None:
-        index = {
-            LoadState.LOADED: 0,
-            LoadState.EMPTY: 1,
-            LoadState.FAILED: 2,
-            LoadState.LOADING: 0,
-        }[self.state]
+        if self.state is LoadState.LOADING and self._shimmer is not None:
+            index = 3
+        else:
+            index = {
+                LoadState.LOADED: 0,
+                LoadState.EMPTY: 1,
+                LoadState.FAILED: 2,
+                LoadState.LOADING: 0,
+            }[self.state]
         self._stack.setCurrentIndex(index)
+        self._set_busy(self.state is LoadState.LOADING)
         self._placeholder.setVisible(self.state is LoadState.EMPTY)
         self._error_panel.setVisible(self.state is LoadState.FAILED)
         if self.state is LoadState.FAILED:
             self._retry.setFocus()
+
+    def _build_shimmer(self, rows: int):
+        from PySide6.QtWidgets import QSizePolicy, QVBoxLayout
+
+        from app.staff.metrics import TOOL_ROW_H
+        from app.widgets.skeleton import Skeleton
+
+        # Same language as the Bookings/Fleet/Customers skeleton: a header
+        # mimic plus full-width row bars at the tools-row rhythm, so every
+        # shimmering table in the app reads as one design.
+        host = QWidget(self)
+        host.setObjectName(theme.OBJ_TABLE_HOST)
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self._shimmer_bars: list = []
+        for _ in range(rows + 1):
+            bar = Skeleton(host)
+            bar.setFixedHeight(TOOL_ROW_H)
+            bar.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            layout.addWidget(bar)
+            self._shimmer_bars.append(bar)
+        layout.addStretch(1)
+        return host
+
+    def _set_busy(self, busy: bool) -> None:
+        for bar in getattr(self, "_shimmer_bars", []):
+            bar.set_busy(busy)
 
     # -- access -----------------------------------------------------------
 
