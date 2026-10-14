@@ -41,12 +41,9 @@ class PageSpec:
     section: str = NAV_SECTIONS[0]
 
 
-#: The one brief row with no screen behind it: key -> (label, icon, group).
-#: Billing was dropped (Payments covers the money side), Maintenance and
-#: Reports grew real pages, so none keeps a stub row leading nowhere.
-STUB_SECTIONS: dict[str, tuple[str, str, str]] = {
-    "settings": ("Settings", "settings", "Tools"),
-}
+#: No brief rows without screens: Billing was dropped (Payments covers the
+#: money side); Maintenance, Reports, and Settings all have real pages now.
+STUB_SECTIONS: dict[str, tuple[str, str, str]] = {}
 
 
 class StaffShell(QMainWindow):
@@ -93,6 +90,11 @@ class StaffShell(QMainWindow):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(DASHBOARD_REFRESH_MS)
         self._refresh_timer.timeout.connect(self._on_refresh_tick)
+
+        #: Auto-logout after inactivity (0 = off). Reset on input + navigation.
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.timeout.connect(self._on_idle_timeout)
 
         if context.selection.is_demo:
             self._title = "rentwheels  -  DEMO DATA"
@@ -163,7 +165,7 @@ class StaffShell(QMainWindow):
     def _visible_pages(self) -> list[PageSpec]:
         return [p for p in self.pages if p.admin_only is False or self.context.is_admin]
 
-    def show_page(self, key: str) -> bool:
+    def _show_page_inner(self, key: str) -> bool:
         spec = next((p for p in self.pages if p.key == key), None)
         if spec is None:
             return False
@@ -223,11 +225,19 @@ class StaffShell(QMainWindow):
         self._body_layout.setSpacing(metrics.SIDEBAR_GAP)
         self._body_layout.insertWidget(0, self._sidebar)
 
+        self.apply_prefs()
         self._refresh_timer.start()
         first = self._visible_pages()
         if first:
-            self.show_page(first[0].key)
+            try:
+                from app.staff import prefs as _prefs
+                wanted = str(_prefs.get("behavior/default_page"))
+            except Exception:
+                wanted = ""
+            target = next((p for p in first if p.key == wanted), first[0])
+            self.show_page(target.key)
         toast(self, f"Signed in as {self.context.display_name}.")
+        self._reset_idle()
 
     def _clear_chrome(self) -> None:
         if self._banner is not None:
@@ -250,6 +260,7 @@ class StaffShell(QMainWindow):
             return
 
         self._refresh_timer.stop()
+        self._idle_timer.stop()
         self.context.sign_out()
         self._discard_pages()
         self._current_key = None
@@ -287,6 +298,118 @@ class StaffShell(QMainWindow):
     def set_refresh_interval(self, ms: int) -> None:
         self._refresh_timer.setInterval(ms)
 
+    # -- prefs + idle --------------------------------------------------------
+
+    def apply_prefs(self) -> None:
+        """Apply per-PC prefs: refresh timer, sidebar width, idle logout."""
+        try:
+            from app.staff import prefs as _prefs
+            ms = int(_prefs.get("behavior/dashboard_refresh_ms"))
+        except Exception:
+            ms = DASHBOARD_REFRESH_MS
+        if ms <= 0:
+            self._refresh_timer.stop()
+        else:
+            self._refresh_timer.setInterval(ms)
+        try:
+            from app.staff import prefs as _prefs2
+            collapsed = bool(_prefs2.get("appearance/sidebar_collapsed"))
+            if self._sidebar is not None:
+                from app.staff import metrics as _metrics
+                self._sidebar.setFixedWidth(
+                    64 if collapsed else _metrics.SIDEBAR_W)
+        except Exception:
+            pass
+        self._reset_idle()
+
+    def _reset_idle(self) -> None:
+        try:
+            from app.staff import prefs as _prefs
+            mins = int(_prefs.get("behavior/auto_logout_mins"))
+        except Exception:
+            mins = 0
+        self._idle_timer.stop()
+        if mins > 0 and self.context.is_signed_in:
+            self._idle_timer.start(mins * 60 * 1000)
+
+    def _on_idle_timeout(self) -> None:
+        if not self.context.is_signed_in:
+            return
+        # Auto-logout never asks: there may be nobody at the counter.
+        self._refresh_timer.stop()
+        self.context.sign_out()
+        self._discard_pages()
+        self._current_key = None
+        self._clear_chrome()
+        self.setWindowTitle(self._title)
+        self.stack.setCurrentWidget(self.login_view)
+        self.setMinimumSize(*LOGIN_SIZE)
+        self.resize(*LOGIN_SIZE)
+        toast(self, "Signed out after inactivity.", "warn")
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        try:
+            from PySide6.QtCore import QEvent
+            if event.type() in (QEvent.Type.MouseButtonPress,
+                                QEvent.Type.KeyPress,
+                                QEvent.Type.Wheel):
+                if self.context.is_signed_in and self._idle_timer.isActive():
+                    self._reset_idle()
+        except Exception:
+            pass
+        return super().eventFilter(watched, event)
+
+    # -- first run ----------------------------------------------------------
+
+    def needs_first_run(self) -> bool:
+        try:
+            from app.services import staff_service
+            with self.context.reading() as session:
+                return not staff_service.has_any_user(session)
+        except Exception:
+            return False
+
+    def show_first_run(self) -> bool:
+        """Modal first-admin creation. Returns True when an admin exists."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout
+        from app.services import staff_service
+        from app.staff.settings_panels import FirstRunPanel
+        if not self.needs_first_run():
+            return True
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Create the first admin")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(420)
+        layout = QVBoxLayout(dialog)
+        panel = FirstRunPanel(dialog)
+        layout.addWidget(panel)
+        created: list[bool] = []
+
+        def _create(values: dict) -> None:
+            try:
+                with self.context.session() as session:
+                    staff_service.ensure_first_admin(
+                        session, full_name=values["full_name"],
+                        email=values["email"], password=values["password"])
+            except Exception as exc:
+                from app.staff.feedback import describe as _describe
+                panel.error.setText(_describe(exc)[0])
+                panel.error.setVisible(True)
+                return
+            created.append(True)
+            dialog.accept()
+
+        panel.submitted.connect(_create)
+        panel.cancelled.connect(dialog.reject)
+        dialog.exec()
+        return bool(created) or not self.needs_first_run()
+
+    def show_page(self, key: str) -> bool:
+        result = self._show_page_inner(key)
+        if result:
+            self._reset_idle()
+        return result
+
 
 def default_pages() -> list[PageSpec]:
     from app.staff.pages.bookings import build_bookings_page
@@ -298,6 +421,7 @@ def default_pages() -> list[PageSpec]:
     from app.staff.pages.new_rental import build_new_rental_page
     from app.staff.pages.payments import build_payments_page
     from app.staff.pages.reports import build_reports_page
+    from app.staff.pages.settings import build_settings_page
 
     return [
         PageSpec(
@@ -338,6 +462,13 @@ def default_pages() -> list[PageSpec]:
             "Reports",
             build_reports_page,
             icon="reports",
+        ),
+        PageSpec(
+            "settings",
+            "Settings",
+            build_settings_page,
+            icon="settings",
+            section="Tools",
         ),
     ]
 

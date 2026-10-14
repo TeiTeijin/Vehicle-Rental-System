@@ -1,3 +1,4 @@
+from app.models.app_setting import App_Setting
 from app.models.booking import Booking
 from app.models.customer_note import Customer_Note
 from app.models.inspection_report import Inspection_Report
@@ -11,6 +12,7 @@ from app.models.vehicle_media import Vehicle_Media
 from app.models.vehicle_rate_log import Vehicle_Rate_Log
 
 __all__ = [
+    "App_Setting",
     "Booking",
     "Customer_Note",
     "Inspection_Report",

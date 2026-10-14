@@ -133,17 +133,69 @@ def theme_margin() -> int:
     return 20
 
 
-def toast(parent: QWidget, message: str, kind: str = "ok") -> Toast:
+def toast(parent: QWidget, message: str, kind: str = "ok",
+          duration_ms: int | None = None) -> Toast:
     # One live toast per window: a second error updates the visible one
     # (text + kind + timer restart) instead of stacking a new widget on
     # the same bottom-right anchor. Call-sites in base/shell/pages all
     # resolve to the same window even when parented to different pages.
+    if duration_ms is None:
+        try:
+            from app.staff import prefs as _prefs
+            duration_ms = int(_prefs.get("behavior/toast_ms"))
+        except Exception:
+            duration_ms = None
+def _visible_overlay(host: QWidget):
+    """A live frosted overlay covering `host`, if any.
+
+    Duck-typed (no imports): both overlay classes are window-children with
+    show/hide_overlay methods. Matched by shape so neither overlay module
+    becomes an import of this one.
+    """
+    try:
+        for child in host.findChildren(QWidget):
+            if (child.isVisible()
+                    and not isinstance(child, Toast)
+                    and hasattr(child, "show_overlay")
+                    and hasattr(child, "hide_overlay")
+                    and child.parentWidget() is host):
+                return child
+    except (AttributeError, RuntimeError):
+        pass
+    return None
+
+
+def toast(parent: QWidget, message: str, kind: str = "ok",
+          duration_ms: int | None = None) -> Toast:
+    # One live toast per window: a second error updates the visible one
+    # (text + kind + timer restart) instead of stacking a new widget on
+    # the same bottom-right anchor. Call-sites in base/shell/pages all
+    # resolve to the same window even when parented to different pages.
+    if duration_ms is None:
+        try:
+            from app.staff import prefs as _prefs
+            duration_ms = int(_prefs.get("behavior/toast_ms"))
+        except Exception:
+            duration_ms = None
     host = parent.window() or parent
+    overlay = _visible_overlay(host)
+    if overlay is not None:
+        # The frosted glass covers the whole window: a page-parented toast
+        # paints underneath it and errors look like nothing happened, so
+        # new toasts go into the overlay itself (above backdrop and card).
+        # A stale page-level toast is left to dismiss on its own, never
+        # reused here, or its old text would surface over the modal.
+        for existing in active_toasts(overlay):
+            existing.retarget(message, kind, duration_ms)
+            return existing
+        widget = Toast(overlay, message, kind)
+        widget.show_for(duration_ms)
+        return widget
     for existing in active_toasts(host):
-        existing.retarget(message, kind)
+        existing.retarget(message, kind, duration_ms)
         return existing
     widget = Toast(parent, message, kind)
-    widget.show_for()
+    widget.show_for(duration_ms)
     return widget
 
 
@@ -161,7 +213,21 @@ def blocking_error(parent: QWidget, error: BaseException, title: str = "Cannot c
     return message
 
 
-def confirm(parent: QWidget, question: str, *, detail: str = "", destructive: bool = False) -> bool:
+def confirm(parent: QWidget, question: str, *, detail: str = "", destructive: bool = False,
+            pref: str | None = None) -> bool:
+    """Blocking Yes/Cancel, honouring the Settings confirm toggles.
+
+    `pref` is one of behavior/confirm_cancel, behavior/confirm_retire,
+    behavior/confirm_deactivate. When the pref exists and is off, returns
+    True without showing anything.
+    """
+    if pref:
+        try:
+            from app.staff import prefs as _prefs
+            if not bool(_prefs.get(pref)):
+                return True
+        except Exception:
+            pass
     box = QMessageBox(parent)
     box.setIcon(
         QMessageBox.Icon.Warning if destructive else QMessageBox.Icon.Question

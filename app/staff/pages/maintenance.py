@@ -55,12 +55,17 @@ def _cost_text(record: Maintenance_Record) -> str:
 
 
 def _maintenance_rows(context, status=None, kind=None, search: str = ""):
+    try:
+        from app.staff import prefs as _prefs
+        cap = _prefs.rows_limit(500)
+    except Exception:
+        cap = 500
     with context.reading() as session:
         stmt = (
             select(Maintenance_Record)
             .options(joinedload(Maintenance_Record.vehicle))
             .order_by(Maintenance_Record.start_date.desc())
-            .limit(500)
+            .limit(cap)
         )
         if status is not None:
             stmt = stmt.where(Maintenance_Record.status == status)

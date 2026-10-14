@@ -36,6 +36,11 @@ def _inspection_rows(
     damage_only: bool = False,
     search: str = "",
 ):
+    try:
+        from app.staff import prefs as _prefs
+        cap = _prefs.rows_limit(500)
+    except Exception:
+        cap = 500
     with context.reading() as session:
         stmt = (
             select(Inspection_Report)
@@ -45,7 +50,7 @@ def _inspection_rows(
                 joinedload(Inspection_Report.inspector),
             )
             .order_by(Inspection_Report.inspected_at.desc())
-            .limit(500)
+            .limit(cap)
         )
         if inspection_type is not None:
             stmt = stmt.where(Inspection_Report.inspection_type == inspection_type)

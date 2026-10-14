@@ -76,7 +76,7 @@ def _fleet_rows(context, filtr: FleetFilter):
     today = date.today()
     with context.reading() as session:
         vehicles = session.execute(
-            select(Vehicle).order_by(Vehicle.make, Vehicle.model)
+            select(Vehicle).order_by(Vehicle.created_at.desc(), Vehicle.vehicle_id.desc())
         ).scalars().all()
 
         rows = []
@@ -709,11 +709,14 @@ class FleetPage(StaffPage):
                 self,
                 f"Return {plate} to service?",
                 detail="It becomes bookable again.",
+                pref="behavior/confirm_retire",
             ):
                 return
             try:
                 with self.context.session() as session:
                     vehicle = session.get(Vehicle, self._resolve_id(plate))
+                    if vehicle is None:
+                        raise ServiceError("That vehicle no longer exists.")
                     fleet_service.unretire_vehicle(session, vehicle)
             except Exception as exc:  # noqa: BLE001
                 message, _field, _kind = describe(exc)
@@ -727,6 +730,7 @@ class FleetPage(StaffPage):
             f"Retire {plate}?",
             detail="It leaves the fleet but stays in history. Refused while it holds a booking.",
             destructive=True,
+            pref="behavior/confirm_retire",
         ):
             return
         try:

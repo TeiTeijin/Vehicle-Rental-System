@@ -623,6 +623,9 @@ class PaymentPanel(_StepBase):
         self.ref_edit.setPlaceholderText("Required for GCash")
         ref_row.addRow(Caption("Reference no.", parent=self.card), self.ref_edit)
         self._body.addLayout(ref_row)
+        for button in self.method_buttons.values():
+            button.clicked.connect(self._sync_ref)
+        self._sync_ref()
 
         back, self.pay_button = self._buttons("Pay")
         back.clicked.connect(self.backed.emit)
@@ -645,6 +648,12 @@ class PaymentPanel(_StepBase):
             if button.isChecked():
                 return method
         return "cash"
+
+    def _sync_ref(self) -> None:
+        gcash = self._method() == "gcash"
+        self.ref_edit.setEnabled(gcash)
+        if not gcash:
+            self.ref_edit.clear()
 
     def _refresh_pay_button(self) -> None:
         _choice, rental = self._selection()

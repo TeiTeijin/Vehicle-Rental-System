@@ -208,6 +208,14 @@ class PaymentPanel(_StepBase):
         back, go = self._buttons("Record payment")
         back.clicked.connect(self.cancelled.emit)
         go.clicked.connect(self._on_go)
+        self.method_combo.currentTextChanged.connect(self._sync_ref)
+        self._sync_ref(self.method_combo.currentText())
+
+    def _sync_ref(self, method: str) -> None:
+        gcash = method == "gcash"
+        self.ref_edit.setEnabled(gcash)
+        if not gcash:
+            self.ref_edit.clear()
 
     def _on_go(self) -> None:
         if self.method_combo.currentText() == "gcash" and not self.ref_edit.text().strip():

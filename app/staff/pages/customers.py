@@ -115,7 +115,7 @@ def _customer_rows(context, filtr: CustomerFilter):
         customers = session.execute(
             select(Users)
             .where(Users.role == "customer")
-            .order_by(Users.full_name)
+            .order_by(Users.created_at.desc(), Users.user_id.desc())
         ).scalars().all()
 
         rows = []
@@ -765,7 +765,8 @@ class CustomersPage(StaffPage):
             return
         if self._selected_active() is False:
             if not confirm(self, f"Reactivate {email}?",
-                           detail="They become bookable again."):
+                           detail="They become bookable again.",
+                           pref="behavior/confirm_deactivate"):
                 return
             try:
                 with self.context.session() as session:
@@ -782,6 +783,7 @@ class CustomersPage(StaffPage):
             self, f"Deactivate {email}?",
             detail="They stay in history but cannot rent.",
             destructive=True,
+            pref="behavior/confirm_deactivate",
         ):
             return
         try:

@@ -63,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
 
     shell.show()
     try:
+        # First-run: empty database gets its admin before anyone can sign in.
+        try:
+            if shell.needs_first_run():
+                shell.show_first_run()
+        except Exception:
+            pass
         return app.exec()
     finally:
         context.dispose()

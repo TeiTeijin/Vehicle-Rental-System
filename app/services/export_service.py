@@ -43,9 +43,14 @@ def _slug(text: str) -> str:
 
 
 def export_path(name: str, extension: str) -> Path:
-    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        from app.staff import prefs as _prefs
+        base = _prefs.export_folder(EXPORTS_DIR)
+    except Exception:
+        base = EXPORTS_DIR
+    base.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return EXPORTS_DIR / f"report_{_slug(name)}_{stamp}.{extension}"
+    return base / f"report_{_slug(name)}_{stamp}.{extension}"
 
 
 def write_csv(path: Path, headers: list[str], rows: list[list]) -> Path:

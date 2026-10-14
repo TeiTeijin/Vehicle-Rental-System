@@ -171,16 +171,22 @@ def complete_counter_rental(
         booking.flag_override_at = _datetime.now()
     total = money(booking.total_cost, field="total_cost")
     pay = money(rental_amount, field="rental_amount")
-    if pay < SCHEDULING_FEE:
+    try:
+        from app.services import settings_service as _settings
+        fee_floor = _settings.scheduling_fee(session)
+        gcash_required = _settings.get_bool(session, "gcash_ref_required")
+    except Exception:
+        fee_floor, gcash_required = SCHEDULING_FEE, True
+    if pay < fee_floor:
         raise ValidationError(
-            f"At least the {SCHEDULING_FEE} scheduling fee is due today.",
+            f"At least the {fee_floor} scheduling fee is due today.",
             field="rental_amount",
         )
     if pay > total:
         raise ValidationError(
             "That is more than the rental total.", field="rental_amount"
         )
-    if method == "gcash" and not (reference_no or "").strip():
+    if method == "gcash" and gcash_required and not (reference_no or "").strip():
         raise ValidationError(
             "A GCash reference number is required.", field="reference_no"
         )
@@ -190,7 +196,12 @@ def complete_counter_rental(
         reference_no=reference_no,
         note="Counter payment",
     )
-    deposit = deposit_for_vehicle(vehicle)
+    try:
+        from app.services import settings_service as _settings2
+        deposit = _settings2.deposit_for_class(
+            session, getattr(vehicle, "vehicle_class", None))
+    except Exception:
+        deposit = deposit_for_vehicle(vehicle)
     payment_service.record_payment(
         session, booking, deposit, method,
         kind="deposit",
@@ -452,6 +463,12 @@ def check_out(
 
     if actual_return_date > booking.end_date:
         days_late = (actual_return_date - booking.end_date).days
+        if late_penalty_per_day == LATE_PENALTY_PER_DAY:
+            try:
+                from app.services import settings_service as _settings
+                late_penalty_per_day = _settings.late_fee_per_day(session)
+            except Exception:
+                pass
         apply_penalty(
             session,
             booking,

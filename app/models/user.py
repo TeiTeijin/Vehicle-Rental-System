@@ -29,6 +29,9 @@ class Users(Base):
     #: Disk paths to licence front/back copies (never BLOBs in the DB).
     licence_front_path = Column(String(255), nullable=True)
     licence_back_path = Column(String(255), nullable=True)
+    #: Staff accounts created with a temporary password must change it on
+    #: first sign-in. Customers never see this (always False for them).
+    must_change_password = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False)
 
     bookings = relationship("Booking", back_populates="user", foreign_keys="Booking.user_id")

@@ -601,7 +601,12 @@ class DashboardPage(StaffPage):
         self._transaction_rows.append(name)
 
     def _fill_target(self, figures) -> None:
-        target = theme.SALES_TARGET
+        try:
+            from app.services import settings_service as _settings
+            with self.context.reading() as _session:
+                target = _settings.get_money(_session, "sales_target")
+        except Exception:
+            target = theme.SALES_TARGET
         achieved = figures.revenue_ytd
         self.target_value.setText(pesos(achieved, decimals=0))
 
@@ -618,6 +623,13 @@ class DashboardPage(StaffPage):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        try:
+            from app.staff import prefs as _prefs
+            if bool(_prefs.get("appearance/reduce_motion")):
+                self._animations_played = True
+                return
+        except Exception:
+            pass
         if self.animate and not self._animations_played:
             self._animations_played = True
             self.channels_curves.animate_in()

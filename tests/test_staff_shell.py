@@ -327,22 +327,21 @@ class TestShellRouting:
         labels = set(shell._sidebar.item_labels())
         assert {"One", "Two", "Secret"} <= labels
 
-    def test_the_sidebar_shows_the_stub_rows_to_both_roles(self, shell, qapp):
-        """Settings is the last brief row with no screen, so it appears and
-        says so on press -- for everyone. (Billing was dropped; Maintenance
-        and Reports grew real pages, so none keeps a stub row.)"""
-        from app.staff.shell import sidebar_page_keys
+    def test_the_sidebar_shows_no_stub_rows_to_both_roles(self, shell, qapp):
+        """Every sidebar row now has a screen: Settings grew a real page,
+        so no stub row remains for either role."""
+        from app.staff.shell import STUB_SECTIONS, sidebar_page_keys
 
+        assert STUB_SECTIONS == {}
         assert "maintenance" in sidebar_page_keys()
         assert "reports" in sidebar_page_keys()
+        assert "settings" in sidebar_page_keys()
         for role in ("staff", "admin"):
             sign_in(shell.context, role=role)
             shell._on_signed_in(shell.context.user)
             labels = shell._sidebar.item_labels()
-            # This shell carries fake pages, so only the remaining stub
-            # row can appear here; the real Reports/Maintenance labels
-            # are pinned by sidebar_page_keys above.
-            assert "Settings" in set(labels)
+            # This shell carries fake pages, so none of the real labels
+            # appear here; the point is no stub row fills the gap.
             assert "Billing" not in set(labels)
             shell.context.sign_out()
 
@@ -353,16 +352,15 @@ class TestShellRouting:
         assert shell._sidebar.item("two").is_active()
         assert not shell._sidebar.item("one").is_active()
 
-    def test_a_stub_row_does_not_become_the_current_page(self, shell, qapp, monkeypatch):
+    def test_an_unknown_sidebar_key_is_ignored(self, shell, qapp, monkeypatch):
         import app.staff.shell as shell_mod
 
         monkeypatch.setattr(shell_mod, "toast", lambda *a, **k: None)
         sign_in(shell.context, role="admin")
         shell._on_signed_in(shell.context.user)
         before = shell.current_page_key
-        shell._sidebar.item("settings").click()
+        assert shell.show_page("settings") is False
         assert shell.current_page_key == before
-        assert not shell._sidebar.item("settings").is_active()
 
     def test_the_sidebar_is_rebuilt_per_session(self, shell, qapp):
         """A row left over from the last sign-in is a way to reach a page

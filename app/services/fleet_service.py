@@ -331,6 +331,8 @@ def _active_booking_count(session: Session, vehicle: Vehicle) -> int:
 
 def retire_vehicle(session: Session, vehicle: Vehicle) -> Vehicle:
     """Deactivate instead of deleting: history keeps its FK forever."""
+    if vehicle is None:
+        raise NotFoundError("That vehicle no longer exists.")
     if vehicle.status == "retired":
         return vehicle
     if _active_booking_count(session, vehicle):
@@ -342,6 +344,8 @@ def retire_vehicle(session: Session, vehicle: Vehicle) -> Vehicle:
 
 
 def unretire_vehicle(session: Session, vehicle: Vehicle) -> Vehicle:
+    if vehicle is None:
+        raise NotFoundError("That vehicle no longer exists.")
     if vehicle.status != "retired":
         return vehicle
     return set_status(session, vehicle, "available")

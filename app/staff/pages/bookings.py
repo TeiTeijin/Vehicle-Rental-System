@@ -100,9 +100,14 @@ def _payment_state(balance) -> str:
 
 def _booking_rows(context, filtr: BookingFilter):
     today = date.today()
+    try:
+        from app.staff import prefs as _prefs
+        cap = _prefs.rows_limit(500)
+    except Exception:
+        cap = 500
     with context.reading() as session:
         bookings = session.execute(
-            select(Booking).order_by(Booking.start_date.desc()).limit(500)
+            select(Booking).order_by(Booking.start_date.desc()).limit(cap)
         ).scalars().all()
         rows = []
         for booking in bookings:
@@ -619,6 +624,7 @@ class BookingsPage(StaffPage):
             "Cancel this booking?",
             detail="The customer will be told to collect their deposit back.",
             destructive=True,
+            pref="behavior/confirm_cancel",
         ):
             return False
         return self.run("cancel", reason=reason)

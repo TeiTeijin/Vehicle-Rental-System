@@ -429,6 +429,9 @@ class LoginView(QWidget):
             with self.context.reading() as session:
                 row = sign_in(session, email, password)
                 identity = StaffUser.from_row(row)
+                active = bool(getattr(row, "is_active", True))
+                must = bool(getattr(row, "must_change_password", False))
+                user_id = row.user_id
         except AuthError as exc:
             self._show_error(str(exc))
             self.password.clear()
@@ -448,10 +451,61 @@ class LoginView(QWidget):
             )
             self.password.clear()
             return None
+        if not active:
+            self._show_error("This staff account is deactivated.")
+            self.password.clear()
+            return None
+        if must and not self._force_password_change(user_id):
+            self._show_error("Password change required before signing in.")
+            self.password.clear()
+            return None
 
         self.context.sign_in(user)
         self._on_signed_in(user)
         return user
+
+    def _force_password_change(self, user_id: int) -> bool:
+        from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QVBoxLayout, QPushButton
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Change temporary password")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(380)
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        new_edit = QLineEdit(dialog)
+        new_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        confirm_edit = QLineEdit(dialog)
+        confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("New password (min 8)", new_edit)
+        form.addRow("Confirm", confirm_edit)
+        layout.addLayout(form)
+        error = QLabel("", dialog)
+        error.setObjectName("fieldError")
+        error.setVisible(False)
+        error.setWordWrap(True)
+        layout.addWidget(error)
+        ok = QPushButton("Change", dialog)
+        ok.setObjectName("primaryButton")
+        ok.clicked.connect(dialog.accept)
+        layout.addWidget(ok)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        if new_edit.text() != confirm_edit.text() or len(new_edit.text()) < 8:
+            self._show_error("Passwords must match and be at least 8 characters.")
+            return False
+        try:
+            with self.context.session() as session:
+                from app.models import Users
+                from app.services import staff_service
+                row = session.get(Users, user_id)
+                staff_service.force_change_password(
+                    session, row, new_password=new_edit.text())
+        except Exception as exc:
+            from app.staff.feedback import describe
+            self._show_error(describe(exc)[0])
+            return False
+        self.password.clear()
+        return True
 
     def _show_error(self, message: str) -> None:
         self.error.setText(message)

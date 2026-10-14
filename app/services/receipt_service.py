@@ -27,12 +27,29 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
     vehicle = booking.vehicle
     balance = payment_service.booking_balance(session, booking)
     settled = [p for p in booking.payments if p.status in payment_service.SETTLED_STATUSES]
+    try:
+        from app.services import settings_service as _settings
+        branch = _settings.get_raw(session, "receipt_branch_name") or "Vehicle Rental System"
+        addr = _settings.get_raw(session, "receipt_branch_address")
+        phone = _settings.get_raw(session, "receipt_branch_phone")
+        show_fee = _settings.get_bool(session, "receipt_fee_note")
+        fee = _settings.scheduling_fee(session)
+    except Exception:
+        branch, addr, phone, show_fee, fee = (
+            "Vehicle Rental System", "", "", True, SCHEDULING_FEE)
 
     rows: list[Row] = [
-        Row("Vehicle Rental System", "title"),
+        Row(branch or "Vehicle Rental System", "title"),
         Row("Rental Receipt", "line"),
         Row("", "blank"),
-
+    ]
+    if addr:
+        rows.append(Row(addr, "note"))
+    if phone:
+        rows.append(Row(phone, "note"))
+    if addr or phone:
+        rows.append(Row("", "blank"))
+    rows += [
         Row("Booking Details", "heading"),
         Row(f"Booking ID: {booking.booking_id}"),
         Row(f"Status: {booking.status.replace('_', ' ').title()}"),
@@ -106,8 +123,9 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
     else:
         rows.append(Row("No payments recorded against this booking.", "note"))
     rows.append(Row("", "blank"))
-    rows.append(Row(f"Includes {pesos(SCHEDULING_FEE)} non-refundable scheduling fee.", "note"))
-    rows.append(Row("", "blank"))
+    if show_fee:
+        rows.append(Row(f"Includes {pesos(fee)} non-refundable scheduling fee.", "note"))
+        rows.append(Row("", "blank"))
 
     rows.append(
         Row(
@@ -217,7 +235,14 @@ MONEY_SECTIONS = ("Charges", "Security deposit (refundable hold)", "Payments")
 
 
 def generate_receipt_pdf(session, booking: Booking, dest_dir: Path | None = None) -> str:
-    target = Path(dest_dir) if dest_dir else RECEIPTS_DIR
+    if dest_dir is None:
+        try:
+            from app.staff import prefs as _prefs
+            target = _prefs.export_folder(RECEIPTS_DIR)
+        except Exception:
+            target = RECEIPTS_DIR
+    else:
+        target = Path(dest_dir)
     target.mkdir(parents=True, exist_ok=True)
     filepath = target / f"receipt_{booking.booking_id}.pdf"
 
@@ -379,7 +404,14 @@ def statement_rows(session, customer) -> list[Row]:
 
 def generate_statement_pdf(session, customer, dest_dir: Path | None = None) -> str:
     """Same grid recipe as receipts (styles frozen); new content function."""
-    target = Path(dest_dir) if dest_dir else RECEIPTS_DIR
+    if dest_dir is None:
+        try:
+            from app.staff import prefs as _prefs
+            target = _prefs.export_folder(RECEIPTS_DIR)
+        except Exception:
+            target = RECEIPTS_DIR
+    else:
+        target = Path(dest_dir)
     target.mkdir(parents=True, exist_ok=True)
     filepath = target / f"statement_{customer.user_id}.pdf"
     story: list = [_para("Vehicle Rental System", "title")]

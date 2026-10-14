@@ -82,6 +82,11 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
             "VARCHAR(255) NULL",
             "disk path to the licence-back copy, never a BLOB",
         ),
+        (
+            "must_change_password",
+            "BOOL NOT NULL DEFAULT FALSE",
+            "staff temp-password flag; False for all legacy rows",
+        ),
     ],
     "VEHICLE": [
         (
@@ -294,6 +299,20 @@ TABLES: dict[str, dict[str, str]] = {
         note VARCHAR(255) NULL
     )""",
     },
+    "APP_SETTINGS": {
+        "mysql": """CREATE TABLE IF NOT EXISTS APP_SETTINGS (
+        `key` VARCHAR(64) NOT NULL PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_by INTEGER NULL,
+        updated_at DATETIME NOT NULL
+    )""",
+        "sqlite": """CREATE TABLE IF NOT EXISTS APP_SETTINGS (
+        key VARCHAR(64) NOT NULL PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        updated_by INTEGER NULL,
+        updated_at DATETIME NOT NULL
+    )""",
+    },
 }
 
 
@@ -459,7 +478,7 @@ def verify() -> bool:
         "USERS": [
             "birthdate", "emergency_contact", "source", "is_active",
             "flag_reason", "flagged_at", "flagged_by",
-            "licence_front_path", "licence_back_path",
+            "licence_front_path", "licence_back_path", "must_change_password",
         ],
         "VEHICLE": [
             "color", "registration_expiry", "insurance_expiry", "retired_at",
@@ -471,7 +490,7 @@ def verify() -> bool:
             if column not in present:
                 print(f"  x {table}.{column} is missing")
                 ok = False
-    for table in ("CUSTOMER_NOTE", "VEHICLE_RATE_LOG"):
+    for table in ("CUSTOMER_NOTE", "VEHICLE_RATE_LOG", "APP_SETTINGS"):
         if table not in _inspector().get_table_names():
             print(f"  x {table} table is missing")
             ok = False
