@@ -1458,6 +1458,51 @@ class TestVehicleFilters:
             )
         assert len(rows) == 7
 
+    def test_a_stale_signed_url_is_handed_over_as_none(self, branch):
+        """CarImages signatures expire after an hour. A stale url must reach
+        the page as None so the media pipeline renews it — a stale truthy
+        url is downloaded as-is, 403s, and the card paints nothing."""
+        from datetime import datetime, timedelta
+
+        from app.models import Vehicle_Media
+        from app.services.vehicle_service import showcase_vehicle_rows
+
+        built, context = branch
+        now = datetime.now()
+        with context.session() as session:
+            session.add(
+                Vehicle_Media(
+                    vehicle_id=built.free_car.vehicle_id,
+                    source="carimagesapi",
+                    view_angle="front34",
+                    image_url="https://carimagesapi.com/image?sig=stale",
+                    model_3d_url="",
+                    cached_at=now - timedelta(hours=2),
+                )
+            )
+            session.add(
+                Vehicle_Media(
+                    vehicle_id=built.collecting_car.vehicle_id,
+                    source="carimagesapi",
+                    view_angle="front34",
+                    image_url="https://carimagesapi.com/image?sig=fresh",
+                    model_3d_url="",
+                    cached_at=now,
+                )
+            )
+        with context.reading() as session:
+            urls = {
+                vehicle.vehicle_id: url
+                for vehicle, url in showcase_vehicle_rows(
+                    session, category=None, statuses=None
+                )
+            }
+        assert urls[built.free_car.vehicle_id] is None
+        assert (
+            urls[built.collecting_car.vehicle_id]
+            == "https://carimagesapi.com/image?sig=fresh"
+        )
+
 
 class TestFilterQueries:
     """The rail's selection is applied in SQL, so these read a real database."""

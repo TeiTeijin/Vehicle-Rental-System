@@ -12,11 +12,25 @@ def is_motorcycle(vehicle) -> bool:
     return bool(category and category.category_name == "Motorcycle")
 
 
-def _row_is_fresh(row: Vehicle_Media, now: datetime) -> bool:
-    if not row.cached_at:
+def url_is_fresh(
+    url: str | None,
+    cached_at: datetime | None,
+    now: datetime | None = None,
+) -> bool:
+    """Signed URLs expire after an hour, catalog URLs after a day.
+
+    Callers that hand a stored url to an image widget (which downloads it
+    asynchronously and swallows failures) must treat a stale url as absent,
+    or the widget silently paints nothing.
+    """
+    if not cached_at:
         return False
-    ttl = SIGNED_URL_TTL if "sig=" in (row.image_url or "") else CATALOG_URL_TTL
-    return now - row.cached_at < ttl
+    ttl = SIGNED_URL_TTL if "sig=" in (url or "") else CATALOG_URL_TTL
+    return (now or datetime.now()) - cached_at < ttl
+
+
+def _row_is_fresh(row: Vehicle_Media, now: datetime) -> bool:
+    return url_is_fresh(row.image_url, row.cached_at, now)
 
 
 def _fresh_rows(session, vehicle) -> list[Vehicle_Media]:

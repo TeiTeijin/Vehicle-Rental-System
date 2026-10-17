@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Vehicle, Vehicle_Category, Vehicle_Media
+from app.services import media_service
 
 
 CC_BUCKETS: tuple[tuple[str, int | None, int | None], ...] = (
@@ -247,17 +249,14 @@ def showcase_vehicle_records(
     return query.order_by(Vehicle.year.desc(), Vehicle.vehicle_id.asc()).all()
 
 
-def showcase_vehicle_rows(
-    session: Session,
-    category: str | None = "Car",
-    statuses: tuple[str, ...] | None = ("available",),
-    makes: Sequence[str] | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-    filters: "VehicleFilter | None" = None,
-) -> list[tuple[Vehicle, str | None]]:
-    photo = (
-        session.query(Vehicle_Media.image_url)
+def _first_media_value(session: Session, column):
+    """The chosen image row's `column`: front34 wins, then lowest media_id.
+
+    Both the url and its `cached_at` are read through this same subquery, so
+    the freshness of a url is always judged against its own row.
+    """
+    return (
+        session.query(column)
         .filter(
             Vehicle_Media.vehicle_id == Vehicle.vehicle_id,
             Vehicle_Media.image_url.isnot(None),
@@ -272,8 +271,25 @@ def showcase_vehicle_rows(
         .scalar_subquery()
     )
 
+
+def showcase_vehicle_rows(
+    session: Session,
+    category: str | None = "Car",
+    statuses: tuple[str, ...] | None = ("available",),
+    makes: Sequence[str] | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    filters: "VehicleFilter | None" = None,
+) -> list[tuple[Vehicle, str | None]]:
+    photo = _first_media_value(session, Vehicle_Media.image_url)
+    photo_cached_at = _first_media_value(session, Vehicle_Media.cached_at)
+
     query = (
-        session.query(Vehicle, photo.label("photo_url"))
+        session.query(
+            Vehicle,
+            photo.label("photo_url"),
+            photo_cached_at.label("photo_cached_at"),
+        )
         .options(joinedload(Vehicle.category))
     )
     if category:
@@ -290,7 +306,16 @@ def showcase_vehicle_rows(
     rows = query.order_by(Vehicle.year.desc(), Vehicle.vehicle_id.asc())
     if limit is not None:
         rows = rows.offset(offset).limit(limit)
-    return [(vehicle, url or None) for vehicle, url in rows.all()]
+    now = datetime.now()
+    return [
+        (
+            vehicle,
+            url
+            if url and media_service.url_is_fresh(url, cached_at, now)
+            else None,
+        )
+        for vehicle, url, cached_at in rows.all()
+    ]
 
 
 def vehicle_brands(session: Session) -> list[str]:
