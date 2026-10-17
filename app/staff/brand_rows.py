@@ -21,6 +21,10 @@ from app.staff.vehicle_cards import RentalVehicle, VehicleSlot
 #: Card width inside a rail: narrow enough that a few cards already overflow.
 RAIL_CARD_W = VEHICLE_CARD_MIN_W
 
+#: Extra cards built just past the rail's right edge, so a side-scroll lands
+#: on a card that is already there instead of one still shimmering.
+RAIL_PRELOAD_CARDS = 2
+
 #: Reserved under the cards for the horizontal scrollbar, so it never clips one.
 RAIL_SCROLLBAR_H = 16
 
@@ -61,7 +65,37 @@ class VehicleRail(QScrollArea):
 
         self._alive = True
         self.destroyed.connect(self._stop_building)
+        # Cards are built only as the rail scrolls into view. The page calls
+        # `start()` when the section nears the viewport; from there the rail
+        # builds just the cards inside -- or a small margin past -- its own
+        # horizontal viewport. An off-screen brand costs nothing.
+        self._started = False
+        self.horizontalScrollBar().valueChanged.connect(self._on_side_scroll)
+
+    def start(self) -> None:
+        if self._started or not self._alive:
+            return
+        self._started = True
         QTimer.singleShot(0, self._process_queue)
+
+    def _on_side_scroll(self, _value: int) -> None:
+        if self._started:
+            QTimer.singleShot(0, self._process_queue)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        # The visible width decides what "on screen" means, and a layout pass
+        # can widen it without any scroll signal.
+        super().resizeEvent(event)
+        if getattr(self, "_started", False):
+            QTimer.singleShot(0, self._process_queue)
+
+    def _visible_edge(self) -> int:
+        """X of the rightmost card worth building right now."""
+        return (
+            self.horizontalScrollBar().value()
+            + self.viewport().width()
+            + RAIL_PRELOAD_CARDS * (RAIL_CARD_W + VEHICLE_CARD_GUTTER)
+        )
 
     def _stop_building(self) -> None:
         self._alive = False
@@ -95,8 +129,13 @@ class VehicleRail(QScrollArea):
         if not self._build_queue:
             self._built = True
             return
+        idx = self._build_queue[0]
+        if idx * (RAIL_CARD_W + VEHICLE_CARD_GUTTER) > self._visible_edge():
+            # The next card is past the right edge; a side-scroll or a resize
+            # wakes this back up. Order is preserved, so nothing leaps ahead.
+            return
         self._building = True
-        idx = self._build_queue.pop(0)
+        self._build_queue.pop(0)
         if 0 <= idx < len(self._slots) and not self._slots[idx].built:
             self._slots[idx].build(self._pool)
         self._building = False

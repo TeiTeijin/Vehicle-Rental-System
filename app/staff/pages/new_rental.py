@@ -46,6 +46,14 @@ BRANDS_PER_PAGE = 4
 #: enough that the greying still feels attached to the click.
 AVAILABILITY_DEBOUNCE_MS = 90
 
+#: How far past the viewport edges a brand starts building its cards, so a
+#: scroll lands on cards that are already there rather than on grey slots.
+SECTION_PRELOAD_PX = 600
+
+#: Coalescing window for per-card media requests: a section coming into view
+#: asks about each of its cards; this makes that one resolver run.
+MEDIA_COALESCE_MS = 60
+
 
 def popover_position(anchor: QPoint, size: QSize, available: QRect) -> QPoint:
     """Top-left for a popup of `size` opening at `anchor`, kept on-screen.
@@ -122,6 +130,12 @@ class NewRentalPage(StaffPage):
         self._settle_timer.setSingleShot(True)
         self._settle_timer.setInterval(SECTION_TRACK_MS)
         self._settle_timer.timeout.connect(self._track_section)
+        self._settle_timer.timeout.connect(self._update_visible_sections)
+
+        self._media_timer = QTimer(self)
+        self._media_timer.setSingleShot(True)
+        self._media_timer.setInterval(MEDIA_COALESCE_MS)
+        self._media_timer.timeout.connect(self._flush_media)
 
         self._availability_timer = QTimer(self)
         self._availability_timer.setSingleShot(True)
@@ -423,6 +437,9 @@ class NewRentalPage(StaffPage):
             self._sections.append(section)
             for slot in section.slots:
                 slot.details_requested.connect(self._open_vehicle_details)
+                slot.media_needed.connect(
+                    lambda _vid, vehicle=slot.vehicle: self._on_slot_media(vehicle)
+                )
             vehicles.extend(brand_vehicles)
 
         self._offset += len(page_brands)
@@ -432,10 +449,10 @@ class NewRentalPage(StaffPage):
         # Not re-set here: the list is the whole fleet and does not narrow as the
         # grid loads. Rebuilding it from the sections on screen would both empty
         # the axis on every filter change and drop brands the clerk can still see.
-        self._request_media(vehicles)
         self._update_filter_thumbs(vehicles)
         self._update_count()
         self._sync_empty_state()
+        self._update_visible_sections()
         QTimer.singleShot(0, self._fill_viewport)
         QTimer.singleShot(0, self._track_section)
 
@@ -578,10 +595,35 @@ class NewRentalPage(StaffPage):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._flush_media()
+        self._update_visible_sections()
         # Re-read the section in view against a real viewport. `refresh()` runs
         # before the page is shown, so at that point the viewport's height is
         # whatever the last layout left behind and the read is only provisional.
         QTimer.singleShot(0, self._track_section)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # A taller window brings more brands (and a wider one more cards per
+        # rail) into view without any scroll signal.
+        QTimer.singleShot(0, self._update_visible_sections)
+
+    def _update_visible_sections(self) -> None:
+        """Start the rails of every brand at (or just past) the viewport.
+
+        A brand below the fold keeps its grey slots until it scrolls up, so a
+        page-turn never resolves urls or downloads photos for cards nobody is
+        looking at. The preload margin is what makes the scroll feel warm.
+        """
+        if not self._sections:
+            return
+        bar = self.scroll_area.verticalScrollBar()
+        line = bar.value() - self._rows.y()
+        top = line - SECTION_PRELOAD_PX
+        bottom = line + self.scroll_area.viewport().height() + SECTION_PRELOAD_PX
+        for section, (_brand, y) in zip(self._sections, self._section_offsets()):
+            height = section.sizeHint().height() + BRAND_ROW_GAP
+            if y + height >= top and y <= bottom:
+                section.rail.start()
 
     def _flush_media(self) -> None:
         if not self._pending_media:
@@ -592,6 +634,16 @@ class NewRentalPage(StaffPage):
         resolver.signals.resolved.connect(self._apply_photo_urls)
         self._resolvers.append(resolver)
         self._pool.start(resolver)
+
+    def _on_slot_media(self, vehicle) -> None:
+        """A card just built without a photo url: resolve it now.
+
+        Requests are coalesced for a beat so a whole visible section is one
+        resolver run instead of one run per card.
+        """
+        self._request_media([vehicle])
+        if not self._media_timer.isActive():
+            self._media_timer.start()
 
     def _request_media(self, vehicles) -> None:
         seen = self._media_requested

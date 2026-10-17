@@ -566,6 +566,11 @@ class VehicleSlot(QWidget):
     #: connect once per slot instead of chasing the lazily-built card.
     details_requested = Signal(int)
 
+    #: Emitted when a card that just built has no photo url yet: the page
+    #: resolves media only for cards that actually come into view, instead of
+    #: asking the API about the whole loaded page up front.
+    media_needed = Signal(int)
+
     def __init__(self, vehicle: RentalVehicle, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("vehicleSlot")
@@ -598,6 +603,8 @@ class VehicleSlot(QWidget):
         self.card.details_requested.connect(self.details_requested.emit)
         self._stack.addWidget(self.card)
         self.card.load_photo(pool, self._photo_url)
+        if self._photo_url is None:
+            self.media_needed.emit(self.vehicle.vehicle_id)
 
     def set_photo_url(self, url: str | None) -> None:
         if not url or url == self._photo_url:
