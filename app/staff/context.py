@@ -51,6 +51,8 @@ class StaffUser:
 class DatabaseTarget(Enum):
     LIVE = "live"
     DEMO = "demo"
+    #: A local snapshot of the live database (scripts.backup_live_db).
+    LOCAL = "local"
 
     @property
     def is_demo(self) -> bool:
@@ -73,7 +75,24 @@ def select_database(
     *,
     demo: bool = False,
     demo_file: str | Path | None = None,
+    backup_file: str | Path | None = None,
 ) -> DatabaseSelection:
+    if backup_file is not None:
+        path = Path(backup_file)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        if not path.exists():
+            raise FileNotFoundError(
+                f"No local backup at {path}.\n"
+                "  Take a snapshot of the live database first:\n"
+                "      python -m scripts.backup_live_db"
+            )
+        return DatabaseSelection(
+            url=f"sqlite:///{path}",
+            target=DatabaseTarget.LOCAL,
+            label=f"Local copy - {path.name}",
+        )
+
     if demo:
         path = Path(demo_file) if demo_file else BASE_DIR / DEFAULT_DEMO_FILE
         if not path.is_absolute():

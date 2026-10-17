@@ -100,6 +100,22 @@ class TestDatabaseSelection:
             select_database(demo=True)
         assert "seed_demo_data" in str(caught.value)
 
+    def test_a_backup_file_opens_as_a_local_copy(self, tmp_path):
+        path = tmp_path / "backup.db"
+        path.write_bytes(b"")
+        picked = select_database(backup_file=path)
+        assert picked.target is DatabaseTarget.LOCAL
+        assert picked.is_demo is False
+        assert picked.url == f"sqlite:///{path}"
+        assert "Local copy" in picked.label
+        assert "backup.db" in picked.label
+
+    def test_missing_backup_file_says_how_to_make_one(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.staff.context.BASE_DIR", tmp_path)
+        with pytest.raises(FileNotFoundError) as caught:
+            select_database(backup_file="backup.db")
+        assert "backup_live_db" in str(caught.value)
+
     def test_the_label_never_carries_credentials(self, monkeypatch):
         monkeypatch.setattr(
             "app.staff.context.DATABASE_URL",

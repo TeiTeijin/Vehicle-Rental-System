@@ -756,7 +756,12 @@ class SettingsPage(StaffPage):
                 return
             toast(self, f"Backup saved: {dest.name}.")
         else:
-            toast(self, "Live database: take a mysqldump (see runbook).", "warn")
+            toast(
+                self,
+                "Live database: run `python -m scripts.backup_live_db` "
+                "for a local copy.",
+                "warn",
+            )
 
     def _refresh_cache_label(self) -> None:
         try:

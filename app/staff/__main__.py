@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from app.staff.context import StaffContext, select_database
+from app.staff.context import DatabaseTarget, StaffContext, select_database
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +20,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Which demo database to open. Implies --demo.",
     )
+    parser.add_argument(
+        "--backup-file",
+        metavar="PATH",
+        help=(
+            "Open a local snapshot of the live database "
+            "(scripts.backup_live_db) instead of the live one."
+        ),
+    )
     return parser
 
 
@@ -30,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         selection = select_database(
             demo=args.demo or bool(args.demo_file),
             demo_file=args.demo_file,
+            backup_file=args.backup_file,
         )
     except FileNotFoundError as exc:
         print(exc, file=sys.stderr)
@@ -52,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         # Fails before any window exists: report rather than show a broken shell.
         print(f"Could not start RentWheels Staff: {exc}", file=sys.stderr)
-        if not selection.is_demo:
+        if selection.target is DatabaseTarget.LIVE:
             print(
                 "\nIf this is the staff schema migration:\n"
                 "    python -m scripts.migrate_staff_schema --dry-run",
