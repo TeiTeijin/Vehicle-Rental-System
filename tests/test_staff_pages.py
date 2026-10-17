@@ -2236,6 +2236,10 @@ class TestFleetPage:
         _wait_for_fleet(page)
         panel = FleetDetailsPanel(page.context, built.free_car.vehicle_id, page)
         panel._pool.waitForDone(15000)
+        # The constructor's silent refresh lands with an empty snapshot;
+        # drain that queued landing first, or it overwrites the photo
+        # injected below and the hero ends up empty.
+        qapp_process(panel)
         # Simulate the worker landing with one photo row.
         panel._on_media_done(
             [{"view_angle": "front34", "image_url": "http://x/1.webp",
@@ -3639,20 +3643,24 @@ class TestReportsPage:
         panel = page._panels["revenue"]
         panel.granularity_combo.setCurrentText("Week")
         _wait_for_reports(page)
-        # Week and month counts depend on the weekday: totals must agree.
-        week_sum = sum(
-            float(panel.table.cell_text(r, 3).replace(",", ""))
-            for r in range(panel.table.row_count())
-        )
+        # Week and month counts depend on the weekday: totals must agree,
+        # and the paid rental must land in exactly one bucket of each
+        # granularity. Rows list oldest first, so row 0 is not "current" —
+        # the single payment sits mid-window by construction.
+        week_totals = [
+            panel.table.cell_text(r, 3) for r in range(panel.table.row_count())
+        ]
+        week_sum = sum(float(value.replace(",", "")) for value in week_totals)
         assert panel.table.row_count() in (4, 5, 6)
+        assert sum(1 for value in week_totals if value != "0.00") == 1
         panel.granularity_combo.setCurrentText("Month")
         _wait_for_reports(page)
-        month_sum = sum(
-            float(panel.table.cell_text(r, 3).replace(",", ""))
-            for r in range(panel.table.row_count())
-        )
+        month_totals = [
+            panel.table.cell_text(r, 3) for r in range(panel.table.row_count())
+        ]
+        month_sum = sum(float(value.replace(",", "")) for value in month_totals)
         assert month_sum == week_sum
-        assert panel.table.cell_text(0, 3) != "0.00"
+        assert sum(1 for value in month_totals if value != "0.00") == 1
 
     def test_channel_filter_narrows_both_reports(self, shell, branch):
         built, context = branch
