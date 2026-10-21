@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+import secrets
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.domain.availability import AvailabilityChecker
 from app.domain.rental_calculator import RentalCalculator
 from app.domain.vehicle_types import Car, Motorcycle
 from app.models import Booking, Inspection_Report, Penalty, Vehicle
-from app.services import fleet_service, payment_service
+from app.services import branch_service, fleet_service, payment_service, pricing
 from app.services.errors import ConflictError, StateError, ValidationError
 from app.utils.money import ZERO, money
 
@@ -600,3 +601,291 @@ def overdue_returns(session: Session, today: date | None = None) -> list[Booking
             .order_by(Booking.end_date)
         ).scalars()
     )
+
+
+# =========================================================================
+#  CUSTOMER APP (online) BOOKINGS
+#  -------------------------------------------------------------------------
+#  Everything the four customer screens need: the booked-day map behind the
+#  calendar, the datetime conflict check, the reference code, and the booking
+#  itself (priced by app/services/pricing.py, paid by the mock gateway).
+# =========================================================================
+
+#: Status buckets behind the All / Upcoming / Completed / Cancelled pills.
+CUSTOMER_FILTERS: tuple[str, ...] = ("all", "upcoming", "completed", "cancelled")
+
+#: Which stored statuses land in each pill. "Upcoming" is everything still
+#: holding the vehicle (awaiting cash at pickup, confirmed, or already out).
+BUCKET_STATUSES: dict[str, tuple[str, ...]] = {
+    "upcoming": ("pending", "confirmed", "ongoing"),
+    "completed": ("completed",),
+    "cancelled": ("cancelled",),
+}
+
+#: How far ahead the vehicle page looks when nothing is booked.
+AVAILABILITY_HORIZON_DAYS = 30
+
+#: Alphabet for reference codes: no O/0, I/1 to keep them readable on a phone.
+_REFERENCE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+REFERENCE_PREFIX = "RW"
+
+
+def booking_window(booking: Booking) -> tuple[datetime, datetime]:
+    """The window this booking occupies, as datetimes.
+
+    An online booking carries the exact pickup/return times. A counter booking
+    only carries dates, so it keeps the counter's own reading: the vehicle is
+    out until 00:00 on the return date, and a same-day rental takes the whole
+    day (see app/domain/availability.py).
+    """
+    if booking.pickup_dt and booking.return_dt:
+        return booking.pickup_dt, booking.return_dt
+    start = datetime.combine(booking.start_date, time.min)
+    if booking.end_date and booking.end_date > booking.start_date:
+        end = datetime.combine(booking.end_date, time.min)
+    else:
+        end = start + timedelta(days=1)
+    return start, end
+
+
+def _windows_overlap(
+    start: datetime, end: datetime, other_start: datetime, other_end: datetime
+) -> bool:
+    """`pickup < existing_return and return > existing_pickup`."""
+    return start < other_end and other_start < end
+
+
+def occupied_windows(
+    session: Session, vehicle: Vehicle, *, exclude_booking_id: int | None = None
+) -> list[tuple[datetime, datetime]]:
+    """Every window the vehicle is already spoken for."""
+    windows = []
+    for booking in active_bookings(session, vehicle):
+        if booking.booking_id == exclude_booking_id:
+            continue
+        windows.append(booking_window(booking))
+    return sorted(windows)
+
+
+def find_conflict_window(
+    session: Session,
+    vehicle: Vehicle,
+    pickup_dt: datetime,
+    return_dt: datetime,
+    *,
+    exclude_booking_id: int | None = None,
+) -> tuple[datetime, datetime] | None:
+    """The first existing booking this window would collide with, if any."""
+    for start, end in occupied_windows(
+        session, vehicle, exclude_booking_id=exclude_booking_id
+    ):
+        if _windows_overlap(pickup_dt, return_dt, start, end):
+            return (start, end)
+    return None
+
+
+def window_is_free(
+    session: Session,
+    vehicle: Vehicle,
+    pickup_dt: datetime,
+    return_dt: datetime,
+    *,
+    exclude_booking_id: int | None = None,
+) -> bool:
+    return (
+        find_conflict_window(
+            session,
+            vehicle,
+            pickup_dt,
+            return_dt,
+            exclude_booking_id=exclude_booking_id,
+        )
+        is None
+    )
+
+
+def assert_window_free(
+    session: Session,
+    vehicle: Vehicle,
+    pickup_dt: datetime,
+    return_dt: datetime,
+    *,
+    exclude_booking_id: int | None = None,
+) -> None:
+    clash = find_conflict_window(
+        session, vehicle, pickup_dt, return_dt, exclude_booking_id=exclude_booking_id
+    )
+    if clash is None:
+        return
+    start, end = clash
+    raise ConflictError(
+        f"{vehicle.make} {vehicle.model} is already booked from "
+        f"{start:%d %b %Y, %I:%M %p} to {end:%d %b %Y, %I:%M %p}."
+    )
+
+
+def booked_days(
+    session: Session, vehicle: Vehicle, first: date, last: date
+) -> set[date]:
+    """Days the vehicle is out *the whole day*, for the calendar to grey out.
+
+    A day that is only partly taken stays selectable on purpose: whether the
+    hours actually clash depends on the times, and that is checked (and shown
+    in red) when the customer picks them.
+    """
+    blocked: set[date] = set()
+    for start, end in occupied_windows(session, vehicle):
+        day = max(first, start.date())
+        last_day = min(last, (end - timedelta(microseconds=1)).date())
+        while day <= last_day:
+            day_start = datetime.combine(day, time.min)
+            day_end = day_start + timedelta(days=1)
+            if start <= day_start and end >= day_end:
+                blocked.add(day)
+            day += timedelta(days=1)
+    return blocked
+
+
+def next_available_window(
+    session: Session,
+    vehicle: Vehicle,
+    *,
+    horizon_days: int = AVAILABILITY_HORIZON_DAYS,
+    from_date: date | None = None,
+) -> tuple[date, date]:
+    """(start, end) of the next stretch this vehicle is free, for the vehicle
+    page's green line: "Available for Sep 28 - Oct 01"."""
+    today = from_date or date.today()
+    horizon_end = today + timedelta(days=horizon_days)
+    upcoming = [
+        start
+        for start, _end in occupied_windows(session, vehicle)
+        if start.date() >= today and start.date() <= horizon_end
+    ]
+    if not upcoming:
+        return today, horizon_end
+    return today, min(upcoming).date()
+
+
+def new_reference_code() -> str:
+    """'RW-7QK4ZP': short enough to read over the phone."""
+    body = "".join(secrets.choice(_REFERENCE_ALPHABET) for _ in range(6))
+    return f"{REFERENCE_PREFIX}-{body}"
+
+
+def booking_reference(booking: Booking) -> str:
+    """The code quoted to the customer; counter bookings get a derived one."""
+    return booking.reference_code or f"{REFERENCE_PREFIX}B-{booking.booking_id:06d}"
+
+
+def bookings_for(
+    session: Session, user, *, bucket: str = "all", limit: int | None = None
+) -> list[Booking]:
+    """One customer's bookings, newest first, filtered by pill."""
+    if bucket not in CUSTOMER_FILTERS:
+        raise ValidationError(
+            f"Unknown filter: {bucket}. Choose one of "
+            f"{', '.join(CUSTOMER_FILTERS)}.",
+            field="bucket",
+        )
+    stmt = (
+        select(Booking)
+        .options(joinedload(Booking.vehicle), joinedload(Booking.pickup_branch))
+        .where(Booking.user_id == user.user_id)
+    )
+    statuses = BUCKET_STATUSES.get(bucket)
+    if statuses:
+        stmt = stmt.where(Booking.status.in_(statuses))
+    stmt = stmt.order_by(Booking.start_date.desc(), Booking.booking_id.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(session.execute(stmt).scalars().unique())
+
+
+def create_online_booking(
+    session: Session,
+    *,
+    user,
+    vehicle: Vehicle,
+    pickup_dt: datetime,
+    return_dt: datetime,
+    pickup_branch,
+    return_branch=None,
+    payment_method: str,
+    card_last4: str | None = None,
+    payment_reference: str | None = None,
+) -> Booking:
+    """Book a vehicle from the customer app.
+
+    Prices the rental through app/services/pricing.py, refuses a window that
+    clashes with anything already booked or that sits outside branch hours, and
+    records the payment for the methods that are settled up front (cash is due
+    at the counter, so it stays `pending`).
+
+    The caller commits: a raise here leaves nothing half-written.
+    """
+    if payment_method not in payment_service.METHODS:
+        raise ValidationError(
+            f"Unknown payment method: {payment_method}. Choose one of "
+            f"{', '.join(payment_service.METHODS)}.",
+            field="payment_method",
+        )
+
+    branch_service.validate_window(
+        pickup_dt, return_dt, pickup_branch, return_branch
+    )
+    assert_window_free(session, vehicle, pickup_dt, return_dt)
+
+    drop_branch = return_branch or pickup_branch
+    quote = pricing.quote(vehicle.daily_rate, pickup_dt, return_dt)
+    prepaid = payment_method in ("card", "gcash")
+
+    booking = Booking(
+        user_id=user.user_id,
+        vehicle_id=vehicle.vehicle_id,
+        start_date=pickup_dt.date(),
+        end_date=return_dt.date(),
+        actual_return_date=None,
+        # The counter reads total_cost everywhere, so it stays the grand total.
+        total_cost=quote.total,
+        status="confirmed" if prepaid else "pending",
+        created_at=datetime.now(),
+        created_by=None,
+        channel="online",
+        pickup_dt=pickup_dt,
+        return_dt=return_dt,
+        pickup_branch_id=pickup_branch.branch_id,
+        return_branch_id=drop_branch.branch_id,
+        payment_method=payment_method,
+        card_last4=(card_last4 or None),
+        reference_code=new_reference_code(),
+        subtotal=quote.subtotal,
+        insurance_fee=quote.insurance,
+        service_fee=quote.service_fee,
+        vat=quote.vat,
+        total=quote.total,
+    )
+    session.add(booking)
+    session.flush()
+
+    if prepaid:
+        payment_service.record_payment(
+            session,
+            booking,
+            quote.total,
+            payment_method,
+            recorded_by=None,
+            reference_no=payment_reference,
+            note="Paid online at booking",
+        )
+
+    return booking
+
+
+def online_booking_count(session: Session, *, since: datetime | None = None) -> int:
+    """How many bookings came in through the customer app (reporting nicety)."""
+    stmt = select(Booking).where(Booking.channel == "online")
+    if since is not None:
+        stmt = stmt.where(Booking.created_at >= since)
+    return len(list(session.execute(stmt).scalars()))

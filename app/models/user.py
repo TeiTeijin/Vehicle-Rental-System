@@ -12,6 +12,13 @@ class Users(Base):
     phone = Column(String(255))
     password_hash = Column(String(255), nullable=False)
     address = Column(String(255), nullable=False)
+    #: PSGC codes and the street line the customer typed at sign-up. The
+    #: formatted `address` above stays the human-readable copy used by staff.
+    region_code = Column(String(9), nullable=True)
+    province_code = Column(String(9), nullable=True)
+    city_municipality_code = Column(String(9), nullable=True)
+    barangay_code = Column(String(9), nullable=True)
+    street_address = Column(String(255), nullable=True)
     license_number = Column(String(12), nullable=False, unique=True)
     license_expiry = Column(Date, nullable=False)
     role = Column(Enum('customer', 'staff', 'admin'), nullable=False, default='customer')

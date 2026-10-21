@@ -18,8 +18,12 @@ class CachedImage:
     url: str
 
 
-def _identity(make: str, model: str, year: int) -> str:
+def _identity(make: str, model: str, year: int, variant: str = "") -> str:
     parts = [str(make).strip().lower(), str(model).strip().lower(), str(year).strip()]
+    if variant:
+        # One vehicle can have several photos (front, side, ...): the variant
+        # keeps them apart without changing the keys already on disk.
+        parts.append(str(variant).strip().lower())
     return "-".join(parts).replace(" ", "-")
 
 
@@ -27,8 +31,10 @@ def _paths(key: str) -> tuple[Path, Path]:
     return CACHE_DIR / f"{key}{_BYTES_SUFFIX}", CACHE_DIR / f"{key}{_META_SUFFIX}"
 
 
-def load(make: str, model: str, year: int) -> CachedImage | None:
-    bytes_path, meta_path = _paths(_identity(make, model, year))
+def load(
+    make: str, model: str, year: int, variant: str = ""
+) -> CachedImage | None:
+    bytes_path, meta_path = _paths(_identity(make, model, year, variant))
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         data = bytes_path.read_bytes()
@@ -48,10 +54,11 @@ def store(
     year: int,
     data: bytes,
     url: str,
+    variant: str = "",
 ) -> None:
     if not data:
         return
-    key = _identity(make, model, year)
+    key = _identity(make, model, year, variant)
     bytes_path, meta_path = _paths(key)
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,6 +74,7 @@ def store(
                     "make": make,
                     "model": model,
                     "year": year,
+                    "variant": variant,
                     "url": url,
                 },
                 indent=2,

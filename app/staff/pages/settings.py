@@ -765,10 +765,12 @@ class SettingsPage(StaffPage):
 
     def _refresh_cache_label(self) -> None:
         try:
-            from app.services import image_cache
+            from app.services import api_cache, image_cache
             count, size = image_cache.stats()
+            api_count, api_size = api_cache.stats()
             self.cache_label.setText(
-                f"Image cache: {count} file(s), {size / 1024:.1f} KB.")
+                f"Image cache: {count} file(s), {size / 1024:.1f} KB. "
+                f"API lookups: {api_count} record(s), {api_size / 1024:.1f} KB.")
         except Exception:
             self.cache_label.setText("Image cache: unavailable.")
 
@@ -777,8 +779,8 @@ class SettingsPage(StaffPage):
                              detail="They re-download on demand."):
             return
         try:
-            from app.services import image_cache
-            removed = image_cache.clear()
+            from app.services import api_cache, image_cache
+            removed = image_cache.clear() + api_cache.clear()
         except Exception as exc:
             toast(self, describe(exc)[0], "error")
             return

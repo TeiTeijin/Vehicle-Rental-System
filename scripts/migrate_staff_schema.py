@@ -45,6 +45,31 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "USERS": [
         (
+            "region_code",
+            "VARCHAR(9) NULL",
+            "PSGC region chosen at customer sign-up; NULL for counter/legacy rows",
+        ),
+        (
+            "province_code",
+            "VARCHAR(9) NULL",
+            "PSGC province chosen at sign-up; NULL for Metro Manila or legacy rows",
+        ),
+        (
+            "city_municipality_code",
+            "VARCHAR(9) NULL",
+            "PSGC city/municipality chosen at sign-up; NULL for legacy rows",
+        ),
+        (
+            "barangay_code",
+            "VARCHAR(9) NULL",
+            "reserved for a barangay picker; NULL until the form asks for one",
+        ),
+        (
+            "street_address",
+            "VARCHAR(255) NULL",
+            "the street line the customer typed; `address` keeps the formatted copy",
+        ),
+        (
             "birthdate",
             "DATE NULL",
             "needed by the renting-age check; legacy rows stay NULL until "
@@ -476,6 +501,8 @@ def verify() -> bool:
             "flag_override_note", "flag_override_by", "flag_override_at",
         ],
         "USERS": [
+            "region_code", "province_code", "city_municipality_code",
+            "barangay_code", "street_address",
             "birthdate", "emergency_contact", "source", "is_active",
             "flag_reason", "flagged_at", "flagged_by",
             "licence_front_path", "licence_back_path", "must_change_password",
