@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -10,6 +12,11 @@ from pathlib import Path
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "cache" / "media"
 _META_SUFFIX = ".json"
 _BYTES_SUFFIX = ".img"
+#: Anything that is not a lowercase ASCII letter or digit. Make/model are
+#: staff-typed, so every path separator and `..` has to disappear here.
+_UNSAFE = re.compile(r"[^a-z0-9]+")
+_SLUG_LIMIT = 64
+_DIGEST_LENGTH = 12
 
 
 @dataclass(frozen=True)
@@ -19,16 +26,42 @@ class CachedImage:
 
 
 def _identity(make: str, model: str, year: int) -> str:
-    parts = [str(make).strip().lower(), str(model).strip().lower(), str(year).strip()]
-    return "-".join(parts).replace(" ", "-")
+    """A filesystem-safe key for one vehicle.
+
+    The readable slug comes from the lowercased identity; the SHA-256 digest
+    keeps two vehicles whose names slugify to the same text apart. The raw
+    values are hashed, so `../../evil` cannot contribute a path component.
+    """
+    make_text = str(make).strip()
+    model_text = str(model).strip()
+    year_text = str(year).strip()
+    raw = "\0".join((make_text.lower(), model_text.lower(), year_text))
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:_DIGEST_LENGTH]
+    slug = _UNSAFE.sub("-", f"{make_text}-{model_text}-{year_text}".lower()).strip("-")
+    slug = slug[:_SLUG_LIMIT].strip("-") or "vehicle"
+    return f"{slug}-{digest}"
 
 
 def _paths(key: str) -> tuple[Path, Path]:
-    return CACHE_DIR / f"{key}{_BYTES_SUFFIX}", CACHE_DIR / f"{key}{_META_SUFFIX}"
+    """Byte and metadata paths for a key, refusing to leave `CACHE_DIR`.
+
+    `_identity` already strips separators. This is the second line of
+    defence, in case a future caller passes a hand-built key.
+    """
+    root = CACHE_DIR.resolve()
+    bytes_path = (CACHE_DIR / f"{key}{_BYTES_SUFFIX}").resolve()
+    meta_path = (CACHE_DIR / f"{key}{_META_SUFFIX}").resolve()
+    for target in (bytes_path, meta_path):
+        if not target.is_relative_to(root):
+            raise ValueError(f"cache key escapes the cache directory: {key!r}")
+    return bytes_path, meta_path
 
 
 def load(make: str, model: str, year: int) -> CachedImage | None:
-    bytes_path, meta_path = _paths(_identity(make, model, year))
+    try:
+        bytes_path, meta_path = _paths(_identity(make, model, year))
+    except (OSError, ValueError):
+        return None
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         data = bytes_path.read_bytes()
@@ -51,8 +84,10 @@ def store(
 ) -> None:
     if not data:
         return
-    key = _identity(make, model, year)
-    bytes_path, meta_path = _paths(key)
+    try:
+        bytes_path, meta_path = _paths(_identity(make, model, year))
+    except (OSError, ValueError):
+        return
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
     except OSError:
