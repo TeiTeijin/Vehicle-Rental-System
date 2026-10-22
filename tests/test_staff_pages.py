@@ -1323,10 +1323,28 @@ class TestNewRentalPage:
     def test_the_count_comes_from_the_database(self, qapp, shell, branch):
         _built, context = branch
         with context.reading() as session:
-            total = session.query(Vehicle).count()
+            visible = (
+                session.query(Vehicle)
+                .filter(Vehicle.status.in_(("available", "rented", "reserved")))
+                .count()
+            )
         page = NewRentalPage(shell)
         page.refresh()
-        assert f"{total:,}" in page.count_label.text()
+        assert f"{visible:,}" in page.count_label.text()
+
+    def test_the_count_excludes_shop_and_retired_cars(self, qapp, shell, branch):
+        """The label and the rails describe the same set: no vanished cars."""
+        _built, context = branch
+        _add_vehicle(
+            context, make="Ford", model="Ranger", plate="FOR-001",
+            status="retired",
+        )
+        page = NewRentalPage(shell)
+        page.refresh()
+        while not page._exhausted:
+            page._load_page()
+        assert len(page.slots) == 6  # branch has 7 cars, 1 in the workshop
+        assert page.count_label.text() == "6 vehicles"
 
     def test_a_filter_narrows_the_sections_that_are_built(self, qapp, shell, branch):
         from app.services.vehicle_service import VehicleFilter
@@ -1411,7 +1429,7 @@ class TestNewRentalPage:
         page.filter_popover.price_group.min_rate.setValue(900_000)
         qapp_process(page)
         assert page.matched == 0
-        assert page.count_label.text() == "0 of 7 vehicles"
+        assert page.count_label.text() == "0 of 6 vehicles"
 
     def test_the_page_survives_a_failing_count(self, qapp, shell, branch, monkeypatch):
         from app.staff.pages import new_rental

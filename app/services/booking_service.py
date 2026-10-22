@@ -13,7 +13,6 @@ from app.models import Booking, Inspection_Report, Penalty, Vehicle
 from app.services import fleet_service, payment_service
 from app.services.errors import (
     ConflictError,
-    NotFoundError,
     StateError,
     ValidationError,
 )
@@ -259,13 +258,38 @@ def _to_domain_vehicle(vehicle: Vehicle) -> Car | Motorcycle:
     return Car(vehicle.make, vehicle.model, vehicle.year, vehicle.daily_rate)
 
 
-def active_bookings(session: Session, vehicle: Vehicle) -> list[Booking]:
+def _active_bookings_stmt(vehicle_id: int, *, for_update: bool = False):
+    """Active bookings for one vehicle, optionally as a locking read.
+
+    Under InnoDB's default REPEATABLE READ, a transaction's first plain SELECT
+    fixes its snapshot. A counter that already read the vehicle (the wizard's
+    pre-lock `session.get`) keeps that stale view even after it waits for the
+    vehicle row lock, so a plain overlap query can miss the booking the other
+    counter just committed. `FOR UPDATE` makes this a current read, which sees
+    the latest committed rows.
+
+    SQLite ignores the clause, so the suite can assert the compiled MySQL
+    statement and the non-locking behaviour but cannot prove the race is
+    closed. Required MySQL staging check, with a pre-lock read in each
+    session: two sessions read the same vehicle and window without locking,
+    then call `create_booking` concurrently. Exactly one must commit; the
+    other must fail with the overlap conflict instead of inserting.
+    """
+    stmt = select(Booking).where(
+        Booking.vehicle_id == vehicle_id,
+        Booking.status.in_(BLOCKING_STATUSES),
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    return stmt
+
+
+def active_bookings(
+    session: Session, vehicle: Vehicle, *, for_update: bool = False
+) -> list[Booking]:
     return list(
         session.execute(
-            select(Booking).where(
-                Booking.vehicle_id == vehicle.vehicle_id,
-                Booking.status.in_(BLOCKING_STATUSES),
-            )
+            _active_bookings_stmt(vehicle.vehicle_id, for_update=for_update)
         ).scalars()
     )
 
@@ -297,8 +321,20 @@ def check_licence(session: Session, user, on_date: date) -> None:
 
 
 def assert_available(
-    session: Session, vehicle: Vehicle, start_date: date, end_date: date
+    session: Session,
+    vehicle: Vehicle,
+    start_date: date,
+    end_date: date,
+    *,
+    for_update: bool = False,
 ) -> None:
+    """Reject a window the vehicle cannot take.
+
+    `for_update=True` makes the active-bookings read a locking/current read.
+    `create_booking` uses it after locking the vehicle row so a second counter
+    sees the first counter's committed booking; quote and preview callers keep
+    the plain read.
+    """
     if end_date < start_date:
         raise ValidationError(
             "The return date cannot be before the pick-up date.", field="end_date"
@@ -319,28 +355,15 @@ def assert_available(
         )
 
     clash = AvailabilityChecker.find_conflict(
-        start_date, end_date, active_bookings(session, vehicle)
+        start_date,
+        end_date,
+        active_bookings(session, vehicle, for_update=for_update),
     )
     if clash is not None:
         raise ConflictError(
             f"{vehicle.make} {vehicle.model} is already booked from "
             f"{clash.start_date:%d %b} to {clash.end_date:%d %b %Y}."
         )
-
-
-def _lock_vehicle_stmt(vehicle_id: int):
-    """The vehicle row, locked for the rest of the transaction.
-
-    On MySQL, two counters can pass the overlap check at the same instant and
-    both write a booking. Taking the vehicle row first makes the second wait,
-    then re-read the bookings the first one wrote. SQLite has no row locks and
-    ignores the clause, so the suite still exercises the path.
-    """
-    return (
-        select(Vehicle)
-        .where(Vehicle.vehicle_id == vehicle_id)
-        .with_for_update()
-    )
 
 
 def create_booking(
@@ -358,15 +381,14 @@ def create_booking(
             f"Unknown channel: {channel}. Choose one of {', '.join(CHANNELS)}.",
             field="channel",
         )
-    # Serialize the availability read per vehicle before asking whether the
-    # dates are free. See `_lock_vehicle_stmt`.
-    locked = session.execute(
-        _lock_vehicle_stmt(vehicle.vehicle_id)
-    ).scalar_one_or_none()
-    if locked is None:
-        raise NotFoundError(f"Vehicle #{vehicle.vehicle_id} does not exist.")
-    vehicle = locked
-    assert_available(session, vehicle, start_date, end_date)
+    # Serialize per vehicle and make both availability reads current reads.
+    # The lock blocks the other counter; the locking follow-up selects (the
+    # refresh plus the booking read) see through this transaction's earlier
+    # snapshot, so a committed booking from the first counter is visible.
+    # Flush first: refresh would otherwise discard a pending status change.
+    session.flush()
+    session.refresh(vehicle, with_for_update=True)
+    assert_available(session, vehicle, start_date, end_date, for_update=True)
     check_licence(session, user, start_date)
 
     total_cost = money(

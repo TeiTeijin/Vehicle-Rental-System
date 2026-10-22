@@ -385,10 +385,13 @@ def count_filtered_vehicles(
     filters: "VehicleFilter",
     *,
     available_only: bool = False,
+    statuses: tuple[str, ...] | None = None,
 ) -> int:
     query = session.query(func.count(Vehicle.vehicle_id))
     if available_only:
         query = query.filter(Vehicle.status == "available")
+    if statuses:
+        query = query.filter(Vehicle.status.in_(statuses))
     if not filters.is_empty():
         query = _apply_filter(query, filters)
     return int(query.scalar() or 0)

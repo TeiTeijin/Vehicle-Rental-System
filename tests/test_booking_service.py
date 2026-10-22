@@ -105,33 +105,82 @@ class TestCreateBooking:
         with pytest.raises(ConflictError, match="retired"):
             booking_service.create_booking(session, customer, vehicle, D5, D7)
 
-    def test_the_vehicle_row_lock_compiles_to_for_update_on_mysql(
+    def test_the_locking_bookings_read_compiles_to_for_update_on_mysql(
         self, session, vehicle
     ):
         from sqlalchemy.dialects import mysql
 
-        statement = booking_service._lock_vehicle_stmt(vehicle.vehicle_id)
-        compiled = str(
-            statement.compile(
-                dialect=mysql.dialect(),
-                compile_kwargs={"literal_binds": True},
-            )
-        )
-        assert "FOR UPDATE" in compiled.upper()
+        def _compiled(*, for_update):
+            return str(
+                booking_service._active_bookings_stmt(
+                    vehicle.vehicle_id, for_update=for_update
+                ).compile(
+                    dialect=mysql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            ).upper()
 
-    def test_create_booking_takes_the_vehicle_row_lock(
+        assert "FOR UPDATE" in _compiled(for_update=True)
+        # The quote/preview path stays a plain consistent read.
+        assert "FOR UPDATE" not in _compiled(for_update=False)
+
+    def test_create_booking_uses_the_locking_availability_path(
         self, session, customer, vehicle, monkeypatch
     ):
         seen = []
-        original = booking_service._lock_vehicle_stmt
+        original = booking_service.assert_available
 
-        def _spy(vehicle_id):
-            seen.append(vehicle_id)
-            return original(vehicle_id)
+        def _spy(session, vehicle, start_date, end_date, *, for_update=False):
+            seen.append(for_update)
+            return original(
+                session, vehicle, start_date, end_date, for_update=for_update
+            )
 
-        monkeypatch.setattr(booking_service, "_lock_vehicle_stmt", _spy)
+        monkeypatch.setattr(booking_service, "assert_available", _spy)
         booking_service.create_booking(session, customer, vehicle, D1, D3)
-        assert seen == [vehicle.vehicle_id]
+        assert seen == [True]
+
+    def test_create_booking_refreshes_the_vehicle_with_for_update(
+        self, session, customer, vehicle, monkeypatch
+    ):
+        from sqlalchemy.orm import Session
+
+        seen = []
+        real_refresh = Session.refresh
+
+        def _spy(self, instance, *args, **kwargs):
+            seen.append(kwargs.get("with_for_update", False))
+            return real_refresh(self, instance, *args, **kwargs)
+
+        monkeypatch.setattr(Session, "refresh", _spy)
+        booking_service.create_booking(session, customer, vehicle, D1, D3)
+        assert seen == [True]
+
+    def test_create_booking_issues_locking_reads_for_vehicle_and_bookings(
+        self, session, customer, vehicle
+    ):
+        """Both reads must be current reads, not the transaction's snapshot.
+
+        Events see the ORM statement before SQLite drops FOR UPDATE, so the
+        statement is compiled for MySQL to assert what production emits.
+        """
+        from sqlalchemy import event
+        from sqlalchemy.dialects import mysql
+
+        locking = []
+
+        @event.listens_for(session, "do_orm_execute")
+        def _record(state):
+            try:
+                sql = str(state.statement.compile(dialect=mysql.dialect()))
+            except Exception:  # noqa: BLE001 - not every statement is a SELECT
+                return
+            if "FOR UPDATE" in sql.upper():
+                locking.append(sql)
+
+        booking_service.create_booking(session, customer, vehicle, D1, D3)
+        assert any("`VEHICLE`" in sql for sql in locking), locking
+        assert any("`BOOKING`" in sql for sql in locking), locking
 
     def test_allows_a_booking_that_starts_the_day_one_ends(self, session, customer, vehicle):
         booking_service.create_booking(session, customer, vehicle, D1, D5)

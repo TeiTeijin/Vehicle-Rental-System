@@ -51,6 +51,11 @@ AVAILABILITY_DEBOUNCE_MS = 90
 #: scroll lands on cards that are already there rather than on grey slots.
 SECTION_PRELOAD_PX = 600
 
+#: Statuses New Rental shows. A car in the shop or retired cannot be booked;
+#: one that is out or reserved now can still take a later date. The rails and
+#: the count both read this tuple so they cannot disagree.
+VISIBLE_STATUSES: tuple[str, ...] = ("available", "rented", "reserved")
+
 #: Coalescing window for per-card media requests: a section coming into view
 #: asks about each of its cards; this makes that one resolver run.
 MEDIA_COALESCE_MS = 60
@@ -415,7 +420,7 @@ class NewRentalPage(StaffPage):
                     # A rented or reserved car can still be booked for later
                     # dates; only the shop and retired cars leave this view.
                     # Fleet remains the all-status list.
-                    statuses=("available", "rented", "reserved"),
+                    statuses=VISIBLE_STATUSES,
                     makes=page_brands,
                     filters=self._filters,
                 )
@@ -570,8 +575,12 @@ class NewRentalPage(StaffPage):
     def _update_count(self) -> None:
         try:
             with self.context.reading() as session:
-                matched = count_filtered_vehicles(session, self._filters)
-                total = count_filtered_vehicles(session, VehicleFilter())
+                matched = count_filtered_vehicles(
+                    session, self._filters, statuses=VISIBLE_STATUSES
+                )
+                total = count_filtered_vehicles(
+                    session, VehicleFilter(), statuses=VISIBLE_STATUSES
+                )
         except Exception as exc:  # noqa: BLE001
             message, _, _ = describe(exc)
             self.count_label.setText(f"Count unavailable: {message}")
