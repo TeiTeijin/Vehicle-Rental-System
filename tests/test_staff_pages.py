@@ -1718,6 +1718,26 @@ class TestBrandSection:
 
 
 class TestVehicleCard:
+    @pytest.fixture(autouse=True)
+    def offline_media(self, offline_media, monkeypatch):
+        """Tests here hand real photo URLs to cards and slots, so the
+        download transport gets a test double; the CarImages guards stay
+        in force (the chained fixture still blocks/records actual API
+        traffic and asserts at teardown)."""
+        from app.staff import vehicle_cards
+
+        class _FakeResponse:
+            status_code = 200
+            content = b""
+
+            def raise_for_status(self) -> None:
+                pass
+
+        monkeypatch.setattr(
+            vehicle_cards.requests, "get", lambda *a, **k: _FakeResponse()
+        )
+        yield
+
     def _vehicle(self, index: int = 7) -> RentalVehicle:
         return RentalVehicle(
             vehicle_id=index,

@@ -217,6 +217,12 @@ class TestModelUrl:
     def test_follow_sends_secret_once_without_following(self, ctx, monkeypatch):
         from app.services import carimages_client as ci
 
+        # The harness keeps the CarImages keys empty; this test asserts the
+        # auth plumbing itself, so it gets placeholder keys here and only
+        # here. The request stays fully faked -- no network is reachable.
+        monkeypatch.setattr(ci, "CI_API_KEY", "test-key")
+        monkeypatch.setattr(ci, "CI_API_SECRET", "test-secret")
+
         seen = {}
 
         class _Resp:

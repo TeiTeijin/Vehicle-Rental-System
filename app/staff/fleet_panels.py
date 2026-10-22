@@ -48,7 +48,7 @@ from app.staff import theme
 from app.staff.cards import Caption, SectionLabel
 from app.staff.feedback import describe
 from app.staff.rental_wizard import _StepBase, make_choice_button, make_status_box
-from app.staff.workers import media_pool
+from app.staff.workers import emit_safely, media_pool
 from app.utils.money import ZERO, money, pesos
 
 try:
@@ -158,7 +158,7 @@ class _MediaProbe(QRunnable):
         self._year = year
         self._category = category
         self._gen = gen
-        self._signals = signals
+        self._done = signals.done  # bound while the form panel is alive
 
     def run(self) -> None:
         try:
@@ -167,7 +167,7 @@ class _MediaProbe(QRunnable):
             )
         except Exception:  # noqa: BLE001 - doubt means retry later, never a crash
             status = "unreachable"
-        self._signals.done.emit(self._gen, status, self._make, self._model)
+        emit_safely(self._done, self._gen, status, self._make, self._model)
 
 
 def _hero_bytes(make: str, model: str, year: int) -> bytes | None:
@@ -693,7 +693,8 @@ class _MediaRefresh(QRunnable):
         super().__init__()
         self._context = context
         self._vehicle_id = vehicle_id
-        self._signals = signals
+        self._done = signals.done  # bound while the panel is alive
+        self._failed = signals.failed
         self._force = force
 
     def run(self) -> None:
@@ -703,7 +704,7 @@ class _MediaRefresh(QRunnable):
             with self._context.session() as session:
                 vehicle = session.get(Vehicle, self._vehicle_id)
                 if vehicle is None:
-                    self._signals.done.emit([])
+                    emit_safely(self._done, [])
                     return
                 if self._force:
                     session.query(Vehicle_Media).filter_by(
@@ -721,9 +722,9 @@ class _MediaRefresh(QRunnable):
                     for r in rows
                 ]
         except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
-            self._signals.failed.emit(exc)
+            emit_safely(self._failed, exc)
         else:
-            self._signals.done.emit(snapshot)
+            emit_safely(self._done, snapshot)
 
 
 class FleetDetailsPanel(_StepBase):

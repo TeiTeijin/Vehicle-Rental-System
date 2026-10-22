@@ -18,8 +18,19 @@ from __future__ import annotations
 from PySide6.QtCore import QThreadPool
 
 _MAX_LOADER_THREADS = 2
-_MAX_MEDIA_THREADS = 2
+#: NewRental's pool ran on Qt's default (6 threads) before the pools were
+#: shared; 6 keeps that ceiling now that every media worker is in one pool.
+_MAX_MEDIA_THREADS = 6
 
+# The two module globals below are load-bearing.
+#
+# The pools have no parent, so they are only ever destroyed when the
+# interpreter dies -- and ~QThreadPool waits for every thread that is still
+# running. If the last reference to a pool were dropped earlier (globals
+# cleared, module reloaded, references reassigned), that wait would run at
+# interpreter teardown and reintroduce the original hang. Never clear or
+# reassign these while a worker may still be running; `shutdown_pools` is
+# the only sanctioned stop, and it stays bounded.
 _loader_pool: QThreadPool | None = None
 _media_pool: QThreadPool | None = None
 
@@ -55,3 +66,19 @@ def shutdown_pools(timeout_ms: int = 2000) -> None:
             continue
         pool.clear()
         pool.waitForDone(timeout_ms)
+
+
+def emit_safely(signal, *args) -> None:
+    """Emit a signal whose owner (a page's QObject) may already be gone.
+
+    Workers started on the shared pools can outlive the page that enqueued
+    them, so they may emit into a deleted QObject, which raises
+    ``RuntimeError: Signal source has been deleted``. That is harmless -- the
+    page is gone and nobody is listening -- so it is dropped here and only
+    here. Anything else still propagates.
+    """
+    try:
+        signal.emit(*args)
+    except RuntimeError:
+        pass
+

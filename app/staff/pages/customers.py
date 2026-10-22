@@ -29,7 +29,7 @@ from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
 from app.staff.widgets import confirm, toast
-from app.staff.workers import loader_pool
+from app.staff.workers import emit_safely, loader_pool
 from app.utils.money import ZERO
 from app.widgets.skeleton import Skeleton
 
@@ -183,15 +183,16 @@ class _CustomersLoader(QRunnable):
         self._context = context
         self._filtr = filtr
         self._gen = gen
-        self._signals = signals
+        self._loaded = signals.loaded  # bound while the page is alive
+        self._failed = signals.failed
 
     def run(self) -> None:
         try:
             rows = _customer_rows(self._context, self._filtr)
         except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
-            self._signals.failed.emit(self._gen, exc)
+            emit_safely(self._failed, self._gen, exc)
         else:
-            self._signals.loaded.emit(self._gen, rows)
+            emit_safely(self._loaded, self._gen, rows)
 
 
 class CustomersPage(StaffPage):

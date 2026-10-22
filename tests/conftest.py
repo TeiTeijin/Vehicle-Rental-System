@@ -62,6 +62,10 @@ def session(engine) -> Session:
 # --------------------------------------------------------------------------
 
 
+class NetworkAccessBlocked(AssertionError):
+    """Raised by the offline-media harness when a test reaches the network."""
+
+
 @pytest.fixture(autouse=True)
 def offline_media(monkeypatch, tmp_path):
     """Keep every test off the network.
@@ -69,32 +73,40 @@ def offline_media(monkeypatch, tmp_path):
     - `media_service.get_or_fetch_media` returns no media rows, so GUI
       builders never spawn workers that would fetch anything.
     - `requests.get`/`requests.post` as used by the CarImages client raise
-      ``AssertionError``: a test that reaches the API fails loudly and
-      immediately instead of hanging in TLS. This is the guard that keeps
-      the suite off the down CarImages API.
+      ``NetworkAccessBlocked`` (an ``AssertionError``) and every blocked
+      call is recorded. Two things make the no-network guarantee real:
+      the immediate raise kills accidental calls where a test can see
+      them, and the teardown assertion below fails the test even when a
+      worker swallowed the exception.
     - the on-disk image cache is redirected into ``tmp_path``.
 
-    The client module also gets placeholder keys. The *environment* keys are
-    emptied (above) so nothing real can leak in from ``.env``; a handful of
-    unit tests assert the security headers are attached exactly once, which
-    needs a non-empty key to reach the (patched) request in the first place.
-
-    A test that intentionally exercises media behaviour (a later fixture or
-    test module shadowing this one) can override it by defining its own
-    `offline_media` fixture at module scope.
+    A test that intentionally exercises media behaviour shadows
+    `offline_media` with its own module-level fixture.
     """
     from app.services import carimages_client, image_cache, media_service
 
-    def _blocked(*args, **kwargs):
-        raise AssertionError("tests must never call the CarImages API")
+    blocked: list[tuple[str, tuple, dict]] = []
+
+    def _blocked(method):
+        def _wrapper(*args, **kwargs):
+            blocked.append((method, args, kwargs))
+            raise NetworkAccessBlocked(
+                "tests must never call the CarImages API: "
+                f"requests.{method}({args!r}, {kwargs!r})"
+            )
+
+        return _wrapper
 
     monkeypatch.setattr(media_service, "get_or_fetch_media", lambda *a, **k: [])
-    monkeypatch.setattr(carimages_client.requests, "get", _blocked)
-    monkeypatch.setattr(carimages_client.requests, "post", _blocked)
-    monkeypatch.setattr(carimages_client, "CI_API_KEY", "test-key")
-    monkeypatch.setattr(carimages_client, "CI_API_SECRET", "test-secret")
+    monkeypatch.setattr(carimages_client.requests, "get", _blocked("get"))
+    monkeypatch.setattr(carimages_client.requests, "post", _blocked("post"))
     monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path / "image-cache")
     yield
+    assert not blocked, (
+        f"{len(blocked)} network call(s) attempted while CarImages is offline; "
+        "patch the client instead of reaching the API: "
+        f"{blocked[:3]}"
+    )
 
 
 @pytest.fixture(scope="session")

@@ -13,6 +13,8 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
+from app.staff.workers import emit_safely
+
 
 class TableLoadSignals(QObject):
     loaded = Signal(int, object)
@@ -26,15 +28,19 @@ class TableLoadWorker(QRunnable):
         super().__init__()
         self._fetch = fetch
         self._gen = gen
-        self._signals = signals
+        # Bound once here, while the owning page is alive: a deleted owner
+        # raises the moment its attributes are touched, and the worker can
+        # outlive the page that started it.
+        self._loaded = signals.loaded
+        self._failed = signals.failed
 
     def run(self) -> None:
         try:
             result = self._fetch()
         except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
-            self._signals.failed.emit(self._gen, exc)
+            emit_safely(self._failed, self._gen, exc)
         else:
-            self._signals.loaded.emit(self._gen, result)
+            emit_safely(self._loaded, self._gen, result)
 
 
 class AsyncTable:
