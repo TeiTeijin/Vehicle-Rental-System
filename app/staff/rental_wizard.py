@@ -36,8 +36,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.models import Booking, Users, Vehicle
-from app.services import booking_service, customer_service, payment_service
-from app.services.booking_service import SCHEDULING_FEE
+from app.services import (
+    booking_service,
+    counter_service,
+    customer_service,
+    payment_service,
+)
 from app.services.receipt_service import generate_receipt_pdf
 from app.staff import theme
 from app.staff.cards import Caption, Card, MoneyNumber, SectionLabel
@@ -53,6 +57,9 @@ class WizardState:
     days: int = 1
     total: Decimal | None = None
     deposit: Decimal | None = None
+    scheduling_fee: Decimal | None = None
+    default_method: str = "cash"
+    default_channel: str = "walk_in"
     customer_id: int | None = None
     #: Staff-typed reason for proceeding past a customer flag. Written to
     #: the booking on Pay; NULL means no flag was overridden.
@@ -218,13 +225,8 @@ class SchedulePanel(_StepBase):
         total_row.addWidget(self.total_caption)
         total_row.addStretch(1)
         self._body.addLayout(total_row)
-        self._body.addWidget(
-            Caption(
-                f"Includes {pesos(SCHEDULING_FEE)} non-refundable scheduling fee. "
-                "Same-day return counts as 1 day.",
-                parent=self.card,
-            )
-        )
+        self.fee_caption = Caption("", parent=self.card)
+        self._body.addWidget(self.fee_caption)
 
         back, self.next_button = self._buttons("Continue")
         back.clicked.connect(self.backed.emit)
@@ -242,7 +244,7 @@ class SchedulePanel(_StepBase):
         try:
             with self._context.reading() as session:
                 vehicle = session.get(Vehicle, self._state.vehicle_id)
-                days, total = booking_service.quote_for(
+                q = counter_service.quote(
                     session,
                     vehicle,
                     self.start_edit.date().toPython(),
@@ -253,9 +255,13 @@ class SchedulePanel(_StepBase):
             self.total_caption.setText(_friendly(exc))
             self.next_button.setEnabled(False)
             return
-        self._days, self._total = days, total
-        self.total.set_amount(total)
-        self.total_caption.setText(f"for {days} day{'s' if days != 1 else ''}")
+        self._days, self._total = q.days, q.total
+        self.total.set_amount(q.total)
+        self.total_caption.setText(f"for {q.days} day{'s' if q.days != 1 else ''}")
+        self.fee_caption.setText(
+            f"Includes {pesos(q.scheduling_fee)} non-refundable scheduling fee. "
+            "Same-day return counts as 1 day."
+        )
         self.next_button.setEnabled(True)
 
     def _on_continue(self) -> None:
@@ -551,7 +557,12 @@ class PaymentPanel(_StepBase):
 
         total = state.total or money(0)
         deposit = state.deposit or money(0)
-        minimum = min(SCHEDULING_FEE, total) if total > 0 else SCHEDULING_FEE
+        fee = (
+            state.scheduling_fee
+            if state.scheduling_fee is not None
+            else booking_service.SCHEDULING_FEE
+        )
+        minimum = min(fee, total) if total > 0 else fee
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
@@ -567,7 +578,7 @@ class PaymentPanel(_StepBase):
         self._body.addLayout(form)
         self._body.addWidget(
             Caption(
-                f"Includes {pesos(SCHEDULING_FEE)} non-refundable scheduling fee. "
+                f"Includes {pesos(fee)} non-refundable scheduling fee. "
                 "Pay the minimum now and the rest at pick-up, or everything up front.",
                 parent=self.card,
             )
@@ -614,6 +625,12 @@ class PaymentPanel(_StepBase):
             methods.addLayout(cell, 1)
             self.method_buttons[method] = button
         self.method_buttons["cash"].setChecked(True)
+        initial_method = (
+            state.default_method
+            if state.default_method in self.method_buttons
+            else "cash"
+        )
+        self.method_buttons[initial_method].setChecked(True)
         self._body.addLayout(methods)
 
         ref_row = QFormLayout()
@@ -825,15 +842,19 @@ class RentalWizard:
         try:
             with self._context.reading() as session:
                 vehicle = session.get(Vehicle, self.state.vehicle_id)
-                days, total = booking_service.quote_for(
+                q = counter_service.quote(
                     session, vehicle, start.toPython(), end.toPython()
                 )
-                deposit = booking_service.deposit_for_vehicle(vehicle)
         except Exception as exc:  # noqa: BLE001 - inline, stay on step
             self._current._error.setText(_friendly(exc))
             self._current._error.setVisible(True)
             return
-        self.state.days, self.state.total, self.state.deposit = days, total, deposit
+        self.state.days = q.days
+        self.state.total = q.total
+        self.state.deposit = q.deposit
+        self.state.scheduling_fee = q.scheduling_fee
+        self.state.default_method = q.default_method
+        self.state.default_channel = q.default_channel
         panel = LicencePanel(
             self._context, self.state, self._overlay.scroll,
             preset_customer_id=self.state.customer_id,
@@ -881,8 +902,11 @@ class RentalWizard:
                     method=values["method"],
                     staff_id=staff_id,
                     reference_no=values.get("reference_no") or None,
+                    channel=self.state.default_channel,
                     flag_override_note=self.state.flag_override_note,
                     flag_override_by=staff_id,
+                    fee_floor=self.state.scheduling_fee,
+                    deposit=self.state.deposit,
                 )
                 balance = payment_service.booking_balance(session, booking)
                 receipt_path = generate_receipt_pdf(session, booking)

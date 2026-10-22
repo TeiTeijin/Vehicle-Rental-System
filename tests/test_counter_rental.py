@@ -13,7 +13,13 @@ from decimal import Decimal
 import pytest
 
 from app.models import Payment
-from app.services import booking_service, customer_service, payment_service
+from app.services import (
+    booking_service,
+    counter_service,
+    customer_service,
+    payment_service,
+    settings_service,
+)
 from app.services.booking_service import SCHEDULING_FEE
 from app.services.errors import ConflictError, StateError, ValidationError
 
@@ -176,6 +182,139 @@ class TestCompleteCounterRental:
         ]
         assert mine == []
         assert session.query(Payment).count() == before
+
+
+class TestCounterQuoteAgreement:
+    """The quote the wizard shows is the quote the Pay button records."""
+
+    def test_configured_deposit_is_both_displayed_and_recorded(
+        self, session, customer, staff, vehicle
+    ):
+        settings_service.set_value(session, "deposit_suv", "4000.00")
+        vehicle.vehicle_class = "suv"
+        start, end = _rental()
+        q = counter_service.quote(session, vehicle, start, end)
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=q.total,
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=q.scheduling_fee,
+            deposit=q.deposit,
+        )
+        assert payment_service.deposit_held(session, booking) == Decimal("4000.00")
+        deposit_row = next(p for p in booking.payments if p.kind == "deposit")
+        assert deposit_row.amount == Decimal("4000.00")
+
+    def test_configured_fee_is_the_recorded_minimum(
+        self, session, customer, staff, vehicle
+    ):
+        settings_service.set_value(session, "scheduling_fee", "500.00")
+        start, end = _rental()
+        q = counter_service.quote(session, vehicle, start, end)
+        assert q.scheduling_fee == Decimal("500.00")
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=q.scheduling_fee,
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=q.scheduling_fee,
+            deposit=q.deposit,
+        )
+        rental_row = next(p for p in booking.payments if p.kind == "rental")
+        assert rental_row.amount == Decimal("500.00")
+
+    def test_explicit_fee_floor_overrides_settings(
+        self, session, customer, staff, vehicle
+    ):
+        settings_service.set_value(session, "scheduling_fee", "500.00")
+        start, end = _rental()
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=Decimal("100.00"),
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=Decimal("100.00"),
+            deposit=Decimal("2500.00"),
+        )
+        rental_row = next(p for p in booking.payments if p.kind == "rental")
+        assert rental_row.amount == Decimal("100.00")
+
+    def test_zero_deposit_records_no_deposit_row(
+        self, session, customer, staff, vehicle
+    ):
+        start, end = _rental()
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=SCHEDULING_FEE,
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=SCHEDULING_FEE,
+            deposit=Decimal("0.00"),
+        )
+        assert [p.kind for p in booking.payments] == ["rental"]
+        assert payment_service.deposit_held(session, booking) == Decimal("0.00")
+
+    @pytest.mark.parametrize("keyword", ["fee_floor", "deposit"])
+    def test_negative_overrides_are_rejected_without_writing(
+        self, session, customer, staff, vehicle, keyword
+    ):
+        start, end = _rental()
+        before = session.query(Payment).count()
+        with pytest.raises(ValidationError, match="cannot be negative"):
+            booking_service.complete_counter_rental(
+                session,
+                user=customer,
+                vehicle=vehicle,
+                start_date=start,
+                end_date=end,
+                rental_amount=SCHEDULING_FEE,
+                method="cash",
+                staff_id=staff.user_id,
+                **{keyword: Decimal("-1.00")},
+            )
+        session.rollback()
+        assert session.query(Payment).count() == before
+        mine = [
+            b
+            for b in session.query(booking_service.Booking).all()
+            if b.user_id == customer.user_id
+        ]
+        assert mine == []
+
+    def test_channel_override_is_recorded(
+        self, session, customer, staff, vehicle
+    ):
+        start, end = _rental()
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=SCHEDULING_FEE,
+            method="cash",
+            staff_id=staff.user_id,
+            channel="online",
+            fee_floor=SCHEDULING_FEE,
+        )
+        assert booking.channel == "online"
 
 
 class TestDepositSettlement:

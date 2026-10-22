@@ -5271,6 +5271,62 @@ class TestRentalWizard:
         finally:
             overlay.hide_overlay()
 
+    def test_payment_panel_uses_configured_fee_and_defaults(
+        self, qapp, shell, branch
+    ):
+        from PySide6.QtWidgets import QLabel
+
+        from app.services import settings_service
+        from app.staff.rental_wizard import PaymentPanel
+
+        _built, context = branch
+        with context.session() as session:
+            settings_service.set_value(session, "scheduling_fee", "500.00")
+            settings_service.set_value(session, "default_payment_method", "gcash")
+            settings_service.set_value(session, "default_channel", "online")
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            schedule_step = wizard._current
+            assert "500.00" in schedule_step.fee_caption.text()
+
+            schedule_step._on_continue()
+            qapp_process(page)
+            licence_step = wizard._current
+            with context.reading() as session:
+                licence = (
+                    session.query(Users)
+                    .filter(
+                        Users.role == "customer",
+                        Users.license_expiry > TODAY,
+                    )
+                    .first()
+                    .license_number
+                )
+            licence_step.licence_edit.setText(licence)
+            licence_step.find_button.click()
+            qapp_process(page)
+            licence_step.next_button.click()
+            qapp_process(page)
+
+            pay_step = wizard._current
+            assert isinstance(pay_step, PaymentPanel)
+            assert wizard.state.scheduling_fee == Decimal("500.00")
+            assert wizard.state.deposit == Decimal("2500.00")
+            assert wizard.state.default_method == "gcash"
+            assert wizard.state.default_channel == "online"
+            assert "3,000.00" in pay_step.min_button.text()  # 500 fee + 2,500 deposit
+            fee_captions = [
+                label.text()
+                for label in pay_step.findChildren(QLabel)
+                if label.text().startswith("Includes")
+            ]
+            assert fee_captions and "500.00" in fee_captions[0]
+            assert pay_step.method_buttons["gcash"].isChecked() is True
+            assert pay_step.ref_edit.isEnabled() is True
+        finally:
+            overlay.hide_overlay()
+
     def test_schedule_back_returns_to_details(self, qapp, shell, branch):
         from PySide6.QtWidgets import QPushButton
 

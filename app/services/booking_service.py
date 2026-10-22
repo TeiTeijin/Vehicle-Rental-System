@@ -151,14 +151,32 @@ def complete_counter_rental(
     channel: str = "walk_in",
     flag_override_note: str | None = None,
     flag_override_by: int | None = None,
+    fee_floor: Decimal | None = None,
+    deposit: Decimal | None = None,
 ) -> tuple[Booking, bool]:
     """The wizard's Pay button: booking + payments + confirm-if-settled.
 
-    `rental_amount` is the rental-kind payment: anything from SCHEDULING_FEE
-    (minimum that locks the dates) up to the full total. The deposit is
+    `rental_amount` is the rental-kind payment: anything from the scheduling
+    fee (minimum that locks the dates) up to the full total. The deposit is
     always collected in full alongside it. Returns (booking, confirmed).
     The caller commits: any raise rolls everything back, nothing half-written.
+
+    `fee_floor` and `deposit` are the exact values the wizard displayed, from
+    `counter_service.quote`. When omitted, the current branch settings are
+    read so non-wizard callers keep the old behaviour.
     """
+    if fee_floor is not None:
+        fee_floor = money(fee_floor, field="fee_floor")
+        if fee_floor < ZERO:
+            raise ValidationError(
+                "The scheduling fee cannot be negative.", field="fee_floor"
+            )
+    if deposit is not None:
+        deposit = money(deposit, field="deposit")
+        if deposit < ZERO:
+            raise ValidationError(
+                "The security deposit cannot be negative.", field="deposit"
+            )
     booking = create_booking(
         session, user, vehicle, start_date, end_date,
         created_by=staff_id, channel=channel,
@@ -173,10 +191,13 @@ def complete_counter_rental(
     pay = money(rental_amount, field="rental_amount")
     try:
         from app.services import settings_service as _settings
-        fee_floor = _settings.scheduling_fee(session)
+        if fee_floor is None:
+            fee_floor = _settings.scheduling_fee(session)
         gcash_required = _settings.get_bool(session, "gcash_ref_required")
     except Exception:
-        fee_floor, gcash_required = SCHEDULING_FEE, True
+        if fee_floor is None:
+            fee_floor = SCHEDULING_FEE
+        gcash_required = True
     if pay < fee_floor:
         raise ValidationError(
             f"At least the {fee_floor} scheduling fee is due today.",
@@ -196,19 +217,21 @@ def complete_counter_rental(
         reference_no=reference_no,
         note="Counter payment",
     )
-    try:
-        from app.services import settings_service as _settings2
-        deposit = _settings2.deposit_for_class(
-            session, getattr(vehicle, "vehicle_class", None))
-    except Exception:
-        deposit = deposit_for_vehicle(vehicle)
-    payment_service.record_payment(
-        session, booking, deposit, method,
-        kind="deposit",
-        recorded_by=staff_id,
-        reference_no=reference_no if method == "gcash" else None,
-        note="Refundable security deposit",
-    )
+    if deposit is None:
+        try:
+            from app.services import settings_service as _settings2
+            deposit = _settings2.deposit_for_class(
+                session, getattr(vehicle, "vehicle_class", None))
+        except Exception:
+            deposit = deposit_for_vehicle(vehicle)
+    if deposit > ZERO:
+        payment_service.record_payment(
+            session, booking, deposit, method,
+            kind="deposit",
+            recorded_by=staff_id,
+            reference_no=reference_no if method == "gcash" else None,
+            note="Refundable security deposit",
+        )
     # Walk-ins are verified in person, so they skip the pending review that
     # online reservations wait in. Payment state lives separately in the
     # balance: a fee-only walk-in is confirmed with OUTSTANDING due.
