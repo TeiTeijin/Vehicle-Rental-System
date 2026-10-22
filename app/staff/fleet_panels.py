@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from PySide6.QtCore import QDate, Qt, QTimer, QUrl, Signal, QObject, QRunnable, QThreadPool
+from PySide6.QtCore import QDate, Qt, QTimer, QUrl, Signal, QObject, QRunnable
 from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -48,6 +48,7 @@ from app.staff import theme
 from app.staff.cards import Caption, SectionLabel
 from app.staff.feedback import describe
 from app.staff.rental_wizard import _StepBase, make_choice_button, make_status_box
+from app.staff.workers import media_pool
 from app.utils.money import ZERO, money, pesos
 
 try:
@@ -309,8 +310,7 @@ class VehicleFormPanel(_StepBase):
 
         # Spelling probe: debounced, off-thread, advisory only -- a miss
         # never blocks the save (the API may simply be down).
-        self._probe_pool = QThreadPool(self)
-        self._probe_pool.setMaxThreadCount(1)
+        self._probe_pool = media_pool()
         self._probe_signals = _ProbeSignals(self)
         self._probe_signals.done.connect(self._on_probe_done)
         self._probe_gen = 0
@@ -743,8 +743,7 @@ class FleetDetailsPanel(_StepBase):
         self._media_loaded = False
         #: Manual Refresh toasts; the silent open-fetch stays quiet.
         self._quiet_refresh = False
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._pool = media_pool()
         self._media_signals = _MediaSignals(self)
         self._media_signals.done.connect(self._on_media_done)
         self._media_signals.failed.connect(self._on_media_failed)

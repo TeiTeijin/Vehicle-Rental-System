@@ -13,8 +13,10 @@ import os
 from datetime import date, datetime, timedelta
 
 os.environ["DATABASE_URL"] = "sqlite://"
-os.environ.setdefault("CI_API_KEY", "test-key")
-os.environ.setdefault("CI_API_SECRET", "test-secret")
+# Keys start empty: no test session may reach the CarImages API (it is
+# externally down and anything cached in .env must not leak into tests).
+os.environ["CI_API_KEY"] = ""
+os.environ["CI_API_SECRET"] = ""
 
 import pytest
 from sqlalchemy import create_engine
@@ -53,6 +55,58 @@ def session(engine) -> Session:
     with Session(engine, future=True) as session:
         yield session
         session.rollback()
+
+
+# --------------------------------------------------------------------------
+# Offline media / no-network harness
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def offline_media(monkeypatch, tmp_path):
+    """Keep every test off the network.
+
+    - `media_service.get_or_fetch_media` returns no media rows, so GUI
+      builders never spawn workers that would fetch anything.
+    - `requests.get`/`requests.post` as used by the CarImages client raise
+      ``AssertionError``: a test that reaches the API fails loudly and
+      immediately instead of hanging in TLS. This is the guard that keeps
+      the suite off the down CarImages API.
+    - the on-disk image cache is redirected into ``tmp_path``.
+
+    The client module also gets placeholder keys. The *environment* keys are
+    emptied (above) so nothing real can leak in from ``.env``; a handful of
+    unit tests assert the security headers are attached exactly once, which
+    needs a non-empty key to reach the (patched) request in the first place.
+
+    A test that intentionally exercises media behaviour (a later fixture or
+    test module shadowing this one) can override it by defining its own
+    `offline_media` fixture at module scope.
+    """
+    from app.services import carimages_client, image_cache, media_service
+
+    def _blocked(*args, **kwargs):
+        raise AssertionError("tests must never call the CarImages API")
+
+    monkeypatch.setattr(media_service, "get_or_fetch_media", lambda *a, **k: [])
+    monkeypatch.setattr(carimages_client.requests, "get", _blocked)
+    monkeypatch.setattr(carimages_client.requests, "post", _blocked)
+    monkeypatch.setattr(carimages_client, "CI_API_KEY", "test-key")
+    monkeypatch.setattr(carimages_client, "CI_API_SECRET", "test-secret")
+    monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path / "image-cache")
+    yield
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Shared QApplication; bounded pool teardown at session end."""
+    from PySide6.QtWidgets import QApplication
+
+    from app.staff.workers import shutdown_pools
+
+    app = QApplication.instance() or QApplication([])
+    yield app
+    shutdown_pools(1000)
 
 
 # --------------------------------------------------------------------------

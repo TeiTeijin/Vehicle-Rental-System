@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from functools import partial
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt, QUrl
+from PySide6.QtCore import QObject, QRunnable, QTimer, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -29,6 +29,7 @@ from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
 from app.staff.widgets import confirm, toast
+from app.staff.workers import loader_pool
 from app.utils.money import ZERO
 from app.widgets.skeleton import Skeleton
 
@@ -260,8 +261,7 @@ class CustomersPage(StaffPage):
         self._customer_overlay = None
 
         # -- async reload machinery (whole-page shimmer) ------------------
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._pool = loader_pool()
         self._load_signals = _CustomersLoadSignals(self)
         self._load_signals.loaded.connect(self._on_rows_loaded)
         self._load_signals.failed.connect(self._on_rows_failed)

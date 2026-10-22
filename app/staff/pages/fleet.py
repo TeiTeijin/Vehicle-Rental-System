@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from functools import partial
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
+from PySide6.QtCore import QObject, QRunnable, QTimer, Signal, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -28,6 +28,7 @@ from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
 from app.staff.widgets import confirm, toast
+from app.staff.workers import loader_pool, media_pool
 from app.widgets.skeleton import Skeleton
 
 
@@ -211,11 +212,9 @@ class FleetPage(StaffPage):
         self._pending_focus: str | None = None
 
         # -- async reload machinery (whole-page shimmer) ------------------
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._pool = loader_pool()
         # Media warming gets its own pool so a slow photo fetch never holds up list reloads.
-        self._media_pool = QThreadPool(self)
-        self._media_pool.setMaxThreadCount(2)
+        self._media_pool = media_pool()
         self._load_signals = _FleetLoadSignals(self)
         self._load_signals.loaded.connect(self._on_rows_loaded)
         self._load_signals.failed.connect(self._on_rows_failed)

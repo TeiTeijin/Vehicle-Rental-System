@@ -163,12 +163,10 @@ class ReportsPage(StaffPage):
             self._stack.addWidget(panel)
 
         # -- shared async machinery (one pool, shimmer-then-rows) ------------
-        from PySide6.QtCore import QThreadPool
-
         from app.staff.async_load import AsyncTable
+        from app.staff.workers import loader_pool
 
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._pool = loader_pool()
         self._async = {
             key: AsyncTable(self._pool, panel.table, self)
             for key, panel in self._panels.items()

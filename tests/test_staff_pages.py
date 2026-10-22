@@ -99,8 +99,11 @@ TODAY = date.today()
 def qapp():
     from PySide6.QtWidgets import QApplication
 
+    from app.staff.workers import shutdown_pools
+
     app = QApplication.instance() or QApplication([])
     yield app
+    shutdown_pools(1000)
 
 
 # --------------------------------------------------------------------------

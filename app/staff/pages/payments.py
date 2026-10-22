@@ -214,12 +214,12 @@ class PaymentsPage(StaffPage):
         )
 
         # -- shared async machinery (one pool, shimmer-then-rows) ------------
-        from PySide6.QtCore import QTimer, QThreadPool
+        from PySide6.QtCore import QTimer
 
         from app.staff.async_load import AsyncTable
+        from app.staff.workers import loader_pool
 
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._pool = loader_pool()
         self._takings_async = AsyncTable(self._pool, self.takings, self)
         self._outstanding_async = AsyncTable(self._pool, self.outstanding, self)
         #: Keystroke quiet period: rapid typing becomes one reload, and the

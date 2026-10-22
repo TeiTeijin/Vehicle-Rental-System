@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -36,6 +36,7 @@ from app.staff.metrics import (
 )
 from app.staff.pages.base import StaffPage
 from app.staff.vehicle_cards import MediaResolver, to_rental_vehicle
+from app.staff.workers import media_pool
 
 #: Brands appended per scroll gesture. Not a page break -- brands are appended as
 #: the list is scrolled, so this only sets how many queries one gesture makes.
@@ -80,7 +81,7 @@ class NewRentalPage(StaffPage):
     def __init__(self, shell) -> None:
         super().__init__(shell, "New Rental", "Write a rental for a walk-in customer.")
 
-        self._pool = QThreadPool(self)
+        self._pool = media_pool()
         self._brands: list[str] = []
         self._offset = 0
         self._exhausted = False

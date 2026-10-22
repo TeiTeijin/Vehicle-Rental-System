@@ -122,12 +122,12 @@ class InspectionsPage(StaffPage):
         )
 
         # -- shared async machinery (one pool, shimmer-then-rows) ------------
-        from PySide6.QtCore import QTimer, QThreadPool
+        from PySide6.QtCore import QTimer
 
         from app.staff.async_load import AsyncTable
+        from app.staff.workers import loader_pool
 
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._pool = loader_pool()
         self._table_async = AsyncTable(self._pool, self.table, self)
         #: Keystroke quiet period: rapid typing becomes one reload, and the
         #: tools stay live while only the table shimmers.
