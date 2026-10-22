@@ -119,6 +119,21 @@ class TestRetire:
         assert car.retired_at is None
 
 
+class TestStatusPolicy:
+    def test_maintenance_and_retired_always_block_a_booking(self):
+        assert fleet_service.ALWAYS_BLOCKING_STATUSES == (
+            "maintenance",
+            "retired",
+        )
+
+    def test_is_rentable_still_means_handover_ready(self):
+        assert fleet_service.is_rentable(Vehicle(status="available")) is True
+        assert fleet_service.is_rentable(Vehicle(status="rented")) is False
+        assert fleet_service.is_rentable(Vehicle(status="reserved")) is False
+        assert fleet_service.is_rentable(Vehicle(status="maintenance")) is False
+        assert fleet_service.is_rentable(Vehicle(status="retired")) is False
+
+
 class TestBulkRate:
     def test_bulk_writes_rate_and_logs(self, ctx):
         context, car_id = ctx

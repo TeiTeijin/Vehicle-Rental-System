@@ -412,7 +412,10 @@ class NewRentalPage(StaffPage):
                 rows = showcase_vehicle_rows(
                     session,
                     category=None,
-                    statuses=None,
+                    # A rented or reserved car can still be booked for later
+                    # dates; only the shop and retired cars leave this view.
+                    # Fleet remains the all-status list.
+                    statuses=("available", "rented", "reserved"),
                     makes=page_brands,
                     filters=self._filters,
                 )

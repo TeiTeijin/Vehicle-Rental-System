@@ -11,7 +11,12 @@ from app.domain.rental_calculator import RentalCalculator
 from app.domain.vehicle_types import Car, Motorcycle
 from app.models import Booking, Inspection_Report, Penalty, Vehicle
 from app.services import fleet_service, payment_service
-from app.services.errors import ConflictError, StateError, ValidationError
+from app.services.errors import (
+    ConflictError,
+    NotFoundError,
+    StateError,
+    ValidationError,
+)
 from app.utils.money import ZERO, money
 
 #: Statuses that still hold the vehicle for their dates.
@@ -307,7 +312,7 @@ def assert_available(
             f"{workshop.description}"
         )
 
-    if not fleet_service.is_rentable(vehicle):
+    if vehicle.status in fleet_service.ALWAYS_BLOCKING_STATUSES:
         raise ConflictError(
             f"{vehicle.make} {vehicle.model} is currently {vehicle.status} and "
             "cannot be booked."
@@ -321,6 +326,21 @@ def assert_available(
             f"{vehicle.make} {vehicle.model} is already booked from "
             f"{clash.start_date:%d %b} to {clash.end_date:%d %b %Y}."
         )
+
+
+def _lock_vehicle_stmt(vehicle_id: int):
+    """The vehicle row, locked for the rest of the transaction.
+
+    On MySQL, two counters can pass the overlap check at the same instant and
+    both write a booking. Taking the vehicle row first makes the second wait,
+    then re-read the bookings the first one wrote. SQLite has no row locks and
+    ignores the clause, so the suite still exercises the path.
+    """
+    return (
+        select(Vehicle)
+        .where(Vehicle.vehicle_id == vehicle_id)
+        .with_for_update()
+    )
 
 
 def create_booking(
@@ -338,6 +358,14 @@ def create_booking(
             f"Unknown channel: {channel}. Choose one of {', '.join(CHANNELS)}.",
             field="channel",
         )
+    # Serialize the availability read per vehicle before asking whether the
+    # dates are free. See `_lock_vehicle_stmt`.
+    locked = session.execute(
+        _lock_vehicle_stmt(vehicle.vehicle_id)
+    ).scalar_one_or_none()
+    if locked is None:
+        raise NotFoundError(f"Vehicle #{vehicle.vehicle_id} does not exist.")
+    vehicle = locked
     assert_available(session, vehicle, start_date, end_date)
     check_licence(session, user, start_date)
 

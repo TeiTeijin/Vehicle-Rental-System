@@ -15,7 +15,14 @@ from app.utils.money import money
 VEHICLE_STATUSES = ("available", "reserved", "rented", "maintenance", "retired")
 
 #: Statuses a new rental may start from (`reserved` is never stored).
+#: This answers "can it be handed over right now", not "can it be booked":
+#: a rented or reserved vehicle is still bookable for later dates.
 RENTABLE_STATUSES = ("available",)
+
+#: Statuses that block every window regardless of the dates: the vehicle is
+#: off the road (in the shop) or gone for good. Every other status is judged
+#: by whether a live booking actually overlaps the requested dates.
+ALWAYS_BLOCKING_STATUSES = ("maintenance", "retired")
 
 #: Legal status moves, keyed by the current status. Retiring out of `rented`
 #: is refused (check the vehicle in first); the active-booking guard in

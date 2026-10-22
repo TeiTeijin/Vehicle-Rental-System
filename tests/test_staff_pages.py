@@ -1140,14 +1140,31 @@ class TestNewRentalPage:
         page = NewRentalPage(shell)
         page.refresh()
 
-    def test_every_vehicle_gets_a_slot_whatever_its_status(self, shell, branch):
-        _built, context = branch
-        with context.reading() as session:
-            total = session.query(Vehicle).count()
+    def test_new_rental_offers_only_plausibly_rentable_vehicles(
+        self, shell, branch
+    ):
+        """Shop and retired cars are gone; rented/reserved stay for later dates."""
+        built, context = branch
+        reserved = _add_vehicle(
+            context, make="Honda", model="Civic", plate="HON-001",
+            status="reserved",
+        )
+        retired = _add_vehicle(
+            context, make="Ford", model="Ranger", plate="FOR-001",
+            status="retired",
+        )
+
         page = NewRentalPage(shell)
         page.refresh()
-        assert total > 0
-        assert len(page.slots) == total
+        while not page._exhausted:
+            page._load_page()
+
+        shown = {slot.vehicle.vehicle_id for slot in page.slots}
+        assert reserved in shown
+        assert built.out_car.vehicle_id in shown  # currently rented
+        assert built.free_car.vehicle_id in shown
+        assert built.shop_car.vehicle_id not in shown  # maintenance
+        assert retired not in shown
 
     def test_the_page_loads_one_page_of_brands_at_a_time(self, shell, branch, monkeypatch):
         from app.staff.pages import new_rental
@@ -5069,7 +5086,36 @@ class TestVehicleDetailsDialog:
         dialog.end_edit.setDate(today.addDays(3))
         dialog.check_button.click()
         assert "Not available" in dialog.check_result.text()
+        # No prefill: the wizard must not silently reuse the clashing dates.
+        assert dialog.checked_window is None
+
+    def test_the_booking_end_day_is_free_again(self, qapp, branch):
+        """The shared rule is half-open: returning on the 4th frees the 4th."""
+        from PySide6.QtCore import QDate
+
+        vid = self._booked_vehicle(branch)
+        _built, context = branch
+        dialog = self._dialog(context, vid)
+        today = QDate.currentDate()
+        dialog.start_edit.setDate(today.addDays(4))
+        dialog.end_edit.setDate(today.addDays(5))
+        dialog.check_button.click()
+        assert dialog.check_error.isHidden() is True
+        assert "Available" in dialog.check_result.text()
         assert dialog.checked_window is not None
+
+    def test_the_checker_blocks_a_vehicle_in_the_workshop(self, qapp, branch):
+        from PySide6.QtCore import QDate
+
+        built, context = branch
+        dialog = self._dialog(context, built.shop_car.vehicle_id)
+        today = QDate.currentDate()
+        dialog.start_edit.setDate(today.addDays(30))
+        dialog.end_edit.setDate(today.addDays(31))
+        dialog.check_button.click()
+        assert "Not available" in dialog.check_result.text()
+        assert "maintenance" in dialog.check_result.text()
+        assert dialog.checked_window is None
 
     def test_overlay_rent_carries_the_checked_window(self, qapp, shell, branch):
         from PySide6.QtCore import QDate

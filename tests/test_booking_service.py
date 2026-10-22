@@ -16,9 +16,11 @@ from app.services.errors import ConflictError, StateError, ValidationError
 
 TODAY = date(2026, 9, 10)
 D1 = date(2026, 9, 1)
+D2 = date(2026, 9, 2)
 D3 = date(2026, 9, 3)
 D5 = date(2026, 9, 5)
 D6 = date(2026, 9, 6)
+D7 = date(2026, 9, 7)
 D8 = date(2026, 9, 8)
 
 
@@ -71,6 +73,66 @@ class TestCreateBooking:
         second = booking_service.create_booking(session, customer, vehicle, D5, D8)
         assert second.booking_id is not None
 
+    def test_a_currently_rented_vehicle_can_be_booked_after_its_return(
+        self, session, customer, vehicle, staff
+    ):
+        vehicle.status = "rented"
+        existing = booking_service.create_booking(session, customer, vehicle, D1, D3)
+        existing.status = "ongoing"
+        session.flush()
+        future = booking_service.create_booking(session, customer, vehicle, D5, D7)
+        assert future.booking_id is not None
+
+    def test_a_reserved_vehicle_can_be_booked_for_a_free_window(
+        self, session, customer, vehicle
+    ):
+        vehicle.status = "reserved"
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D3)
+        assert booking.booking_id is not None
+
+    def test_a_reserved_vehicle_still_honours_an_overlapping_booking(
+        self, session, customer, vehicle
+    ):
+        vehicle.status = "reserved"
+        booking_service.create_booking(session, customer, vehicle, D1, D3)
+        with pytest.raises(ConflictError, match="already booked"):
+            booking_service.create_booking(session, customer, vehicle, D2, D5)
+
+    def test_a_retired_vehicle_is_refused_even_for_free_dates(
+        self, session, customer, vehicle
+    ):
+        vehicle.status = "retired"
+        with pytest.raises(ConflictError, match="retired"):
+            booking_service.create_booking(session, customer, vehicle, D5, D7)
+
+    def test_the_vehicle_row_lock_compiles_to_for_update_on_mysql(
+        self, session, vehicle
+    ):
+        from sqlalchemy.dialects import mysql
+
+        statement = booking_service._lock_vehicle_stmt(vehicle.vehicle_id)
+        compiled = str(
+            statement.compile(
+                dialect=mysql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        assert "FOR UPDATE" in compiled.upper()
+
+    def test_create_booking_takes_the_vehicle_row_lock(
+        self, session, customer, vehicle, monkeypatch
+    ):
+        seen = []
+        original = booking_service._lock_vehicle_stmt
+
+        def _spy(vehicle_id):
+            seen.append(vehicle_id)
+            return original(vehicle_id)
+
+        monkeypatch.setattr(booking_service, "_lock_vehicle_stmt", _spy)
+        booking_service.create_booking(session, customer, vehicle, D1, D3)
+        assert seen == [vehicle.vehicle_id]
+
     def test_allows_a_booking_that_starts_the_day_one_ends(self, session, customer, vehicle):
         booking_service.create_booking(session, customer, vehicle, D1, D5)
         assert booking_service.is_reserved_between(session, vehicle, D5, D8) is False
@@ -104,12 +166,14 @@ class TestCreateBooking:
 
 
 class TestBookingRefusals:
-    def test_refuses_a_vehicle_out_on_rent(self, session, customer, vehicle, staff):
+    def test_refuses_dates_that_overlap_an_ongoing_rental(
+        self, session, customer, vehicle, staff
+    ):
         first = booking_service.create_booking(session, customer, vehicle, D1, D6)
         booking_service.check_in(session, first, staff, 42000, "full")
         assert vehicle.status == "rented"
-        with pytest.raises(ConflictError, match="rented"):
-            booking_service.create_booking(session, customer, vehicle, D6, D8)
+        with pytest.raises(ConflictError, match="already booked"):
+            booking_service.create_booking(session, customer, vehicle, D5, D8)
 
     def test_refuses_a_vehicle_in_the_workshop(self, session, vehicle):
         fleet_service.schedule_maintenance(
@@ -129,7 +193,7 @@ class TestBookingRefusals:
         with pytest.raises(ConflictError, match="workshop"):
             booking_service.assert_available(session, vehicle, D1, D5)
 
-    def test_a_workshop_date_range_is_free_again_once_the_car_is_out_of_it(self, session, vehicle):
+    def test_a_vehicle_in_the_workshop_is_blocked_even_after_the_job_ends(self, session, vehicle):
         fleet_service.schedule_maintenance(session, vehicle, "Brake pads", D1, D5, 4500)
         with pytest.raises(ConflictError, match="currently maintenance"):
             booking_service.assert_available(session, vehicle, D5, D8)

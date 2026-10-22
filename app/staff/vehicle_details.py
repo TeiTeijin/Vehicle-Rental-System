@@ -39,7 +39,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.models import Booking, Maintenance_Record, Vehicle
-from app.services import image_cache
+from app.services import booking_service, image_cache
+from app.services.errors import ConflictError
 from app.staff import icons, theme
 from app.staff.cards import (
     Caption,
@@ -255,30 +256,6 @@ class VehicleDetailsPanel(QWidget):
                 "maintenance": maintenance_rows,
             }
 
-    def _conflicts(self, start, end) -> list[dict]:
-        """Active bookings overlapping the requested [start, end] dates."""
-        with self._context.reading() as session:
-            rows = (
-                session.query(Booking)
-                .filter(
-                    Booking.vehicle_id == self._vehicle_id,
-                    Booking.status.in_(ACTIVE_BOOKING_STATES),
-                    Booking.start_date <= end,
-                    Booking.end_date >= start,
-                )
-                .order_by(Booking.start_date)
-                .all()
-            )
-            return [
-                {
-                    "ref": row.booking_id,
-                    "customer": row.user.full_name if row.user else DASH,
-                    "start": row.start_date,
-                    "end": row.end_date,
-                }
-                for row in rows
-            ]
-
     # -- layout ---------------------------------------------------------------
 
     def _build(self) -> None:
@@ -461,23 +438,31 @@ class VehicleDetailsPanel(QWidget):
         self.check_error.setVisible(False)
 
         start_py, end_py = start.toPython(), end.toPython()
-        clashes = self._conflicts(start_py, end_py)
-        self.checked_window = (start, end)
-        if clashes:
-            first = clashes[0]
-            self.check_result.setText(
-                f"Not available \u2014 clashes with booking #{first['ref']} "
-                f"({first['customer']}, {first['start']:%d %b} \u2192 "
-                f"{first['end']:%d %b})."
-            )
+        # The same rules the booking service will apply: half-open dates,
+        # rented/reserved judged by overlap, maintenance/retired always blocked.
+        try:
+            with self._context.reading() as session:
+                vehicle = session.get(Vehicle, self._vehicle_id)
+                if vehicle is None:
+                    raise ConflictError("That vehicle no longer exists.")
+                booking_service.assert_available(
+                    session, vehicle, start_py, end_py
+                )
+        except ConflictError as exc:
+            # No prefill: the wizard must not silently reuse clashing dates.
+            self.checked_window = None
+            self.check_result.setText(f"Not available \u2014 {exc}")
             self.check_result.setStyleSheet(f"color: {theme.DANGER};")
-        else:
-            days = RentalCalculator.rental_days(start_py, end_py)
-            self.check_result.setText(
-                f"Available {start_py:%d %b %Y} \u2192 "
-                f"{end_py:%d %b %Y} ({days} day{'s' if days != 1 else ''})."
-            )
-            self.check_result.setStyleSheet(f"color: {theme.OK};")
+            self.check_result.setVisible(True)
+            return
+
+        days = RentalCalculator.rental_days(start_py, end_py)
+        self.checked_window = (start, end)
+        self.check_result.setText(
+            f"Available {start_py:%d %b %Y} \u2192 "
+            f"{end_py:%d %b %Y} ({days} day{'s' if days != 1 else ''})."
+        )
+        self.check_result.setStyleSheet(f"color: {theme.OK};")
         self.check_result.setVisible(True)
 
     def _spec_value(self, value: str) -> QLabel:
