@@ -316,6 +316,31 @@ class TestCounterQuoteAgreement:
         )
         assert booking.channel == "online"
 
+    def test_fee_above_total_still_allows_paying_the_total(
+        self, session, customer, staff, vehicle
+    ):
+        settings_service.set_value(session, "scheduling_fee", "5000.00")
+        start, end = _rental(days=1)  # 2,500 rental against a 5,000 fee
+        q = counter_service.quote(session, vehicle, start, end)
+        assert q.total == Decimal("2500.00")
+        assert q.scheduling_fee == Decimal("5000.00")
+
+        booking, confirmed = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=q.total,
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=q.scheduling_fee,
+            deposit=q.deposit,
+        )
+        assert confirmed is True
+        rental_row = next(p for p in booking.payments if p.kind == "rental")
+        assert rental_row.amount == Decimal("2500.00")
+
 
 class TestDepositSettlement:
     def _paid_booking(self, session, customer_factory, staff, vehicle, days=2):

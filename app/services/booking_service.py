@@ -198,6 +198,10 @@ def complete_counter_rental(
         if fee_floor is None:
             fee_floor = SCHEDULING_FEE
         gcash_required = True
+    # A configured fee can exceed a short rental's total. The wizard already
+    # shows `min(fee, total)`; cap the service the same way so the displayed
+    # minimum is always payable, and the total remains the hard ceiling.
+    fee_floor = min(fee_floor, total)
     if pay < fee_floor:
         raise ValidationError(
             f"At least the {fee_floor} scheduling fee is due today.",

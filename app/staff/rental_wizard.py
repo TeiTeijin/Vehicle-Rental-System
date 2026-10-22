@@ -555,14 +555,14 @@ class PaymentPanel(_StepBase):
         self._head("Step 4 of 4 — Payment", "How much today?")
         self._error = self._error_label()
 
-        total = state.total or money(0)
-        deposit = state.deposit or money(0)
+        total = state.total if state.total is not None else money(0)
+        deposit = state.deposit if state.deposit is not None else money(0)
         fee = (
             state.scheduling_fee
             if state.scheduling_fee is not None
             else booking_service.SCHEDULING_FEE
         )
-        minimum = min(fee, total) if total > 0 else fee
+        minimum = min(fee, total)
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
@@ -674,7 +674,11 @@ class PaymentPanel(_StepBase):
 
     def _refresh_pay_button(self) -> None:
         _choice, rental = self._selection()
-        deposit = self._state.deposit or money(0)
+        deposit = (
+            self._state.deposit
+            if self._state.deposit is not None
+            else money(0)
+        )
         self.pay_button.setText(f"Pay {pesos(rental + deposit)}")
 
     def _on_pay(self) -> None:

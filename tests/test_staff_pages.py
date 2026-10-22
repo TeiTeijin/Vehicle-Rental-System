@@ -5327,6 +5327,59 @@ class TestRentalWizard:
         finally:
             overlay.hide_overlay()
 
+    def test_fee_above_total_shows_and_records_the_total(
+        self, qapp, shell, branch
+    ):
+        from app.services import settings_service
+        from app.staff.rental_wizard import PaymentPanel
+
+        _built, context = branch
+        with context.session() as session:
+            settings_service.set_value(session, "scheduling_fee", "5000.00")
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            wizard._current._on_continue()
+            qapp_process(page)
+            licence_step = wizard._current
+            with context.reading() as session:
+                customer = (
+                    session.query(Users)
+                    .filter(
+                        Users.role == "customer",
+                        Users.license_expiry > TODAY,
+                    )
+                    .first()
+                )
+                licence = customer.license_number
+                customer_id = customer.user_id
+            licence_step.licence_edit.setText(licence)
+            licence_step.find_button.click()
+            qapp_process(page)
+            licence_step.next_button.click()
+            qapp_process(page)
+
+            pay_step = wizard._current
+            assert isinstance(pay_step, PaymentPanel)
+            assert wizard.state.total == Decimal("3000.00")
+            assert wizard.state.scheduling_fee == Decimal("5000.00")
+            # The panel caps the offered minimum at the rental total.
+            assert "5,500.00" in pay_step.min_button.text()  # 3,000 + 2,500 deposit
+            pay_step.pay_button.click()
+            qapp_process(page)
+
+            with context.reading() as session:
+                booking = (
+                    session.query(Booking)
+                    .filter_by(user_id=customer_id)
+                    .order_by(Booking.booking_id.desc())
+                    .first()
+                )
+                rental = next(p for p in booking.payments if p.kind == "rental")
+                assert rental.amount == Decimal("3000.00")
+        finally:
+            overlay.hide_overlay()
+
     def test_schedule_back_returns_to_details(self, qapp, shell, branch):
         from PySide6.QtWidgets import QPushButton
 
