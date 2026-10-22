@@ -150,6 +150,13 @@ class TestBookingsReport:
         assert len(report.rows) == 2
         assert report.rows[0].ref.startswith("#")
 
+    def test_does_not_silently_stop_at_500(self, session, customer, vehicle):
+        for _ in range(501):
+            _booking(session, customer, vehicle, created_at=_noon(D15))
+        report = report_service.bookings_report(session, D15, D15)
+        assert report.total == 501
+        assert len(report.rows) == 501
+
 
 class TestUtilizationReport:
     def test_most_used_ranks_first(self, session, customer, vehicle,
@@ -161,10 +168,18 @@ class TestUtilizationReport:
         session.flush()
         rows = report_service.utilization_report(session, D10, D20)
         assert rows[0].plate == vehicle.plate_number
-        assert rows[0].rented_days == 11
+        assert rows[0].rented_days == 10
         assert rows[0].available_days == 11
-        assert rows[0].utilization == 1.0
+        assert rows[0].utilization == pytest.approx(10 / 11)
         assert rows[-1].plate == "BBB-001"
+
+    def test_two_day_booking_uses_rental_day_count(
+        self, session, customer, vehicle,
+    ):
+        _booking(session, customer, vehicle, status="completed")
+        rows = report_service.utilization_report(session, D10, D20)
+        assert rows[0].rented_days == 2
+        assert rows[0].available_days == 11
 
     def test_shop_days_leave_the_denominator(self, session, customer, vehicle):
         from app.services import maintenance_service
@@ -236,6 +251,22 @@ class TestReceivablesReport:
         assert rows[0].penalties_collected == Decimal("500.00")
         assert rows[0].age_days == 8
         assert rows[1].penalties_collected == 0
+
+    def test_settled_rows_beyond_the_cap_do_not_hide_open_balances(
+        self, session, customer, vehicle,
+    ):
+        for _ in range(500):
+            settled = _booking(
+                session, customer, vehicle, status="completed",
+                start_date=D10, end_date=D10,
+            )
+            _pay(session, settled, "7500.00", D10)
+        open_booking = _booking(
+            session, customer, vehicle, status="ongoing",
+            start_date=D15, end_date=D20,
+        )
+        rows = report_service.receivables_report(session, D20, today=D20)
+        assert [r.ref for r in rows] == [f"#{open_booking.booking_id}"]
 
 
 class TestCustomersReport:

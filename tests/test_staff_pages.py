@@ -3765,6 +3765,53 @@ class TestReportsPage:
         assert any(n.startswith("report_revenue") and n.endswith(".pdf") for n in names)
         assert len(opened) == 2
 
+    def test_export_receives_all_501_bookings(
+        self, shell, branch, tmp_path, monkeypatch,
+    ):
+        import app.services.export_service as exports
+        from PySide6.QtGui import QDesktopServices
+
+        built, context = branch
+        created = datetime.combine(TODAY, datetime.min.time()).replace(hour=12)
+        with context.session() as session:
+            session.add_all(
+                [
+                    Booking(
+                        user_id=built.customer.user_id,
+                        vehicle_id=built.free_car.vehicle_id,
+                        start_date=TODAY - timedelta(days=2),
+                        end_date=TODAY - timedelta(days=1),
+                        actual_return_date=None,
+                        total_cost=Decimal("7500.00"),
+                        status="completed",
+                        created_at=created,
+                    )
+                    for _ in range(501)
+                ]
+            )
+        monkeypatch.setattr(exports, "EXPORTS_DIR", tmp_path, raising=False)
+        monkeypatch.setattr(
+            QDesktopServices, "openUrl", lambda _url: True,
+        )
+        captured: dict[str, int] = {}
+
+        def fake_csv(path, headers, rows):
+            captured["csv"] = len(rows)
+            return path
+
+        def fake_pdf(path, *, rows, **_kwargs):
+            captured["pdf"] = len(rows)
+            return path
+
+        monkeypatch.setattr(exports, "write_csv", fake_csv)
+        monkeypatch.setattr(exports, "write_pdf", fake_pdf)
+        page = ReportsPage(shell)
+        page.refresh()
+        page._pick_report("bookings")
+        assert page._export("csv") is True
+        assert page._export("pdf") is True
+        assert captured == {"csv": 501, "pdf": 501}
+
     def test_every_report_loads_a_summary_and_a_table(self, shell, branch):
         page = ReportsPage(shell)
         page.refresh()

@@ -459,7 +459,6 @@ def bookings_report(
         )
         .where(Booking.created_at >= start, Booking.created_at <= end)
         .order_by(Booking.created_at.desc())
-        .limit(500)
     )
     if channel is not None:
         stmt = stmt.where(Booking.channel == channel)
@@ -786,7 +785,6 @@ def receivables_report(
                 Booking.end_date <= to_date,
             )
             .order_by(Booking.end_date)
-            .limit(500)
         ).scalars()
     )
     rows = []

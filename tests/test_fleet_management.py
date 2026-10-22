@@ -222,10 +222,10 @@ class TestStats:
             stats = fleet_service.vehicle_stats(session, car, window_days=30)
         # completed maintenance is not blocking -> available stays 30
         assert stats["available_days"] == 30
-        assert stats["rented_days"] == 3
+        assert stats["rented_days"] == 2
         assert stats["times_rented"] == 1
         assert stats["total_revenue"] == Decimal("4500.00")
-        assert abs(stats["utilization"] - 0.1) < 1e-9
+        assert abs(stats["utilization"] - (2 / 30)) < 1e-9
 
 
 class TestModelUrl:
