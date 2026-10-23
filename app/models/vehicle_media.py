@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -11,8 +11,9 @@ class Vehicle_Media(Base):
     source = Column(String(255), nullable=False)
     view_angle = Column(String(255), nullable=False)
     # NOTE: signed URLs embed the API key -- treat as credential data.
-    image_url = Column(String(255), nullable=False)
-    model_3d_url = Column(String(255), nullable=False)
+    # Text rather than VARCHAR(255): CarImages signs a long query string.
+    image_url = Column(Text, nullable=False)
+    model_3d_url = Column(Text, nullable=False)
     is_watermarked = Column(Boolean, default=False)
     cached_at = Column(DateTime, nullable=False)
 

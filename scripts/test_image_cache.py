@@ -22,6 +22,11 @@ def note(msg: str) -> None:
     print(f"  ...  {msg}")
 
 
+def entry(scratch: Path, make: str, model: str, year: int, suffix: str) -> Path:
+    """The cache key now has a digest; ask the module rather than guessing."""
+    return scratch / f"{image_cache._identity(make, model, year)}{suffix}"
+
+
 def main() -> int:
     # Redirect the cache at a scratch directory so this never disturbs the
     # photos the real app is using.
@@ -82,12 +87,12 @@ def run(scratch: Path) -> int:
     note(f"{size} bytes total")
 
     # Empty only the 2023 payload; 2024 must be unaffected.
-    (scratch / "toyota-fortuner-2023.img").write_bytes(b"")
+    entry(scratch, "Toyota", "Fortuner", 2023, ".img").write_bytes(b"")
     check("empty image file reports miss", image_cache.load("Toyota", "Fortuner", 2023), None)
     check("surviving entry untouched", image_cache.load("Toyota", "Fortuner", 2024) is not None, True)
     check("empty file removed from disk", image_cache.stats()[0], 1)
 
-    meta = scratch / "toyota-fortuner-2024.json"
+    meta = entry(scratch, "Toyota", "Fortuner", 2024, ".json")
     check("sidecar exists where expected", meta.exists(), True)
     meta.write_text("{ not valid json")
     check("corrupt metadata reports miss", image_cache.load("Toyota", "Fortuner", 2024), None)
@@ -121,7 +126,9 @@ def run(scratch: Path) -> int:
     check("empty payload not stored", image_cache.load("Toyota", "Vios", 2022), None)
 
     print("\n=== sidecar records the identity ===")
-    sidecar = json.loads((scratch / "honda-civic-2021.json").read_text(encoding="utf-8"))
+    sidecar = json.loads(
+        entry(scratch, "Honda", "Civic", 2021, ".json").read_text(encoding="utf-8")
+    )
     check("sidecar make", sidecar["make"], "Honda")
     check("sidecar model", sidecar["model"], "Civic")
     check("sidecar year", sidecar["year"], 2021)

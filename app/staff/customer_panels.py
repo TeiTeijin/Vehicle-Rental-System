@@ -69,6 +69,19 @@ def _thumb(path: str | None, width: int = 160, height: int = 100) -> QPixmap | N
     )
 
 
+def _openable_doc(value: str | None) -> str | None:
+    """Resolve a stored document path, or None when it is missing/unsafe.
+
+    Details-panel display must never raise; a bad row simply shows `—`.
+    """
+    if not value:
+        return None
+    try:
+        return str(customer_service.resolve_doc_path(value))
+    except Exception:  # noqa: BLE001 - a broken row must not break the panel
+        return None
+
+
 class CustomerFormPanel(_StepBase):
     """The single customer form. `preset_licence` for wizard inline-create."""
 
@@ -94,13 +107,17 @@ class CustomerFormPanel(_StepBase):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(6)
         self.name_edit = QLineEdit(self.card)
+        self.name_edit.setMaxLength(customer_service.MAX_TEXT_LENGTH)
         grid.addRow(_field_label("Full name", self.card), self.name_edit)
         self.email_edit = QLineEdit(self.card)
+        self.email_edit.setMaxLength(customer_service.MAX_TEXT_LENGTH)
         self.email_edit.setPlaceholderText("For the receipt and app login")
         grid.addRow(_field_label("Email", self.card), self.email_edit)
         self.phone_edit = QLineEdit(self.card)
+        self.phone_edit.setMaxLength(customer_service.MAX_TEXT_LENGTH)
         grid.addRow(_field_label("Contact number", self.card), self.phone_edit)
         self.address_edit = QLineEdit(self.card)
+        self.address_edit.setMaxLength(customer_service.MAX_TEXT_LENGTH)
         grid.addRow(_field_label("Address", self.card), self.address_edit)
         self.birth_edit = QDateEdit(self.card)
         self.birth_edit.setCalendarPopup(True)
@@ -109,9 +126,11 @@ class CustomerFormPanel(_StepBase):
         self.birth_edit.setMaximumDate(QDate.currentDate())
         grid.addRow(_field_label("Birthdate", self.card), self.birth_edit)
         self.emergency_edit = QLineEdit(self.card)
+        self.emergency_edit.setMaxLength(customer_service.MAX_TEXT_LENGTH)
         self.emergency_edit.setPlaceholderText("Optional")
         grid.addRow(_field_label("Emergency contact", self.card), self.emergency_edit)
         self.licence_edit = QLineEdit(self.card)
+        self.licence_edit.setMaxLength(customer_service.MAX_LICENCE_LENGTH)
         self.licence_edit.setText(preset_licence)
         grid.addRow(_field_label("Licence number", self.card), self.licence_edit)
         self.expiry_edit = QDateEdit(self.card)
@@ -181,10 +200,8 @@ class CustomerFormPanel(_StepBase):
             self.expiry_edit.setDate(QDate(expiry.year, expiry.month, expiry.day))
         self.source_combo.setCurrentText(snap["source"])
         if snap["front"]:
-            self._doc_paths["front"] = snap["front"]
             self.front_button.setText("Front ✓")
         if snap["back"]:
-            self._doc_paths["back"] = snap["back"]
             self.back_button.setText("Back ✓")
 
     def _pick_doc(self, side: str) -> None:
@@ -548,7 +565,8 @@ class CustomerDetailsPanel(_StepBase):
         doc_row.setContentsMargins(0, 0, 0, 0)
         doc_row.setSpacing(8)
         shown_docs = False
-        for label, path in (("Front", data["front"]), ("Back", data["back"])):
+        for label, stored in (("Front", data["front"]), ("Back", data["back"])):
+            path = _openable_doc(stored)
             thumb = _thumb(path)
             doc = QLabel(self.card)
             if thumb is not None:
@@ -626,6 +644,7 @@ class CustomerDetailsPanel(_StepBase):
         note_row.setContentsMargins(0, 0, 0, 0)
         note_row.setSpacing(8)
         self.note_edit = QLineEdit(self.card)
+        self.note_edit.setMaxLength(customer_service.MAX_NOTE_LENGTH)
         self.note_edit.setPlaceholderText("Add a note…")
         note_add = QPushButton("Add", self.card)
         note_add.setObjectName("secondaryButton")

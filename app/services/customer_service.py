@@ -9,6 +9,7 @@ renters resolve to their existing row instead of piling up duplicates.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +29,38 @@ MIN_RENTING_AGE = 21
 
 #: Licence-expiry warning window (matches the Customers tab bucket).
 EXPIRING_SOON_DAYS = 30
+
+#: Column widths the services must not exceed. MySQL rejects or silently
+#: truncates anything longer, so validate in the service (and cap the form)
+#: rather than handing the database a value it cannot keep.
+MAX_LICENCE_LENGTH = 12  # USERS.license_number
+MAX_TEXT_LENGTH = 255  # name, email, phone, address, emergency contact, flag
+MAX_NOTE_LENGTH = 1000  # CUSTOMER_NOTE.note
+
+_FIELD_LIMITS: dict[str, tuple[int, str]] = {
+    "full_name": (MAX_TEXT_LENGTH, "Customer name"),
+    "email": (MAX_TEXT_LENGTH, "Email"),
+    "phone": (MAX_TEXT_LENGTH, "Contact number"),
+    "address": (MAX_TEXT_LENGTH, "Address"),
+    "emergency_contact": (MAX_TEXT_LENGTH, "Emergency contact"),
+    "license_number": (MAX_LICENCE_LENGTH, "Licence number"),
+    "flag_reason": (MAX_TEXT_LENGTH, "Flag reason"),
+}
+
+
+def _check_length(value: str, limit: int, field: str, label: str) -> None:
+    if len(value) > limit:
+        raise ValidationError(
+            f"{label} must be at most {limit} characters.", field=field
+        )
+
+
+def _validate_field_lengths(values: dict) -> None:
+    """Refuse values wider than their columns before they reach the driver."""
+    for field, (limit, label) in _FIELD_LIMITS.items():
+        value = values.get(field)
+        if isinstance(value, str):
+            _check_length(value.strip(), limit, field, label)
 
 
 def normalize_licence(raw: str | None) -> str:
@@ -99,6 +132,16 @@ def create_customer(
     name = (full_name or "").strip()
     mail = (email or "").strip().lower()
     licence = (license_number or "").strip()
+    _validate_field_lengths(
+        {
+            "full_name": name,
+            "email": mail,
+            "phone": phone,
+            "address": address,
+            "emergency_contact": emergency_contact,
+            "license_number": licence,
+        }
+    )
     if not name:
         raise ValidationError("Customer name is required.", field="full_name")
     import re as _re
@@ -161,6 +204,7 @@ def update_contact(
     address: str | None = None,
 ) -> Users:
     """Refresh a returning customer's details without a new row."""
+    _validate_field_lengths({"phone": phone, "address": address})
     if phone is not None:
         customer.phone = phone.strip() or None
     if address is not None:
@@ -206,6 +250,7 @@ def find_duplicates(
 def update_customer(session: Session, customer: Users, **changes) -> Users:
     """Edit every staff-maintained field. Licence/email clashes are refused
     like in create (uniques are the backstop); birthdate/age validated."""
+    _validate_field_lengths(changes)
     if "email" in changes and changes["email"] is not None:
         mail = changes["email"].strip().lower()
         import re as _re
@@ -265,6 +310,7 @@ def set_flag(
     reason = (reason or "").strip()
     if not reason:
         raise ValidationError("A flag needs a reason.", field="flag_reason")
+    _check_length(reason, MAX_TEXT_LENGTH, "flag_reason", "Flag reason")
     customer.flag_reason = reason
     customer.flagged_at = datetime.now()
     customer.flagged_by = staff_id
@@ -288,6 +334,7 @@ def add_note(
     text = (text or "").strip()
     if not text:
         raise ValidationError("Note cannot be empty.", field="note")
+    _check_length(text, MAX_NOTE_LENGTH, "note", "Note")
     row = Customer_Note(
         customer_id=customer.user_id,
         author_id=author_id,
@@ -394,28 +441,65 @@ def allocate_settlement(
     return legs
 
 
+DOCS_DIRNAME = "customer_docs"
+
+
+def _base_dir() -> Path:
+    """Resolved application root. Imported at call time so tests and tools
+    can point `BASE_DIR` at a scratch directory."""
+    from app import config
+
+    return Path(config.BASE_DIR).resolve()
+
+
+def resolve_doc_path(value: str | Path | None) -> Path:
+    """Resolve a stored licence-photo path against `BASE_DIR`.
+
+    New rows hold `customer_docs/<filename>`, which keeps the host layout out
+    of the database. Older rows hold absolute paths; those keep working while
+    they are still inside the application folder. Anything resolving outside
+    `BASE_DIR` is refused, so a tampered row cannot turn the details panel
+    into a file browser.
+    """
+    from app.services.errors import ValidationError
+
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValidationError("No document path given.", field="document")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = _base_dir() / candidate
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(_base_dir()):
+        raise ValidationError(
+            "Document path is outside the application folder.", field="document"
+        )
+    return resolved
+
+
 def store_licence_doc(licence_number: str, side: str, src_path: str) -> str:
     """Copy a licence photo into the docs dir. Keyed by normalised licence
-    (stable before and after the row exists). Returns the stored path."""
+    (stable before and after the row exists). Returns a path relative to
+    `BASE_DIR`, never the host's absolute layout."""
     import shutil
-    from pathlib import Path
 
-    from app.config import BASE_DIR
+    from app.services.errors import ValidationError
 
     if side not in ("front", "back"):
-        from app.services.errors import ValidationError
-
         raise ValidationError(f"Unknown document side: {side}.", field="side")
     src = Path(src_path)
+    if not src.is_absolute():
+        src = _base_dir() / src
     if not src.is_file():
-        from app.services.errors import ValidationError
-
         raise ValidationError("Licence photo not found.", field=side)
-    docs = Path(BASE_DIR) / "customer_docs"
+    docs = _base_dir() / DOCS_DIRNAME
     docs.mkdir(parents=True, exist_ok=True)
     dest = docs / f"{normalize_licence(licence_number)}_{side}{src.suffix.lower() or '.jpg'}"
+    if src.resolve() == dest.resolve():
+        # Editing the same row without picking a new photo: keep the file.
+        return f"{DOCS_DIRNAME}/{dest.name}"
     shutil.copyfile(src, dest)
-    return str(dest)
+    return f"{DOCS_DIRNAME}/{dest.name}"
 
 
 def eligibility_for(session: Session, customer: Users, start_date: date, end_date: date) -> dict:
