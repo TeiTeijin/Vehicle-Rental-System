@@ -138,13 +138,17 @@ class TestVerify:
 
 
 class TestInspectionHelpers:
-    def test_column_ddl_matches_model_values(self, migration):
-        from app.models import Payment
+    def test_column_ddl_matches_the_historical_enum(self, migration):
+        """This migration is history: it must keep writing the *old* enum.
 
+        A later migration (`migrate_deposit_applied`) widens the live column;
+        this script's job is still to add the two-value column that existed at
+        the time, so its tests must not follow the current model enum.
+        """
         ddl = migration.column_ddl("sqlite")["kind"]
         assert "'rental'" in ddl and "'deposit'" in ddl
-        allowed = set(Payment.kind.property.columns[0].type.enums)
-        assert allowed == {"rental", "deposit"}
+        assert "deposit_applied" not in ddl
+        assert migration.KINDS == ("rental", "deposit")
 
     def test_resolve_url_accepts_paths_and_urls(self, migration):
         assert migration.resolve_url("demo.db") == "sqlite:///demo.db"

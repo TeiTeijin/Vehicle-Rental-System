@@ -105,6 +105,30 @@ class TestCompleteCounterRental:
         balance = payment_service.booking_balance(session, booking)
         assert balance.balance > 0
 
+    def test_a_held_deposit_is_not_rental_payment(
+        self, session, customer_factory, staff, vehicle
+    ):
+        customer = customer_factory()
+        start, end = _rental()
+        _days, total = booking_service.quote_for(session, vehicle, start, end)
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=total,
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=SCHEDULING_FEE,
+            deposit=Decimal("3000.00"),
+        )
+        balance = payment_service.booking_balance(session, booking)
+        assert balance.balance == Decimal("0.00")
+        assert balance.amount_paid == total
+        assert balance.deposit_held == Decimal("3000.00")
+        assert balance.deposit_applied == Decimal("0.00")
+
     def test_below_scheduling_fee_is_rejected(
         self, session, customer_factory, staff, vehicle
     ):
@@ -380,7 +404,7 @@ class TestDepositSettlement:
         assert balance.deposit_returned == deposit
         assert balance.is_settled
 
-    def test_damage_consumes_deposit_first_and_returns_change(
+    def test_damage_consumes_deposit_and_reports_zero_held(
         self, session, customer_factory, staff, vehicle
     ):
         booking = self._paid_booking(session, customer_factory, staff, vehicle)
@@ -392,8 +416,10 @@ class TestDepositSettlement:
             damage_notes="Scratch", damage_charge=Decimal("500.00"),
         )
         balance = payment_service.booking_balance(session, booking)
-        assert balance.deposit_held == Decimal("500.00")
+        assert balance.deposit_applied == Decimal("500.00")
+        assert balance.deposit_held == Decimal("0.00")
         assert balance.deposit_returned == deposit - Decimal("500.00")
+        assert balance.balance == Decimal("0.00")
         assert balance.is_settled
 
     def test_shortfall_stays_outstanding(
@@ -435,6 +461,27 @@ class TestDepositSettlement:
             for p in booking.payments
             if p.kind == "rental" and p.status == "paid"
         )
+        assert takings == rental_paid
+
+    def test_takings_exclude_applied_deposits(
+        self, session, customer_factory, staff, vehicle
+    ):
+        booking = self._paid_booking(session, customer_factory, staff, vehicle)
+        self._check_in(session, staff, booking)
+        booking_service.check_out(
+            session, booking, staff, booking.end_date,
+            mileage_reading=200, fuel_level="full",
+            damage_notes="Scratch", damage_charge=Decimal("500.00"),
+        )
+        takings = payment_service.takings(session)
+        rental_paid = sum(
+            p.amount
+            for p in booking.payments
+            if p.kind == "rental" and p.status == "paid"
+        )
+        assert payment_service.booking_balance(
+            session, booking
+        ).deposit_applied == Decimal("500.00")
         assert takings == rental_paid
 
 

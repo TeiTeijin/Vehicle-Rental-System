@@ -26,7 +26,12 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
     user = booking.user
     vehicle = booking.vehicle
     balance = payment_service.booking_balance(session, booking)
-    settled = [p for p in booking.payments if p.status in payment_service.SETTLED_STATUSES]
+    settled = [
+        p
+        for p in booking.payments
+        if p.status in payment_service.SETTLED_STATUSES
+        and p.kind != "deposit_applied"
+    ]
     try:
         from app.services import settings_service as _settings
         branch = _settings.get_raw(session, "receipt_branch_name") or "Vehicle Rental System"
@@ -90,12 +95,20 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
         rows.append(Row(pesos(penalty.amount), "amount"))
         if penalty.description:
             rows.append(Row(penalty.description, "note"))
-    if balance.deposit_held > 0 or balance.deposit_returned > 0:
+    if (
+        balance.deposit_held > 0
+        or balance.deposit_returned > 0
+        or balance.deposit_applied > 0
+    ):
         rows.append(Row("", "blank"))
         rows.append(Row("Security deposit (refundable hold)", "heading"))
         if balance.deposit_held > 0:
             rows.append(Row("Deposit held", "line"))
             rows.append(Row(pesos(balance.deposit_held), "amount"))
+        if balance.deposit_applied > 0:
+            # A ledger adjustment against penalties, never a cash tender.
+            rows.append(Row("Deposit applied", "line"))
+            rows.append(Row(pesos(balance.deposit_applied), "amount"))
         if balance.deposit_returned > 0:
             rows.append(Row("Deposit returned", "line"))
             rows.append(Row(pesos(balance.deposit_returned), "amount"))

@@ -636,6 +636,63 @@ class TestBalances:
         payment_service.record_payment(session, booking, 13000, "cash")
         assert payment_service.booking_balance(session, booking).balance == -500
 
+    def test_a_held_deposit_does_not_count_as_paid(self, session, booking):
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(session, booking, 2000, "cash", kind="deposit")
+        balance = payment_service.booking_balance(session, booking)
+        assert balance.amount_paid == 12500
+        assert balance.balance == 0
+        assert balance.deposit_held == 2000
+        assert balance.deposit_applied == 0
+
+    def test_settle_deposit_applies_penalties_and_refunds_the_rest(
+        self, session, booking
+    ):
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(session, booking, 2000, "cash", kind="deposit")
+        booking_service.apply_penalty(session, booking, "damage", 500, "Scratch")
+
+        remaining = payment_service.settle_deposit(session, booking)
+
+        balance = payment_service.booking_balance(session, booking)
+        assert remaining == 0
+        assert balance.deposit_applied == 500
+        assert balance.deposit_held == 0
+        assert balance.deposit_returned == 1500
+        assert balance.amount_paid == 13000
+        assert balance.balance == 0
+        assert balance.is_settled is True
+
+    def test_deposit_shortfall_leaves_the_remainder_outstanding(
+        self, session, booking
+    ):
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(session, booking, 2000, "cash", kind="deposit")
+        booking_service.apply_penalty(session, booking, "damage", 3500, "Wrecked")
+
+        assert payment_service.settle_deposit(session, booking) == 0
+
+        balance = payment_service.booking_balance(session, booking)
+        assert balance.deposit_applied == 2000
+        assert balance.deposit_held == 0
+        assert balance.deposit_returned == 0
+        assert balance.balance == 1500
+
+    def test_applied_deposit_keeps_the_deposit_method_and_is_not_cash(
+        self, session, booking
+    ):
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(session, booking, 2000, "gcash", kind="deposit")
+        booking_service.apply_penalty(session, booking, "damage", 500, "Scratch")
+
+        payment_service.settle_deposit(session, booking)
+
+        applied = next(p for p in booking.payments if p.kind == "deposit_applied")
+        assert applied.method == "gcash"
+        assert applied.status == "paid"
+        assert applied.paid_at is None
+        assert "not cash" in applied.note
+
 
 class TestRecordPayment:
     def test_records_a_payment(self, session, customer, vehicle, staff):

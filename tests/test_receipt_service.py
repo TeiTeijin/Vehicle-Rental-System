@@ -151,6 +151,45 @@ class TestReceiptContent:
         text = lines(session, booking)
         assert "(deposit)" in text
 
+    def test_a_held_deposit_is_not_reported_as_rental_paid(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(
+            session, booking, 2000, "cash", kind="deposit"
+        )
+        text = lines(session, booking)
+        assert "Deposit held" in text
+        assert "PAID IN FULL" in text
+        # Total Paid is the rental money, not the held liability.
+        assert "PHP 14,500.00" not in text
+
+    def test_settled_damage_shows_the_applied_deposit_and_returned_change(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(
+            session, booking, 2000, "cash", kind="deposit"
+        )
+        booking_service.apply_penalty(session, booking, "damage", 500, "Scratch")
+        payment_service.settle_deposit(session, booking)
+
+        text = lines(session, booking)
+        assert "Deposit applied" in text
+        assert "Deposit held" not in text
+        assert "Deposit returned" in text
+        assert amounts(session, booking) == [
+            "PHP 12,500.00",
+            "PHP 500.00",
+            "PHP 500.00",
+            "PHP 1,500.00",
+            "PHP 12,500.00",
+            "PHP 2,000.00",
+        ]
+        assert "PHP 13,000.00" in text  # Total Paid credits the applied 500
+
 
 class TestReceiptFile:
     def test_writes_a_pdf(self, session, customer, vehicle, staff, receipts_dir):
