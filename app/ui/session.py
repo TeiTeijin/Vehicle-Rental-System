@@ -1,7 +1,7 @@
 """Who the customer app is signed in as.
 
 The signed-in row never leaves the services: the UI keeps a small, plain
-`Identity` (see `auth_service.sign_in` -> `Identity.of`), so a closed database
+`Identity` (see `auth_service.sign_in_customer` -> `Identity.of`), so a closed database
 session can never leave a screen holding a half-dead ORM object.
 """
 

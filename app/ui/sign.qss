@@ -155,7 +155,75 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
     background: @panel_tan_soft;
     border: 1px solid @line_strong;
     color: @text_dark;
-    padding: 0 16px;
+    /* A square-ish chip around the account avatar, not a text button. */
+    padding: 0 4px;
+}
+
+/* ---- account menu ---- */
+QMenu {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 6px;
+}
+QMenu::item {
+    background: transparent;
+    color: @text_dark;
+    padding: 8px 28px 8px 12px;
+    border-radius: 6px;
+}
+QMenu::item:selected { background: @panel_tan_soft; }
+QMenu::item:disabled { color: @text_muted; }
+QMenu::separator {
+    height: 1px;
+    background: @line;
+    margin: 6px 8px;
+}
+
+/* ---- account information (app/ui/profile.py) ---- */
+#profileHeader {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#profileAvatar {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+    border-radius: 39px;
+}
+#profileName { color: @text_dark; font-size: 23pt; font-weight: 700; }
+#profileEmail { color: @text_muted; font-size: 11pt; }
+#profileMeta { color: @text_muted; font-size: 9pt; }
+
+#profileTabRow {
+    background: transparent;
+    border-bottom: 1px solid @line;
+}
+#profileTab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 3px;
+    color: @text_muted;
+    font-size: 10pt;
+    font-weight: 700;
+}
+#profileTab:hover { color: @text_dark; border-bottom: 2px solid @line_strong; }
+#profileTab:checked { color: @text_dark; border-bottom: 2px solid @text_dark; }
+
+#profilePanel {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#profileCardTitle { color: @text_dark; font-size: 13pt; font-weight: 700; }
+#profileField { background: transparent; }
+#profileValue { color: @text_dark; font-size: 11pt; font-weight: 600; }
+#profileValue[tone="muted"] { color: @muted_soft; font-weight: 500; }
+#profileNote {
+    background: @panel_tan_soft;
+    border: 1px solid @line;
+    border-radius: 16px;
 }
 
 /* ---- cards and panels ---- */
@@ -163,6 +231,11 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
     background: @surface;
     border: 1px solid @line;
     border-radius: 6px;
+}
+/* The showroom card is the bubble: a softer, rounder box than the panels
+   behind the stepped booking screens. */
+#gridCard {
+    border-radius: 22px;
 }
 #gridCard:hover { border: 1px solid @gold; }
 #panelTan {
@@ -173,12 +246,12 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
 #photoFrame, #modelCanvas {
     background: @surface;
     border: 1px solid @line;
-    border-radius: 6px;
+    border-radius: 14px;
 }
 #photoCanvas {
     background: @surface;
     border: none;
-    border-radius: 6px;
+    border-radius: 12px;
     color: @muted_soft;
     font-size: 10pt;
 }
@@ -349,7 +422,7 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
 #emptyState {
     background: @surface;
     border: 1px dashed @line_strong;
-    border-radius: 6px;
+    border-radius: 14px;
     color: @text_muted;
     font-size: 11pt;
 }
@@ -413,7 +486,7 @@ QComboBox[state="error"] { border: 1px solid @danger; }
 #bookingCard {
     background: @surface;
     border: 1px solid @line;
-    border-radius: 6px;
+    border-radius: 14px;
 }
 #bookingCard:hover { border-color: @line_strong; }
 #bookingRef { color: @text_dark; font-size: 13pt; font-weight: 700; }
@@ -421,6 +494,15 @@ QComboBox[state="error"] { border: 1px solid @danger; }
 #bookingWindow { color: @text_dark; font-size: 11pt; font-weight: 600; }
 #bookingMeta { color: @text_muted; font-size: 10pt; }
 #pillRow { background: transparent; }
+
+/* ---- the payments list ---- */
+#paymentCard {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#paymentCard:hover { border-color: @line_strong; }
+#paymentAmount { color: @text_dark; font-size: 16pt; font-weight: 700; }
 
 /* ---- showroom dashboard (app/ui/home.py) ---- */
 /* The hero sits straight on the cream page: no card, no photo plate -- the

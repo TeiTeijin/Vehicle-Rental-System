@@ -10,6 +10,7 @@ The window is the only piece of the flow that knows the order of things:
         ->  sign-in gate (screen 2, only for a guest)
         ->  Dates & time (screen 3)  ->  Payment (screen 4)
         ->  Bookings (the new booking, on the Upcoming pill)
+        ->  Payments (the receipts that belong to the account)
 
 Screens 3 and 4 share one `BookingDraft` (app/ui/session.py): the router keeps
 it while the customer walks between them, which is what makes BACK from the
@@ -42,17 +43,14 @@ from app.ui.auth_gate_dialog import AuthGateDialog
 from app.ui.booking_checkout import BookingCheckoutPage
 from app.ui.booking_schedule import BookingSchedulePage
 from app.ui.bookings import BookingsPage
+from app.ui.payments import PaymentsPage
+from app.ui.profile import ProfilePage
 from app.ui.session import BookingDraft, CustomerSession, Identity
 from app.ui.vehicle_details import VehicleDetailsPage
 from app.ui.home import HomePage
 
 #: Tabs that are part of this build; the rest explain themselves.
 COMING_SOON = {
-    "payments": (
-        "Payments",
-        "Receipts live on each booking. A full payment history is not part "
-        "of this build yet.",
-    ),
     "notifications": (
         "Notifications",
         "Pickup reminders are not part of this build yet.",
@@ -102,19 +100,27 @@ class MainWindow(QMainWindow):
         column.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
-        # ----- the two standing tabs -----
+        # ----- the standing tabs -----
         self.vehicles_page = HomePage()
         self.vehicles_page.vehicle_selected.connect(self.open_vehicle)
         self.vehicles_page.book_requested.connect(self.start_booking)
         self.bookings_page = BookingsPage()
         self.bookings_page.vehicle_selected.connect(self.open_vehicle)
+        self.payments_page = PaymentsPage()
+        self.payments_page.vehicle_selected.connect(self.open_vehicle)
+        self.profile_page = ProfilePage()
+        self.profile_page.tab_requested.connect(self.show_tab)
         self._register("vehicles", self.vehicles_page)
         self._register("bookings", self.bookings_page)
+        self._register("payments", self.payments_page)
+        self._register("profile", self.profile_page)
 
         for key, (title, note) in COMING_SOON.items():
             self._register(key, self._placeholder(title, note))
 
         self.bookings_page.set_user(self.session.user)
+        self.payments_page.set_user(self.session.user)
+        self.profile_page.set_user(self.session.user)
         self._sync_chrome()
         self.show_tab("vehicles")
 
@@ -140,10 +146,28 @@ class MainWindow(QMainWindow):
         elif key == "bookings":
             self.bookings_page.set_user(self.session.user)
             self._show_page("bookings")
+        elif key == "payments":
+            self.payments_page.set_user(self.session.user)
+            self._show_page("payments")
         else:
             self._show_page("vehicles")
         self._active_tab = key
         self.navbar.set_active(key)
+
+    def show_profile(self) -> None:
+        """Open the account information page from the avatar menu."""
+        if not self.session.is_signed_in:
+            if not self._prompt_sign_in(
+                reason="Sign in to see the details saved to your account."
+            ):
+                self.navbar.set_active(self._active_tab)
+                return
+        self.profile_page.set_user(self.session.user)
+        self._show_page("profile")
+        self._active_tab = "profile"
+        # The profile strip owns Personal / Bookings / Payments; no top-bar
+        # tab is the current screen, so none of them should stay underlined.
+        self.navbar.clear_active()
 
     # ---------- screen 1 ----------
     def open_vehicle(self, vehicle_id: int) -> None:
@@ -221,6 +245,10 @@ class MainWindow(QMainWindow):
         """The receipt was dismissed: show it in the list it now belongs to."""
         self.bookings_page.set_user(self.session.user)
         self.bookings_page.focus_bucket("upcoming")
+        # The payment tab sits right after Bookings and is now up to date; the
+        # customer lands on Bookings, then can step across to the receipt.
+        self.payments_page.set_user(self.session.user)
+        self.profile_page.set_user(self.session.user)
         self._show_page("bookings")
         self._active_tab = "bookings"
         self.navbar.set_active("bookings")
@@ -239,31 +267,43 @@ class MainWindow(QMainWindow):
         self.session.sign_in(identity)
         self._sync_chrome()
         self.bookings_page.set_user(identity)
+        self.payments_page.set_user(identity)
+        self.profile_page.set_user(identity)
 
     def _sign_out(self) -> None:
         self.session.sign_out()
         self._sync_chrome()
         self.bookings_page.set_user(None)
+        self.payments_page.set_user(None)
+        self.profile_page.set_user(None)
         self.show_tab("vehicles")
 
     def _sync_chrome(self) -> None:
         self.navbar.set_user(self.session.display_name or None)
+
+    def _account_menu(self) -> QMenu:
+        """The avatar's two actions: account information and logging out."""
+        menu = QMenu(self)
+        email = self.session.user.email if self.session.user else ""
+        who = menu.addAction(f"Signed in as {email}")
+        who.setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("Account info", self.show_profile)
+        menu.addAction("Log out", self._sign_out)
+        return menu
 
     def _on_auth_clicked(self) -> None:
         if not self.session.is_signed_in:
             self._prompt_sign_in()
             return
 
-        menu = QMenu(self)
-        who = menu.addAction(f"Signed in as {self.session.user.email}")  # type: ignore[union-attr]
-        who.setEnabled(False)
-        menu.addSeparator()
-        menu.addAction("Sign out", self._sign_out)
+        menu = self._account_menu()
         menu.exec(
             self.navbar.auth_button.mapToGlobal(
                 self.navbar.auth_button.rect().bottomLeft()
             )
         )
+        menu.deleteLater()
 
     # ---------- search ----------
     def _on_search(self, text: str) -> None:

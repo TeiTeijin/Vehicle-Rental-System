@@ -12,7 +12,12 @@ from app.domain.rental_calculator import RentalCalculator
 from app.domain.vehicle_types import Car, Motorcycle
 from app.models import Booking, Inspection_Report, Penalty, Vehicle
 from app.services import branch_service, fleet_service, payment_service, pricing
-from app.services.errors import ConflictError, StateError, ValidationError
+from app.services.errors import (
+    ConflictError,
+    PermissionDenied,
+    StateError,
+    ValidationError,
+)
 from app.utils.money import ZERO, money
 
 #: Statuses that still hold the vehicle for their dates.
@@ -830,6 +835,32 @@ def create_online_booking(
             f"Unknown payment method: {payment_method}. Choose one of "
             f"{', '.join(payment_service.METHODS)}.",
             field="payment_method",
+        )
+
+    # The customer app must apply the same account and fleet checks as the
+    # counter. Without these, a deactivated customer, an expired licence or a
+    # vehicle in the workshop could still produce an online booking.
+    if getattr(user, "role", "customer") != "customer":
+        raise PermissionDenied("Only customer accounts can book online.")
+    check_licence(session, user, pickup_dt.date())
+    workshop = fleet_service.maintenance_conflict(
+        session, vehicle, pickup_dt.date(), return_dt.date()
+    )
+    if workshop is not None:
+        window = f"from {workshop.start_date:%d %b %Y}"
+        if workshop.end_date is not None:
+            window = (
+                f"{workshop.start_date:%d %b} to "
+                f"{workshop.end_date:%d %b %Y}"
+            )
+        raise ConflictError(
+            f"{vehicle.make} {vehicle.model} is in the workshop "
+            f"({window}): {workshop.description}"
+        )
+    if not fleet_service.is_rentable(vehicle):
+        raise ConflictError(
+            f"{vehicle.make} {vehicle.model} is currently {vehicle.status} "
+            "and cannot be booked."
         )
 
     branch_service.validate_window(

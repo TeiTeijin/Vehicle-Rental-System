@@ -25,7 +25,7 @@ from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from app.database import SessionLocal
 from app.services import auth_service
-from app.services.auth_service import InvalidCredentials
+from app.services.auth_service import AuthError
 from app.services.errors import DataUnavailable
 from app.ui import theme
 from app.ui.session import Identity
@@ -113,9 +113,9 @@ class AuthGateDialog(theme.OverlayDialog):
         self.submit_button.setEnabled(False)
         try:
             with SessionLocal() as session:
-                user = auth_service.sign_in(session, email, password)
+                user = auth_service.sign_in_customer(session, email, password)
                 identity = Identity.of(user)
-        except InvalidCredentials as exc:
+        except AuthError as exc:
             self._fail(str(exc))
         except DataUnavailable as exc:
             self._fail(str(exc))

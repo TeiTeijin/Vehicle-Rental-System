@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -64,7 +63,7 @@ from PySide6.QtWidgets import (
 
 from app.database import SessionLocal
 from app.services import image_cache, media_service, pricing
-from app.services.auth_service import is_valid_street_address
+from app.services.auth_service import is_valid_mobile, is_valid_street_address
 from app.services.customer_service import LICENCE_EXAMPLE, canonical_licence
 from app.services.location_service import MAX_STREET_LENGTH
 from app.services.vehicle_service import (
@@ -260,12 +259,37 @@ def build_hero_panel(
     return panel
 
 
+def _password_toggle_icon(visible: bool) -> QIcon:
+    """The eye that matches the field's current visibility."""
+    filename = "eye_shown.png" if visible else "eye_hidden.png"
+    return QIcon(str(ICONS_DIR / filename))
+
+
+def _add_password_toggle(edit: QLineEdit) -> None:
+    """Put a clickable eye inside a password field to reveal what is typed."""
+    action = edit.addAction(
+        _password_toggle_icon(False), QLineEdit.ActionPosition.TrailingPosition
+    )
+    action.setToolTip("Show password")
+
+    def toggle(_checked: bool = False) -> None:
+        visible = edit.echoMode() == QLineEdit.Normal
+        edit.setEchoMode(QLineEdit.Password if visible else QLineEdit.Normal)
+        action.setIcon(_password_toggle_icon(not visible))
+        action.setToolTip("Show password" if visible else "Hide password")
+        edit.setFocus()
+
+    action.triggered.connect(toggle)
+    edit.password_action = action  # type: ignore[attr-defined]
+
+
 def _field(caption: str, placeholder: str, password: bool = False) -> tuple[QLabel, QLineEdit]:
     label = make_label(caption, "fieldLabel")
     edit = QLineEdit()
     edit.setPlaceholderText(placeholder)
     if password:
         edit.setEchoMode(QLineEdit.Password)
+        _add_password_toggle(edit)
     return label, edit
 
 
@@ -289,28 +313,6 @@ def is_valid_email(text: str) -> bool:
     return bool(local) and bool(domain)
 
 
-# Only digits plus the separators people actually type (+ - parentheses,
-# spaces). Everything else is rejected before it reaches the field.
-PHONE_ALLOWED = "+-() "
-
-
-def is_valid_phone(text: str) -> bool:
-    """True when the number is digits only (separators are ignored)."""
-    value = text.strip()
-    if not value or any(ch.isdigit() is False and ch not in PHONE_ALLOWED
-                        for ch in value):
-        return False
-    digits = "".join(ch for ch in value if ch.isdigit())
-    return 7 <= len(digits) <= 15
-
-
-def phone_input_validator(parent: Optional[QLineEdit] = None) -> QRegularExpressionValidator:
-    """Blocks letters in the phone box so only digits/`+ - ( )`/spaces get in."""
-    return QRegularExpressionValidator(
-        QRegularExpression(f"[0-9{re.escape(PHONE_ALLOWED)}]*"), parent
-    )
-
-
 def _set_field_state(edit: QWidget, state: str) -> None:
     """Re-apply the QSS border for a state change ('ok' / 'error' / '')."""
     if edit.property("state") == state:
@@ -322,11 +324,19 @@ def _set_field_state(edit: QWidget, state: str) -> None:
 
 
 def _field_hint() -> QLabel:
-    """Small red message under a field; hidden until the input is wrong."""
+    """Small red message under a field; hidden until the input is wrong.
+
+    The line is reserved whether the hint is hidden or visible. Without that,
+    the card's layout re-flows when an error appears and moves the fields
+    around while the customer is still typing.
+    """
     hint = QLabel()
     hint.setObjectName("fieldHint")
     hint.setWordWrap(True)
-    hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+    hint.setFixedHeight(20)
+    policy = hint.sizePolicy()
+    policy.setRetainSizeWhenHidden(True)
+    hint.setSizePolicy(policy)
     hint.hide()
     return hint
 
@@ -336,15 +346,18 @@ def _check_field(
     hint: QLabel,
     is_valid,
     message: str,
+    *,
+    empty_is_error: bool = True,
 ) -> bool:
     """Colour a required field by validity and explain what went wrong.
 
-    Empty -> red border (it is required) with no message, filled but wrong ->
-    red border + ``message``, valid -> green border. Returns True when valid.
+    Empty -> neutral before the field has been touched, otherwise a red
+    border (it is required) with no message. Filled but wrong -> red border +
+    ``message``. Valid -> green border. Returns True when valid.
     """
     text = edit.text().strip()
     if not text:
-        _set_field_state(edit, "error")
+        _set_field_state(edit, "error" if empty_is_error else "")
         hint.clear()
         hint.hide()
         return False
@@ -457,23 +470,41 @@ def build_form_panel() -> QWidget:
     col.addWidget(panel.signin_btn, alignment=Qt.AlignLeft)
 
     # ----- live validation: red/green borders + disabled button -----
+    email_touched = False
+    password_touched = False
+
     def refresh_validation() -> None:
-        # Email must contain "@" (with text on both sides of it).
+        # Email must contain "@" (with text on both sides of it). The hint
+        # follows every keystroke; an empty untouched field stays neutral.
         email_ok = _check_field(
             panel.email,
             panel.email_hint,
             is_valid_email,
             'Enter a valid email address - it must contain "@".',
+            empty_is_error=email_touched,
         )
         # Password is simply required here (no strength rules on sign-in).
         password_ok = bool(panel.password.text())
-        _set_field_state(panel.password, "error" if not password_ok else "")
+        _set_field_state(
+            panel.password,
+            "error" if password_touched and not password_ok else "",
+        )
 
         panel.signin_btn.setEnabled(email_ok and password_ok)
 
+    def email_changed(_text: str) -> None:
+        nonlocal email_touched
+        email_touched = True
+        refresh_validation()
+
+    def password_changed(_text: str) -> None:
+        nonlocal password_touched
+        password_touched = True
+        refresh_validation()
+
     panel.refresh_validation = refresh_validation
-    panel.email.textChanged.connect(refresh_validation)
-    panel.password.textChanged.connect(refresh_validation)
+    panel.email.textChanged.connect(email_changed)
+    panel.password.textChanged.connect(password_changed)
     refresh_validation()
 
     # Second stretch: pushes the "Sign In" button and the divider down to the
@@ -734,17 +765,21 @@ def _build_signup_step_one(scroll: QScrollArea) -> QWidget:
     col.addWidget(scroll.email)
     scroll.email_hint = _field_hint()
     col.addWidget(scroll.email_hint)
-    col.addSpacing(14)
 
     # ----- mobile number -----
-    mobile_lbl, scroll.mobile = _field("Mobile number", "+63 9XX XXX XXXX")
-    # Letters can never be typed in: only digits and "+ - ( )" / spaces.
-    scroll.mobile.setValidator(phone_input_validator(scroll.mobile))
+    mobile_lbl, scroll.mobile = _field("Mobile number", "09XX XXX XXXX")
+    # Exactly 11 digits, beginning with 09. The validator also blocks the
+    # first digit from being anything other than 0 and the second other than 9.
+    scroll.mobile.setMaxLength(11)
+    scroll.mobile.setValidator(
+        QRegularExpressionValidator(
+            QRegularExpression(r"09[0-9]{0,9}"), scroll.mobile
+        )
+    )
     col.addWidget(mobile_lbl)
     col.addWidget(scroll.mobile)
     scroll.mobile_hint = _field_hint()
     col.addWidget(scroll.mobile_hint)
-    col.addSpacing(14)
 
     # ----- password + requirements hint -----
     pass_lbl, scroll.password = _field("Password", "Password", password=True)
@@ -805,43 +840,56 @@ def _build_signup_step_one(scroll: QScrollArea) -> QWidget:
     REQUIRED = (scroll.first_name, scroll.last_name, scroll.email,
                 scroll.mobile, scroll.password, scroll.confirm_password)
 
-    def refresh_validation() -> None:
-        # Any other required field that is still empty gets a red border.
-        for edit in REQUIRED:
-            if edit is scroll.email or edit is scroll.mobile \
-                    or edit is scroll.confirm_password \
-                    or edit is scroll.password:
-                continue
-            _set_field_state(edit, "error" if not edit.text().strip() else "")
+    #: Empty fields stay neutral until the customer has typed in them, so the
+    #: first paint has no red outlines. Once touched, an empty field is an error.
+    touched = {edit: False for edit in REQUIRED}
 
-        # Email: must contain "@" with text on both sides of it.
+    def refresh_validation() -> None:
+        # Names are simply required; empty + untouched stays neutral.
+        for edit in (scroll.first_name, scroll.last_name):
+            if edit.text().strip():
+                _set_field_state(edit, "")
+            else:
+                _set_field_state(edit, "error" if touched[edit] else "")
+
+        # Email: validated on every keystroke, including the moment the
+        # address is missing its "@" (not only on the next edit or on blur).
         email_ok = _check_field(
             scroll.email,
             scroll.email_hint,
             is_valid_email,
             'Enter a valid email address - it must contain "@".',
+            empty_is_error=touched[scroll.email],
         )
 
-        # Mobile: numbers only (the validator keeps letters out, this checks
-        # that at least 7 digits were actually entered).
+        # Mobile: exactly 11 digits, beginning with 09.
         phone_ok = _check_field(
             scroll.mobile,
             scroll.mobile_hint,
-            is_valid_phone,
-            "Enter a valid mobile number using digits only.",
+            is_valid_mobile,
+            "Enter an 11-digit mobile number starting with 09.",
+            empty_is_error=touched[scroll.mobile],
         )
 
         # Password: every rule in the requirement rows must be met
-        # (8+ chars, uppercase, symbol, number) or the field stays red.
+        # (8+ chars, uppercase, symbol, number). Empty untouched is neutral.
         password_text = scroll.password.text()
         password_ok = all(check(password_text) for _item, check in scroll.req_items)
-        _set_field_state(scroll.password, "ok" if password_ok else "error")
+        if password_text:
+            _set_field_state(scroll.password, "ok" if password_ok else "error")
+        else:
+            _set_field_state(
+                scroll.password, "error" if touched[scroll.password] else ""
+            )
 
-        # Confirm password: green when it matches, red when empty / different.
+        # Confirm password: neutral until typed, then green only on a match.
         confirm = scroll.confirm_password
         confirm_text = confirm.text()
         matched = bool(confirm_text) and confirm_text == password_text
-        _set_field_state(confirm, "ok" if matched else "error")
+        if confirm_text:
+            _set_field_state(confirm, "ok" if matched else "error")
+        else:
+            _set_field_state(confirm, "error" if touched[confirm] else "")
 
         # Disable the button until every field is filled in, the email and
         # phone number are well formed, the password meets all four rules
@@ -851,10 +899,14 @@ def _build_signup_step_one(scroll: QScrollArea) -> QWidget:
             bool(filled) and matched and email_ok and phone_ok and password_ok
         )
 
+    def field_changed(edit: QLineEdit) -> None:
+        touched[edit] = True
+        refresh_validation()
+
     scroll.refresh_validation = refresh_validation
     for attr in ("first_name", "last_name", "email", "mobile", "password", "confirm_password"):
         edit = getattr(scroll, attr)
-        edit.textChanged.connect(lambda _t, e=edit: refresh_validation())
+        edit.textChanged.connect(lambda _t, e=edit: field_changed(e))
     refresh_validation()
 
     # ----- divider + "already have an account" -----
@@ -1498,6 +1550,7 @@ def field(caption: str, placeholder: str = "", *, password: bool = False) -> QWi
     edit.setPlaceholderText(placeholder)
     if password:
         edit.setEchoMode(QLineEdit.Password)
+        _add_password_toggle(edit)
     col.addWidget(label)
     col.addWidget(edit)
     holder.edit = edit  # type: ignore[attr-defined]
@@ -1552,6 +1605,16 @@ class NavBar(QFrame):
         holder.setObjectName("navSection")
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
+        logo = QLabel()
+        logo.setObjectName("navLogo")
+        logo.setPixmap(
+            QPixmap(str(ICONS_DIR / "icon.png")).scaled(
+                32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        )
+        logo.setFixedSize(32, 32)
+        row.addWidget(logo, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        row.addSpacing(10)
         brand = make_label("RENTWHEELS", "navBrand", spacing=2.4)
         row.addWidget(brand, 0, Qt.AlignLeft | Qt.AlignVCenter)
         row.addStretch(1)
@@ -1599,16 +1662,37 @@ class NavBar(QFrame):
             return
         button.setChecked(True)
 
+    def clear_active(self) -> None:
+        """Drop the underline when a screen is not one of the top-bar tabs.
+
+        The account page owns its own Personal / Bookings / Payments strip,
+        so leaving Payments underlined in the top bar while the profile is
+        showing would point at the wrong place. Qt's exclusive group refuses
+        to uncheck its current button, hence the temporary non-exclusive
+        window; setChecked does not emit clicked, so no tab is re-opened.
+        """
+        self._group.setExclusive(False)
+        for button in self.tab_buttons.values():
+            button.setChecked(False)
+        self._group.setExclusive(True)
+
     def set_user(self, name: str | None) -> None:
-        """Guest shows the call to action; a customer shows their name."""
+        """Guest shows the call to action; a customer gets the account avatar."""
         signed_in = bool(name)
-        self.auth_button.setText((name or GUEST_LABEL).upper())
-        self.auth_button.setIcon(
-            icon_from("account", TOKENS["text_dark"], 18) if signed_in else QIcon()
-        )
-        self.auth_button.setIconSize(QSize(18, 18))
+        if signed_in:
+            self.auth_button.setText("")
+            self.auth_button.setIcon(QIcon(str(ICONS_DIR / "account.png")))
+            self.auth_button.setIconSize(QSize(30, 30))
+            self.auth_button.setToolTip(f"Signed in as {name}")
+            self.auth_button.setAccessibleName("Account")
+        else:
+            self.auth_button.setText(GUEST_LABEL)
+            self.auth_button.setIcon(QIcon())
+            self.auth_button.setIconSize(QSize(18, 18))
+            self.auth_button.setToolTip("")
+            self.auth_button.setAccessibleName(GUEST_LABEL)
         # The property drives the QSS (dark pill for a guest, soft tan chip
-        # once the customer's name is in it).
+        # once a customer is signed in).
         self.auth_button.setProperty("authenticated", signed_in)
         self.auth_button.style().unpolish(self.auth_button)
         self.auth_button.style().polish(self.auth_button)

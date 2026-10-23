@@ -10,7 +10,7 @@ if __name__ == "__main__" and not __package__:
 
 from app.database import SessionLocal
 from app.services import auth_service
-from app.services.auth_service import InvalidCredentials
+from app.services.auth_service import AuthError
 from app.ui.session import Identity
 from app.ui.theme import (
     apply_theme,
@@ -60,9 +60,9 @@ class Login(QMainWindow):
         password = self.form.password.text()
         try:
             with SessionLocal() as session:
-                user = auth_service.sign_in(session, email, password)
+                user = auth_service.sign_in_customer(session, email, password)
                 identity = Identity.of(user)
-        except InvalidCredentials as exc:
+        except AuthError as exc:
             self._show_error(str(exc))
             return
         except Exception as exc:  # noqa: BLE001 - the database is remote

@@ -25,8 +25,22 @@ class InvalidCredentials(AuthError):
     pass
 
 
+class InactiveAccount(AuthError):
+    pass
+
+
+class NotACustomer(AuthError):
+    pass
+
+
 DUMMY_HASH = "$2b$12$izSvmM0zX.Kx3tsRF.uwIep3aJoUFsgXQKCB/tgDEYzXuknE8bO7S"
 INVALID_CREDENTIALS_MESSAGE = "Incorrect email or password."
+INACTIVE_ACCOUNT_MESSAGE = (
+    "This account is inactive. Contact the branch so they can review it."
+)
+STAFF_ACCOUNT_MESSAGE = (
+    "This is a staff account. Use the staff sign-in instead."
+)
 
 #: Signup password floor, mirroring the four live rules on the sign-up card.
 MIN_PASSWORD_LENGTH = 8
@@ -37,6 +51,12 @@ PASSWORD_SYMBOLS = "!@#$%^&*()_+-=[]{};:'\"|,.<>/?`~"
 PLACEHOLDER_LICENCE_YEARS = 5
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MOBILE_RE = re.compile(r"^09[0-9]{9}$")
+
+
+def is_valid_mobile(text: str | None) -> bool:
+    """True for an 11-digit mobile number that starts with 09."""
+    return bool(MOBILE_RE.fullmatch((text or "").strip()))
 
 
 def is_valid_street_address(text: str) -> bool:
@@ -63,8 +83,30 @@ def sign_in(session: Session, email: str, password: str) -> Users:
     stored_hash = user.password_hash if user is not None else DUMMY_HASH
     password_ok = verify_password(password or "", stored_hash)
 
+    # This is the shared credential check: the staff sign-in uses it too, and
+    # applies its own role/active/must-change-password policy afterwards.
     if user is None or not password_ok:
         raise InvalidCredentials(INVALID_CREDENTIALS_MESSAGE)
+
+    return user
+
+
+def sign_in_customer(session: Session, email: str, password: str) -> Users:
+    """Sign in through the customer app's front door.
+
+    Staff accounts have their own sign-in; deactivated customers must not get
+    an account session back. The base credential check stays shared so the
+    staff flow can keep its own policy (including forced password changes).
+    """
+    user = sign_in(session, email, password)
+
+    # Only answer the account's state once the password is known to be right:
+    # a wrong password must not reveal whether an email is staff, inactive or
+    # simply nonexistent.
+    if not user.is_active:
+        raise InactiveAccount(INACTIVE_ACCOUNT_MESSAGE)
+    if user.role != "customer":
+        raise NotACustomer(STAFF_ACCOUNT_MESSAGE)
 
     return user
 
@@ -113,6 +155,13 @@ def register_customer(
     if not EMAIL_RE.match(mail):
         raise ValidationError("Enter a valid email address.", field="email")
 
+    mobile = (phone or "").strip()
+    if not is_valid_mobile(mobile):
+        raise ValidationError(
+            "Enter an 11-digit mobile number starting with 09.",
+            field="phone",
+        )
+
     problems = password_problems(password)
     if problems:
         raise ValidationError(problems[0], field="password")
@@ -149,7 +198,7 @@ def register_customer(
     customer = Users(
         full_name=name,
         email=mail,
-        phone=_clean_phone(phone),
+        phone=mobile,
         password_hash=hash_password(password),
         address=location.address_line(street),
         region_code=location.region_code,
@@ -168,11 +217,6 @@ def register_customer(
     session.add(customer)
     session.flush()
     return customer
-
-
-def _clean_phone(phone: str | None) -> str | None:
-    value = (phone or "").strip()
-    return value or None
 
 
 def _placeholder_expiry():

@@ -100,6 +100,24 @@ def test_street_address_needs_a_number_and_a_name(typed, expected):
     assert auth_service.is_valid_street_address(typed) is expected
 
 
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [
+        ("09171234567", True),
+        (" 09171234567 ", True),
+        ("0917123456", False),  # only 10 digits
+        ("091712345678", False),  # 12 digits
+        ("+639171234567", False),  # country code is not accepted
+        ("08171234567", False),  # must begin with 09
+        ("0917 123 4567", False),  # digits only
+        ("", False),
+        (None, False),
+    ],
+)
+def test_mobile_number_is_exactly_11_digits_starting_09(typed, expected):
+    assert auth_service.is_valid_mobile(typed) is expected
+
+
 # ---------------------------------------------------------------------------
 # PSGC lookups
 # ---------------------------------------------------------------------------
@@ -201,6 +219,7 @@ def test_register_customer_stores_psgc_codes_and_address(session):
     user = _register(session)
 
     assert user.address == "123 Mabini St., Adams, Ilocos Norte"
+    assert user.phone == "09171234567"
     assert user.street_address == "123 Mabini St."
     assert user.region_code == "010000000"
     assert user.province_code == "012800000"
@@ -260,6 +279,15 @@ def test_register_customer_rejects_bad_street_and_licence(session):
     with pytest.raises(ValidationError) as excinfo:
         _register(session, license_number="random word")
     assert excinfo.value.field == "license_number"
+
+
+@pytest.mark.parametrize("phone", ["+639171234567", "0917123456", "08171234567"])
+def test_register_customer_rejects_mobile_outside_the_09_format(session, phone):
+    _seed_ilocos(session)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _register(session, phone=phone)
+    assert excinfo.value.field == "phone"
 
 
 def test_register_customer_rejects_a_duplicate_licence(session):

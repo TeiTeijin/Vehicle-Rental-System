@@ -25,6 +25,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QObject,
     QPropertyAnimation,
+    QRectF,
     QRunnable,
     QSize,
     Qt,
@@ -33,7 +34,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QLabel,
@@ -46,7 +47,7 @@ from app.services import vehicle_photos
 from app.widgets.skeleton import Skeleton
 
 #: Rounded corners on every photo, matching the cards around them.
-PHOTO_RADIUS = 8
+PHOTO_RADIUS = 12
 
 #: How long the fade from skeleton to photo takes, in ms.
 FADE_MS = 220
@@ -195,6 +196,7 @@ class VehiclePhoto(QLabel):
             self.setFixedSize(box)
 
         self._thumbnail = thumbnail
+        self._cutout = cutout
         self._vehicle = None
         self._view = vehicle_photos.DEFAULT_VIEW
         self._photo_key: tuple | None = None
@@ -203,7 +205,7 @@ class VehiclePhoto(QLabel):
         self._skeleton_enabled = skeleton
         self._fade: QPropertyAnimation | None = None
 
-        self._skeleton = Skeleton(self)
+        self._skeleton = Skeleton(self, radius=PHOTO_RADIUS)
         self._skeleton.hide()
 
     # ----- api -----
@@ -322,7 +324,28 @@ class VehiclePhoto(QLabel):
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation,
         )
-        self.setPixmap(QPixmap.fromImage(scaled))
+        if self._cutout:
+            # The hero's WebP already has transparent bodywork corners; a
+            # rounded plate would cut into the car instead of the card.
+            self.setPixmap(QPixmap.fromImage(scaled))
+            return
+
+        # QLabel paints a pixmap square over its stylesheet background, so the
+        # card's rounded corner would otherwise be covered by the photo's own
+        # square corner. Clip the bytes to the same bubble radius.
+        canvas = QPixmap(scaled.size())
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        radius = min(PHOTO_RADIUS, scaled.width() / 2, scaled.height() / 2)
+        path = QPainterPath()
+        path.addRoundedRect(
+            QRectF(0, 0, scaled.width(), scaled.height()), radius, radius
+        )
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, QPixmap.fromImage(scaled))
+        painter.end()
+        self.setPixmap(canvas)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
