@@ -133,3 +133,41 @@ class TestIdempotent:
         before = columns(engine)
         run("--dry-run")
         assert _type_name(columns(engine)["image_url"]) == _type_name(before["image_url"])
+
+
+class TestMissingTable:
+    """A brand-new database has no VEHICLE_MEDIA yet. The migration must
+    print guidance, not run DDL against a table that is not there."""
+
+    def test_mysql_missing_table_emits_no_ddl(self, monkeypatch, capsys):
+        migration = importlib.import_module("scripts.migrate_vehicle_media_urls")
+
+        class _Dialect:
+            name = "mysql"
+
+        class _NoDdlEngine:
+            dialect = _Dialect()
+
+            def begin(self):  # pragma: no cover - only fails when the guard is absent
+                raise AssertionError("ALTER TABLE was attempted on a missing table")
+
+        monkeypatch.setattr(migration, "_engine", lambda: _NoDdlEngine())
+        monkeypatch.setattr(migration, "columns", lambda: {})
+
+        migration.widen_mysql(dry_run=False)
+
+        assert "ALTER TABLE" not in capsys.readouterr().out
+        # Verification is the one place that explains the missing table.
+        assert migration.verify() is False
+        assert "run scripts/init_db.py first" in capsys.readouterr().out
+
+    def test_widening_predicate_rejects_an_absent_table(self):
+        migration = importlib.import_module("scripts.migrate_vehicle_media_urls")
+
+        class _Varchar:
+            length = 255
+
+        assert migration.needs_widening({}) is False
+        assert migration.needs_widening(
+            {"image_url": _Varchar(), "model_3d_url": _Varchar()}
+        ) is True

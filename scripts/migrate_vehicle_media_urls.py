@@ -94,11 +94,19 @@ def is_wide(column_type: object | None) -> bool:
     return getattr(column_type, "length", None) is None
 
 
-def needs_rebuild() -> bool:
-    present = columns()
+def needs_widening(present: dict[str, object]) -> bool:
+    """True only when the table exists and a URL column is still narrow.
+
+    An empty mapping means the table is absent (fresh database). That is not
+    a widening job: `verify()` explains it, and no DDL may run.
+    """
     if not present:
         return False
     return any(not is_wide(present.get(name)) for name in WIDE_COLUMNS)
+
+
+def needs_rebuild() -> bool:
+    return needs_widening(columns())
 
 
 def rebuild_sqlite(dry_run: bool) -> bool:
@@ -123,6 +131,13 @@ def widen_mysql(dry_run: bool) -> None:
     if _dialect() != "mysql":
         return
     present = columns()
+    if not present:
+        # Missing table: `verify()` prints the "run scripts/init_db.py" hint.
+        # Issuing ALTER here would crash with an opaque driver traceback.
+        return
+    if not needs_widening(present):
+        print(f"  = {TABLE} URL columns are already TEXT, skipping")
+        return
     for column in WIDE_COLUMNS:
         if is_wide(present.get(column)):
             print(f"  = {TABLE}.{column:<16} already TEXT, skipping")
