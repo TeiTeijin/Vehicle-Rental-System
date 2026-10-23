@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.domain.rental_calculator import RentalCalculator
 from app.models import Maintenance_Record, Vehicle, Vehicle_Category
 from app.services.errors import ConflictError, NotFoundError, StateError, ValidationError
 from app.utils.money import money
@@ -519,9 +520,50 @@ def _date_union_days(ranges: list[tuple[date, date]]) -> int:
     return total
 
 
+def _half_open_union_days(ranges: list[tuple[date, date]]) -> int:
+    """Union day-count of half-open [start, end) ranges.
+
+    Two sequential rentals (`D10→D12`, `D12→D15`) share the boundary day
+    without double-counting it; a same-day rental still occupies one day.
+    """
+    points = sorted(ranges)
+    total = 0
+    cur_start = cur_end = None
+    for start, end in points:
+        if cur_start is None:
+            cur_start, cur_end = start, end
+        elif start <= cur_end:
+            cur_end = max(cur_end, end)
+        else:
+            total += (cur_end - cur_start).days
+            cur_start, cur_end = start, end
+    if cur_start is not None:
+        total += (cur_end - cur_start).days
+    return total
+
+
 def _clip(start: date, end: date, win_start: date, win_end: date) -> tuple[date, date] | None:
     clipped = (max(start, win_start), min(end, win_end))
     return clipped if clipped[0] <= clipped[1] else None
+
+
+def _clip_half_open(
+    start: date, end: date, win_start: date, win_end: date
+) -> tuple[date, date] | None:
+    """Clip a rental into the window's days as a half-open [start, end).
+
+    Returns are exclusive: `D10 → D20` occupies ten days, matching
+    `RentalCalculator.rental_days`. The window itself is inclusive of
+    `win_end`, so its half-open bound is `win_end + 1 day`.
+    """
+    if end < start:
+        return None
+    exclusive_end = start + timedelta(days=RentalCalculator.rental_days(start, end))
+    clipped = (
+        max(start, win_start),
+        min(exclusive_end, win_end + timedelta(days=1)),
+    )
+    return clipped if clipped[0] < clipped[1] else None
 
 
 def vehicle_stats(
@@ -535,8 +577,9 @@ def vehicle_stats(
     """Times rented, revenue, and utilization over a trailing window.
 
     Utilization = rented days ÷ days available, where available excludes
-    maintenance and retired days. Ranges clipping the window edge are cut
-    at the window start so a booking that began earlier is not over-counted.
+    maintenance and retired days. Rental occupancy is half-open (a returned
+    vehicle frees its return day), clipped to the window so a booking that
+    began earlier is not over-counted.
 
     Pass `from_date`/`to_date` for an explicit period (the Reports suite
     does); otherwise the trailing `window_days` ending today is used.
@@ -571,10 +614,12 @@ def vehicle_stats(
         if booking.status == "completed":
             times_rented += 1
             revenue += money(booking.total_cost, field="total_cost")
-        clipped = _clip(booking.start_date, booking.end_date, win_start, win_end)
+        clipped = _clip_half_open(
+            booking.start_date, booking.end_date, win_start, win_end
+        )
         if clipped is not None:
             rented_ranges.append(clipped)
-    rented_days = _date_union_days(rented_ranges)
+    rented_days = _half_open_union_days(rented_ranges)
 
     shop_ranges = []
     for record in vehicle.maintenance_records:
