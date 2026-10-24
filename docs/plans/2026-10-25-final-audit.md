@@ -464,7 +464,7 @@ git push origin final-audit
 - Consumes: temporary SQLite `StaffContext`, `booking_service`, `payment_service`, `receipt_service`, `report_service`.
 - Produces: one repeatable test proving a customer-created booking can be processed by staff to completion.
 
-- [ ] **Step 1: Write the harness test**
+- [x] **Step 1: Write the harness test**
 
 `test_online_booking_reaches_staff_and_completes` must:
 1. Seed a category, branch, vehicle, customer, and staff member in a temporary SQLite database.
@@ -476,7 +476,7 @@ git push origin final-audit
 7. Assert `receipt_service.receipt_rows` includes the booking reference.
 8. Assert dashboard/report figures include the rental revenue and exclude held deposit from revenue.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_final_audit_flow.py -k "online_booking_reaches_staff_and_completes" -v
@@ -484,11 +484,11 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/test_final_audit_flow.py -k "on
 
 If it fails, record the failure as a finding. Fix only if it blocks later tasks; otherwise continue and add to Task 24.
 
-- [ ] **Step 3: Add the result to the register**
+- [x] **Step 3: Add the result to the register**
 
 Mark `C5`, `S3`, `S4`, `S5`, `X1`, `X2`, `X3`, and `X4` as `Pass` or `Finding` based on the evidence.
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 ```bash
 git add tests/test_final_audit_flow.py docs/audits/final-audit-register.md

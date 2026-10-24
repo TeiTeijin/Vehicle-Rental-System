@@ -57,8 +57,10 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
     rows += [
         Row("Booking Details", "heading"),
         Row(f"Booking ID: {booking.booking_id}"),
-        Row(f"Status: {booking.status.replace('_', ' ').title()}"),
     ]
+    if booking.reference_code:
+        rows.append(Row(f"Reference: {booking.reference_code}"))
+    rows.append(Row(f"Status: {booking.status.replace('_', ' ').title()}"))
     creator = getattr(booking, "creator", None)
     if creator is not None:
         rows.append(Row(f"Taken by: {creator.full_name}"))
