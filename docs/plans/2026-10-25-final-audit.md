@@ -812,7 +812,7 @@ git push origin final-audit
 - Consumes: staff customer lookup/create, vehicle/date selection, quote, payment, deposit, confirm.
 - Produces: verified walk-in rental from start to confirmed booking and receipt.
 
-- [ ] **Step 1: Run the counter tests**
+- [x] **Step 1: Run the counter tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -822,7 +822,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_receipt_service.py -q
 ```
 
-- [ ] **Step 2: Walk a walk-in rental**
+- [x] **Step 2: Walk a walk-in rental**
 
 Exercise:
 - existing customer lookup by name/phone/licence
@@ -837,7 +837,7 @@ Exercise:
 
 Verify `BOOKING.channel="walk_in"`, `created_by`, payment rows, deposit row, vehicle status, and receipt contents.
 
-- [ ] **Step 3: Verify counter invariants**
+- [x] **Step 3: Verify counter invariants**
 
 - scheduling fee cannot exceed rental total
 - GCash reference required when configured
@@ -845,13 +845,13 @@ Verify `BOOKING.channel="walk_in"`, `created_by`, payment rows, deposit row, veh
 - booking confirms only under the intended payment state
 - receipt failure is a warning, not a booking rollback
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S2`, `X2`, and the counter part of `X5`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md
