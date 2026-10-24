@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 7, 11, 16, 17.
-- In progress: None — next is Task 6.
-- Not started: Tasks 6, 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 11, 16, 17.
+- In progress: None — next is Task 8.
+- Not started: Tasks 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -500,6 +500,8 @@ git commit -m "fix: require pickup balance before vehicle release"
 
 This task depends on Task 4 (deposit liability). It preserves the rule that a rental should not close with an uncollected penalty, while giving the clerk a concrete way to collect the shortfall.
 
+**Status:** ✅ complete — commit `561f410`; read-only quote, exact settlement, and settlement panel tested.
+
 **Files:**
 - Modify: `app/services/booking_service.py`
 - Modify: `app/staff/booking_panels.py`
@@ -540,7 +542,7 @@ def check_out(
   - records a `rental`-kind payment when `settlement_amount` is supplied, then re-reads the balance and raises if money is still owed.
 - `PaymentPanel` gains an optional `heading: str = "Record payment"` so the checkout hand-off can say “Settle and check out” without changing its shared write path.
 
-- [ ] **Step 1: Write the failing quote test**
+- [x] **Step 1: Write the failing quote test**
 
 ```python
 def test_checkout_quote_reports_shortfall_above_deposit(session, customer, vehicle, staff):
@@ -565,7 +567,7 @@ def test_checkout_quote_reports_shortfall_above_deposit(session, customer, vehic
     assert quote.balance_due == Decimal("1000.00")
 ```
 
-- [ ] **Step 2: Write the failing service test**
+- [x] **Step 2: Write the failing service test**
 
 ```python
 def test_checkout_with_shortfall_requires_and_records_settlement(...):
@@ -590,16 +592,16 @@ def test_checkout_with_shortfall_requires_and_records_settlement(...):
     assert payment_service.deposit_held(session, booking) == Decimal("0.00")
 ```
 
-- [ ] **Step 3: Run both to verify failure**
+- [x] **Step 3: Run both to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_booking_service.py -q -o addopts=`
 Expected: FAIL because `checkout_quote` does not exist and `check_out` rolls back after a shortfall.
 
-- [ ] **Step 4: Implement quote and settlement**
+- [x] **Step 4: Implement quote and settlement**
 
 Add `CheckoutQuote` and `checkout_quote` to `booking_service.py`. Reuse the same configured late-fee reader and `money(...)` validation used by `check_out`; do not write rows. Add the settlement parameters to `check_out` and record the settlement only after penalties and deposit application, using `payment_service.record_payment(..., kind="rental", note="Checkout settlement")`. Require the amount to cover the quoted balance exactly; reject underpayment and overpayment with a clear `ValidationError`.
 
-- [ ] **Step 5: Wire the checkout panel and page**
+- [x] **Step 5: Wire the checkout panel and page**
 
 In `BookingsPage`, replace the direct check-out submit with `_submit_check_out(booking_id, values)`:
 
@@ -608,16 +610,16 @@ In `BookingsPage`, replace the direct check-out submit with `_submit_check_out(b
 3. If `balance_due > 0`, open `PaymentPanel(balance_due, self, heading="Settle and check out")`. On its `submitted` signal, re-use the saved check-out values plus `settlement_amount`, `settlement_method`, and `settlement_reference` and call `_submit_for(booking_id, "check_out", combined)`.
 4. Keep the payment panel open on failure so the clerk can correct the method/amount.
 
-- [ ] **Step 6: Add the GUI regression**
+- [x] **Step 6: Add the GUI regression**
 
 Add a test that selecting an ongoing booking, entering a damage charge above the deposit, and submitting opens the settlement panel; a second submit records the shortfall and completes the checkout. Assert the booking is `completed`, the vehicle is `available`, and the balance is zero.
 
-- [ ] **Step 7: Run the checkout tests**
+- [x] **Step 7: Run the checkout tests**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_booking_service.py tests/test_staff_pages.py -q -o addopts=`
 Expected: pass. Also re-run `tests/test_counter_rental.py` after Task 4 to confirm deposit accounting.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/services/booking_service.py app/staff/booking_panels.py app/staff/pages/bookings.py tests/test_booking_service.py tests/test_staff_pages.py
