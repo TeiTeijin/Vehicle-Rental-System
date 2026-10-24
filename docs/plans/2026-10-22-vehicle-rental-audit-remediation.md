@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19.
-- In progress: Task 14.
-- Not started: Tasks 15, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19.
+- In progress: Task 15 (parallel worktree).
+- Not started: Task 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -1026,7 +1026,7 @@ git commit -m "fix: reset idle logout on real user input"
 - `CustomersPage._customer_rows` uses both maps; no per-customer `outstanding_for` loop.
 - `CustomerFormPanel` uses a 250 ms single-shot timer for `_check_duplicates`; the direct `textChanged` connection is removed.
 
-- [ ] **Step 1: Write the failing query-count test**
+- [x] **Step 1: Write the failing query-count test**
 
 ```python
 def test_customer_page_load_is_not_n_plus_one(branch):
@@ -1037,23 +1037,23 @@ def test_customer_page_load_is_not_n_plus_one(branch):
     assert len(queries) < 20  # for 50 customers, not 50 * bookings
 ```
 
-- [ ] **Step 2: Write the debounce test**
+- [x] **Step 2: Write the debounce test**
 
 Type three phone characters; assert `_check_duplicates` runs once after the timer, not three times.
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_customer_management.py tests/test_staff_pages.py -q -o addopts=`
 
-- [ ] **Step 4: Implement the aggregate maps**
+- [x] **Step 4: Implement the aggregate maps**
 
 Use three grouped queries: booking totals, penalty totals, and paid-payment totals, keyed by `Booking.user_id`. The paid-payment total includes `rental` and `deposit_applied` rows, but excludes held `deposit` rows. Combine them in Python; the result must equal `outstanding_for` for every customer in the fixture. Keep `outstanding_for` for single-customer use.
 
-- [ ] **Step 5: Replace the page loop and add debounce**
+- [x] **Step 5: Replace the page loop and add debounce**
 
 In `_customer_rows`, look up `owed` and `has_open` from the maps. In `CustomerFormPanel`, create a single-shot timer and start/restart it on phone/licence changes.
 
-- [ ] **Step 6: Run and commit**
+- [x] **Step 6: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_customer_management.py tests/test_staff_pages.py -q -o addopts=`
 
