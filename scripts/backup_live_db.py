@@ -10,13 +10,18 @@ app can open offline:
 
     python -m app.staff --backup-file backup.db      # open the snapshot
 
-The snapshot is credential data -- password hashes, signed media URLs that
-embed the API key -- so it stays on this machine: `*.db` is gitignored.
+The snapshot is credential data -- password hashes still need to restore a
+working login -- so it stays on this machine: `*.db` is gitignored and the
+file is chmod 0600. Signed media URLs are *not* copied: they embed the
+CarImages API key and are useless after they expire, so those columns are
+blanked (the app refetches them). If this snapshot or the machine was ever
+shared, rotate the CarImages key.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -27,6 +32,27 @@ from app.config import BASE_DIR, DATABASE_URL
 
 #: Rows per statement, matching the bulk seeder: round trips dominate.
 BATCH = 2000
+
+#: Columns whose values are credentials, not data. Signed CarImages URLs
+#: embed the API key, so the snapshot keeps the row (restore tests and FKs
+#: still see it) but blanks the value. A blank URL reads as stale and is
+#: refetched when the app is online.
+CREDENTIAL_COLUMNS: dict[str, tuple[str, ...]] = {
+    "VEHICLE_MEDIA": ("image_url", "model_3d_url"),
+}
+
+PRIVATE_FILE_MODE = 0o600
+
+
+def _sanitize_rows(table_name: str, rows: list[dict]) -> list[dict]:
+    """Drop credential-bearing values before they ever reach the target."""
+    columns = CREDENTIAL_COLUMNS.get(table_name)
+    if not columns:
+        return rows
+    return [
+        {**row, **{column: "" for column in columns if column in row}}
+        for row in rows
+    ]
 
 
 def _source_label(url: str) -> str:
@@ -78,13 +104,20 @@ def copy_database(source_url: str, out_path: Path) -> dict[str, int]:
     target = create_engine(f"sqlite:///{out_path}")
     _fast_sqlite(target)
     metadata.create_all(target)
+    # Restrict before customer data lands in the file. On POSIX this is a
+    # real 0600; on Windows Python only toggles the read-only bit, which is
+    # the closest equivalent the platform offers.
+    os.chmod(out_path, PRIVATE_FILE_MODE)
 
     counts: dict[str, int] = {}
     with Session(source) as src, Session(target) as dst:
         # `sorted_tables` is dependency order, so parents land before
         # children even with the FK pragma off.
         for table in metadata.sorted_tables:
-            rows = [dict(row) for row in src.execute(select(table)).mappings()]
+            rows = _sanitize_rows(
+                table.name,
+                [dict(row) for row in src.execute(select(table)).mappings()],
+            )
             for start in range(0, len(rows), BATCH):
                 dst.execute(table.insert(), rows[start : start + BATCH])
             dst.commit()
