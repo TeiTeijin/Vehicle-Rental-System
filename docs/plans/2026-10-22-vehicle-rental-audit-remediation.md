@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17.
-- In progress: Tasks 13, 18, 19 in parallel worktrees; next serial is Task 12.
-- Not started: Tasks 12, 14, 15, 20 (plus the three in-flight).
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 16, 17, 19.
+- In progress: Task 18 in a parallel worktree; next serial is Task 12.
+- Not started: Tasks 12, 14, 15, 20 (plus Task 18 in flight).
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -979,7 +979,7 @@ git commit -m "fix: wire pricing and operational settings to behavior"
 - `StaffShell.eventFilter` resets `_idle_timer` for mouse press, key press, and wheel events while signed in.
 - `StaffShell.closeEvent` or destructor removes the filter to avoid dangling callbacks.
 
-- [ ] **Step 1: Write the failing idle test**
+- [x] **Step 1: Write the failing idle test**
 
 ```python
 def test_input_resets_the_idle_timer(shell):
@@ -990,16 +990,16 @@ def test_input_resets_the_idle_timer(shell):
     assert shell._idle_timer.remainingTime() >= before
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_shell.py -q -o addopts=`
 Expected: FAIL; timer is unchanged because the filter is not installed.
 
-- [ ] **Step 3: Install the filter and add cleanup**
+- [x] **Step 3: Install the filter and add cleanup**
 
 Install it after the timer is created; remove it on close. Keep `show_page` resetting the timer. Do not reset while signed out.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_shell.py -q -o addopts=`
 
@@ -1254,20 +1254,20 @@ git commit -m "chore: add CI, linting, and remove tracked junk"
 - `recent_transactions` includes `payment.status`; pending and failed rows must not be presented as received money.
 - The dashboard labels or filters non-paid rows; choose one behavior and test it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create a paid, a pending, and a failed payment. Assert the dashboard row data preserves each status, and that the rendered amount for a pending/failed row is not styled as received cash.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py -q -o addopts=`
 Expected: FAIL because `TransactionRow` has no status.
 
-- [ ] **Step 3: Implement the status field and presentation**
+- [x] **Step 3: Implement the status field and presentation**
 
 Add `status` to the dataclass and query mapping. In `dashboard.py`, render a small status caption (“Pending”, “Failed”, “Refunded”) or exclude non-paid rows; do not show a pending transfer as a normal received amount.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py -q -o addopts=`
 
