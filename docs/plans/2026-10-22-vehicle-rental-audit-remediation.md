@@ -13,8 +13,8 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 7, 11, 16.
-- In progress: Task 17 (backup secret-leak fix).
+- Completed and merged: Tasks 1, 2, 3, 4, 7, 11, 16, 17.
+- In progress: None — next is Task 5.
 - Not started: Tasks 5, 6, 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
@@ -1155,7 +1155,7 @@ git commit -m "security: harden cache keys, media URLs, and customer docs"
 
 ### Task 17: Remove local secret exposure from database snapshots
 
-**Status:** 🔄 implementation committed `8b44928`; review approved with one Important fix in progress.
+**Status:** ✅ complete — commit `fdfa4dc`; media URLs blanked before insert, snapshot chmod 0600, tested.
 
 **Files:**
 - Modify: `scripts/backup_live_db.py` or add `scripts/sanitize_backup.py`
@@ -1167,15 +1167,15 @@ git commit -m "security: harden cache keys, media URLs, and customer docs"
 - `.env`, `ca.pem`, `backup.db`, and `demo.db` are mode `0600` on the developer machine.
 - The CarImages key is rotated if the backup or machine was shared.
 
-- [ ] **Step 1: Write the failing backup-sanitization test**
+- [x] **Step 1: Write the failing backup-sanitization test**
 
 Create a source DB with a `Vehicle_Media` URL containing `api_key=secret`; run the backup; assert the output contains no `api_key=`.
 
-- [ ] **Step 2: Implement sanitization**
+- [x] **Step 2: Implement sanitization**
 
 Either blank URL columns in the copied database or exclude media rows, keeping schema and row counts for restore tests. Add the script to the backup workflow and document permissions.
 
-- [ ] **Step 3: Run and commit**
+- [x] **Step 3: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_backup_live_db.py -q -o addopts=`
 
