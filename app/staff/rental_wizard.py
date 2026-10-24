@@ -41,6 +41,7 @@ from app.services import (
     counter_service,
     customer_service,
     payment_service,
+    settings_service,
 )
 from app.services.errors import ValidationError
 from app.services.receipt_service import generate_receipt_pdf
@@ -418,6 +419,9 @@ class LicencePanel(_StepBase):
             verdict = customer_service.eligibility_for(
                 session, customer,
                 self._state.start.toPython(), self._state.end.toPython(),
+                expiring_days=settings_service.get_int(
+                    session, "licence_expiring_days"
+                ),
             )
             for warning in verdict["warnings"]:
                 self.result_host.addWidget(Caption(warning, parent=self.card))
@@ -504,6 +508,9 @@ class LicencePanel(_StepBase):
                 verdict = customer_service.eligibility_for(
                     session, customer,
                     self._state.start.toPython(), self._state.end.toPython(),
+                    expiring_days=settings_service.get_int(
+                        session, "licence_expiring_days"
+                    ),
                 )
                 if verdict["blocked"]:
                     raise ValidationError("; ".join(verdict["reasons"]))

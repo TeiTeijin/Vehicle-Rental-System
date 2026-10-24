@@ -183,6 +183,35 @@ class TestDueSoonAndSpend:
         due = maintenance_service.due_soon(session, on_date=TODAY)
         assert "km" in due[0][2]
 
+    def test_due_soon_reads_the_configured_windows(self, session, vehicle):
+        from app.services import settings_service
+
+        record = maintenance_service.start_maintenance(
+            session, vehicle, description="Service", status="in_progress"
+        )
+        vehicle.mileage = 10000
+        maintenance_service.complete_maintenance(
+            session,
+            record,
+            cost=100,
+            next_due_date=TODAY + timedelta(days=20),
+            next_due_odometer=12000,
+        )
+        assert maintenance_service.due_soon(session, on_date=TODAY) == []
+
+        settings_service.set_value(session, "maint_due_days", "30")
+        due = maintenance_service.due_soon(session, on_date=TODAY)
+        assert len(due) == 1 and "20 day" in due[0][2]
+
+        record.next_due_date = None
+        record.next_due_odometer = 10300
+        session.flush()
+        settings_service.set_value(session, "maint_due_km", "200")
+        assert maintenance_service.due_soon(session, on_date=TODAY) == []
+        settings_service.set_value(session, "maint_due_km", "400")
+        due = maintenance_service.due_soon(session, on_date=TODAY)
+        assert len(due) == 1 and "300 km" in due[0][2]
+
     def test_spend_counts_final_costs_only(self, session, vehicle):
         open_job = maintenance_service.start_maintenance(
             session, vehicle, description="Open",

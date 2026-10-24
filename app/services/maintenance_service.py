@@ -257,16 +257,31 @@ def due_soon(
     session: Session,
     *,
     on_date: date | None = None,
-    within_days: int = DUE_SOON_DAYS,
-    within_km: int = DUE_SOON_KM,
+    within_days: int | None = None,
+    within_km: int | None = None,
 ) -> list[tuple[Vehicle, Maintenance_Record, str]]:
     """Vehicles whose next service is due: (vehicle, record, note).
 
     Overdue first. A record counts when its next-due date is within the
     window (or past), or its next-due odometer is within threshold of the
     vehicle's current mileage (or already passed). Only the latest
-    completed record per vehicle is read.
+    completed record per vehicle is read. The windows default to the branch
+    settings, falling back to the code constants for an unmigrated DB.
     """
+    from app.services import settings_service
+
+    if within_days is None:
+        try:
+            within_days = settings_service.get_int(
+                session, "maint_due_days"
+            )
+        except Exception:  # noqa: BLE001 - old DB keeps the code default
+            within_days = DUE_SOON_DAYS
+    if within_km is None:
+        try:
+            within_km = settings_service.get_int(session, "maint_due_km")
+        except Exception:  # noqa: BLE001 - old DB keeps the code default
+            within_km = DUE_SOON_KM
     day = on_date or date.today()
     rows = (
         session.execute(

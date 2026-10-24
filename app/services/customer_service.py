@@ -502,7 +502,14 @@ def store_licence_doc(licence_number: str, side: str, src_path: str) -> str:
     return f"{DOCS_DIRNAME}/{dest.name}"
 
 
-def eligibility_for(session: Session, customer: Users, start_date: date, end_date: date) -> dict:
+def eligibility_for(
+    session: Session,
+    customer: Users,
+    start_date: date,
+    end_date: date,
+    *,
+    expiring_days: int = EXPIRING_SOON_DAYS,
+) -> dict:
     """One verdict for the wizard and the details panel.
 
     Hard blocks (legal/insurance/data): inactive, missing birthdate, expired
@@ -533,7 +540,7 @@ def eligibility_for(session: Session, customer: Users, start_date: date, end_dat
         reasons.append(
             f"Licence expires on {expiry:%d %b %Y}, before the return date."
         )
-    elif expiry <= start_date + timedelta(days=EXPIRING_SOON_DAYS):
+    elif expiry <= start_date + timedelta(days=expiring_days):
         warnings.append(f"Licence expires soon ({expiry:%d %b %Y}).")
     flagged = bool((customer.flag_reason or "").strip())
     if flagged:

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.availability import AvailabilityChecker
+from app.domain.pricing import policy_from_settings
 from app.domain.rental_calculator import RentalCalculator
 from app.domain.vehicle_types import Car, Motorcycle
 from app.models import Booking, Inspection_Report, Penalty, Vehicle
@@ -107,7 +108,10 @@ def extension_quote(
     old_total = money(booking.total_cost, field="total_cost")
     new_total = money(
         RentalCalculator.total_cost(
-            _to_domain_vehicle(vehicle), booking.start_date, new_end_date
+            _to_domain_vehicle(vehicle),
+            booking.start_date,
+            new_end_date,
+            policy=policy_from_settings(session),
         ),
         field="total_cost",
     )
@@ -130,13 +134,24 @@ def extend_booking(
     return booking, old_total, new_total
 
 
-def quote_for(session: Session, vehicle: Vehicle, start_date: date, end_date: date) -> tuple[int, Decimal]:
+def quote_for(
+    session: Session,
+    vehicle: Vehicle,
+    start_date: date,
+    end_date: date,
+) -> tuple[int, Decimal]:
     """Live price preview for the counter: (days, total) through the same
     calculator `create_booking` charges with. Raises like it does."""
+    _reject_same_day_if_disabled(session, start_date, end_date)
     assert_available(session, vehicle, start_date, end_date)
     days = RentalCalculator.rental_days(start_date, end_date)
     total = money(
-        RentalCalculator.total_cost(_to_domain_vehicle(vehicle), start_date, end_date),
+        RentalCalculator.total_cost(
+            _to_domain_vehicle(vehicle),
+            start_date,
+            end_date,
+            policy=policy_from_settings(session),
+        ),
         field="total_cost",
     )
     return days, total
@@ -259,6 +274,26 @@ def _to_domain_vehicle(vehicle: Vehicle) -> Car | Motorcycle:
     if category and category.category_name == "Motorcycle":
         return Motorcycle(vehicle.make, vehicle.model, vehicle.year, vehicle.daily_rate)
     return Car(vehicle.make, vehicle.model, vehicle.year, vehicle.daily_rate)
+
+
+def _reject_same_day_if_disabled(
+    session: Session, start_date: date, end_date: date
+) -> None:
+    """Honour the branch's "allow same-day as 1-day rental" switch."""
+    if start_date != end_date:
+        return
+    from app.services import settings_service
+
+    try:
+        allowed = settings_service.get_bool(session, "allow_same_day")
+    except Exception:  # noqa: BLE001 - an old DB keeps the old behaviour
+        allowed = True
+    if not allowed:
+        raise ValidationError(
+            "Same-day rentals are disabled in Settings. Choose a return date "
+            "after the pick-up date.",
+            field="end_date",
+        )
 
 
 def _active_bookings_stmt(vehicle_id: int, *, for_update: bool = False):
@@ -384,6 +419,7 @@ def create_booking(
             f"Unknown channel: {channel}. Choose one of {', '.join(CHANNELS)}.",
             field="channel",
         )
+    _reject_same_day_if_disabled(session, start_date, end_date)
     # Serialize per vehicle and make both availability reads current reads.
     # The lock blocks the other counter; the locking follow-up selects (the
     # refresh plus the booking read) see through this transaction's earlier
@@ -395,7 +431,12 @@ def create_booking(
     check_licence(session, user, start_date)
 
     total_cost = money(
-        RentalCalculator.total_cost(_to_domain_vehicle(vehicle), start_date, end_date),
+        RentalCalculator.total_cost(
+            _to_domain_vehicle(vehicle),
+            start_date,
+            end_date,
+            policy=policy_from_settings(session),
+        ),
         field="total_cost",
     )
 

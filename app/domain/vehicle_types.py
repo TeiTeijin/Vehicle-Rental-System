@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from decimal import Decimal
 
+from app.domain.pricing import PricingPolicy
+
 
 class Vehicle(ABC):
     def __init__(self, make: str, model: str, year: int, daily_rate) -> None:
@@ -13,23 +15,26 @@ class Vehicle(ABC):
         return f"{type(self).__name__}({self.make} {self.model} {self.year})"
 
     @abstractmethod
-    def calculate_rate(self, days: int) -> Decimal:
+    def calculate_rate(
+        self, days: int, *, policy: PricingPolicy | None = None
+    ) -> Decimal:
         raise NotImplementedError
 
 
 class Car(Vehicle):
-    LONG_TERM_DAYS = 7
-    LONG_TERM_DISCOUNT = Decimal("0.90")
-
-    def calculate_rate(self, days: int) -> Decimal:
+    def calculate_rate(
+        self, days: int, *, policy: PricingPolicy | None = None
+    ) -> Decimal:
+        rules = policy or PricingPolicy()
         rate = self.daily_rate * Decimal(days)
-        if days >= self.LONG_TERM_DAYS:
-            rate *= self.LONG_TERM_DISCOUNT
+        if days >= rules.long_term_days:
+            rate *= rules.long_term_discount
         return rate
 
 
 class Motorcycle(Vehicle):
-    MULTIPLIER = Decimal("0.70")
-
-    def calculate_rate(self, days: int) -> Decimal:
-        return self.daily_rate * Decimal(days) * self.MULTIPLIER
+    def calculate_rate(
+        self, days: int, *, policy: PricingPolicy | None = None
+    ) -> Decimal:
+        rules = policy or PricingPolicy()
+        return self.daily_rate * Decimal(days) * rules.moto_multiplier

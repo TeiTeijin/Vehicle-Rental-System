@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+from app.domain.pricing import PricingPolicy
 from app.utils.money import money
 
 
@@ -13,6 +14,12 @@ class RentalCalculator:
         return max(1, (end_date - start_date).days)
 
     @staticmethod
-    def total_cost(vehicle, start_date: date, end_date: date) -> Decimal:
+    def total_cost(
+        vehicle,
+        start_date: date,
+        end_date: date,
+        *,
+        policy: PricingPolicy | None = None,
+    ) -> Decimal:
         days = RentalCalculator.rental_days(start_date, end_date)
-        return money(vehicle.calculate_rate(days))
+        return money(vehicle.calculate_rate(days, policy=policy))

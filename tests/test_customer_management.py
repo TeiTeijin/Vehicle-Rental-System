@@ -147,6 +147,43 @@ class TestEligibility:
         assert verdict["flagged"] is True
         assert "Unpaid penalty" in (verdict["flag_reason"] or "")
 
+    def test_expiry_window_comes_from_settings(self, ctx):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+
+        from app.services import settings_service
+        from app.staff.pages.customers import CustomerFilter, _customer_rows
+
+        context, customer_id = ctx
+        today = date.today()
+        with context.session() as session:
+            customer = session.get(Users, customer_id)
+            customer.license_expiry = today + timedelta(days=60)
+            settings_service.set_value(
+                session, "licence_expiring_days", "90"
+            )
+
+        @contextmanager
+        def reading():
+            with context.reading() as session:
+                yield session
+
+        rows = _customer_rows(
+            SimpleNamespace(reading=reading), CustomerFilter()
+        )
+        row = next(r for r in rows if r[0] == "Rita Reyes")
+        assert row[5] == "Soon"
+
+        with context.session() as session:
+            settings_service.set_value(
+                session, "licence_expiring_days", "30"
+            )
+        rows = _customer_rows(
+            SimpleNamespace(reading=reading), CustomerFilter()
+        )
+        row = next(r for r in rows if r[0] == "Rita Reyes")
+        assert row[5] == "-"
+
     def test_deactivated_blocks(self, ctx):
         context, customer_id = ctx
         today = date.today()

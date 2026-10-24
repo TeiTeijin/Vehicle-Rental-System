@@ -26,12 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.models import Booking
-from app.services import booking_service, payment_service
+from app.services import booking_service, payment_service, settings_service
 from app.services.booking_service import FUEL_LEVELS
 from app.staff import theme
 from app.staff.cards import Caption, SectionLabel
 from app.staff.feedback import describe
 from app.staff.rental_wizard import _StepBase
+from app.staff.widgets import toast
 from app.utils.money import ZERO, money, pesos
 
 
@@ -454,8 +455,14 @@ class BookingDetailsPanel(_StepBase):
             with self._context.session() as session:
                 booking = session.get(Booking, self._booking_id)
                 path = generate_receipt_pdf(session, booking)
+                auto_open = settings_service.get_bool(
+                    session, "receipt_auto_open"
+                )
         except Exception as exc:  # noqa: BLE001
             self._error.setText(_friendly(exc))
             self._error.setVisible(True)
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        if auto_open:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        else:
+            toast(self, f"Receipt saved: {path}")

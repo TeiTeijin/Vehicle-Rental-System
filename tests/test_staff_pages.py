@@ -4553,6 +4553,39 @@ class TestBookingsPageActions:
             assert booking.end_date == old_end + timedelta(days=3)
             assert booking.total_cost > Decimal("7500.00")
 
+    def test_print_receipt_respects_the_auto_open_setting(
+        self, shell, branch, monkeypatch, tmp_path
+    ):
+        import app.staff.booking_panels as module
+        from app.services import receipt_service, settings_service
+        from app.staff.booking_panels import BookingDetailsPanel
+
+        _built, context = branch
+        old_dir = receipt_service.RECEIPTS_DIR
+        receipt_service.RECEIPTS_DIR = tmp_path
+        opened = []
+        monkeypatch.setattr(
+            module.QDesktopServices,
+            "openUrl",
+            lambda url: opened.append(url) or True,
+        )
+        try:
+            with context.session() as session:
+                settings_service.set_value(session, "receipt_auto_open", "0")
+            panel = BookingDetailsPanel(
+                context, _built.finished.booking_id
+            )
+            panel._on_print()
+            assert opened == []
+            assert list(tmp_path.glob("receipt_*.pdf"))
+
+            with context.session() as session:
+                settings_service.set_value(session, "receipt_auto_open", "1")
+            panel._on_print()
+            assert opened, "expected the receipt to open after export"
+        finally:
+            receipt_service.RECEIPTS_DIR = old_dir
+
     def test_details_panel_builds_sections(self, shell, branch):
         from app.staff.booking_panels import BookingDetailsPanel
 

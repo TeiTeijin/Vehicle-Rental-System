@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy import func, select
 
 from app.models import Booking, Users
-from app.services import customer_service, payment_service
+from app.services import customer_service, payment_service, settings_service
 from app.services.booking_service import check_licence
 from app.services.errors import ServiceError
 from app.staff import theme
@@ -102,9 +102,13 @@ def _matches_customer(
 
 def _customer_rows(context, filtr: CustomerFilter):
     today = date.today()
-    soon = today + timedelta(days=EXPIRING_SOON_DAYS)
 
     with context.reading() as session:
+        soon = today + timedelta(
+            days=settings_service.get_int(
+                session, "licence_expiring_days"
+            )
+        )
         rental_counts = dict(
             session.execute(
                 select(Booking.user_id, func.count(Booking.booking_id)).group_by(
