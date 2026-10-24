@@ -4395,19 +4395,77 @@ class TestBookingsPageActions:
         assert f"#{built.upcoming.booking_id}" not in refs
 
     def test_action_buttons_follow_the_role(self, shell, branch):
+        built, context = branch
+        with context.session() as session:
+            session.get(Booking, built.upcoming.booking_id).status = "pending"
         page = BookingsPage(shell)
         page.refresh()
         _wait_for_bookings(page)
+        self._select(page, f"#{built.upcoming.booking_id}")
         assert page.confirm_button.isEnabled() is True
         assert page.cancel_button.isEnabled() is True
         as_staff(branch)
         staff_page = BookingsPage(shell)
         staff_page.refresh()
         _wait_for_bookings(staff_page)
+        self._select(staff_page, f"#{built.upcoming.booking_id}")
         assert staff_page.confirm_button.isEnabled() is False
         assert staff_page.cancel_button.isEnabled() is False
         assert staff_page.check_in_button.isEnabled() is True
         assert staff_page.pay_button.isEnabled() is True
+
+    def test_row_actions_follow_the_selected_status(self, shell, branch):
+        built, _context = branch
+        page = BookingsPage(shell)
+        page.refresh()
+        _wait_for_bookings(page)
+        page.table.table.clearSelection()
+        page.table.table.setCurrentCell(-1, -1)
+        assert all(
+            not button.isEnabled()
+            for button in page._action_buttons.values()
+        )
+
+        self._select(page, f"#{built.finished.booking_id}")
+        assert page.check_in_button.isEnabled() is False
+        assert page.check_out_button.isEnabled() is False
+
+        self._select(page, f"#{built.out_booking.booking_id}")
+        assert page.check_out_button.isEnabled() is True
+        assert page.check_in_button.isEnabled() is False
+
+    def test_action_allowed_covers_the_status_map(self, shell, branch):
+        page = BookingsPage(shell)
+        assert page.action_allowed("details", None) is False
+        assert page.action_allowed("details", "completed") is True
+        assert page.action_allowed("confirm", "pending") is True
+        assert page.action_allowed("confirm", "confirmed") is False
+        assert page.action_allowed("check_in", "confirmed") is True
+        assert page.action_allowed("check_in", "ongoing") is False
+        assert page.action_allowed("check_out", "ongoing") is True
+        assert page.action_allowed("check_out", "completed") is False
+        assert page.action_allowed("record_payment", "completed") is True
+        assert page.action_allowed("record_payment", "cancelled") is False
+        assert page.action_allowed("extend", "confirmed") is True
+        assert page.action_allowed("extend", "completed") is False
+        assert page.action_allowed("cancel", "confirmed") is True
+        assert page.action_allowed("cancel", "ongoing") is False
+
+        as_staff(branch)
+        assert page.action_allowed("details", "completed") is True
+        assert page.action_allowed("cancel", "pending") is False
+
+    def test_admin_cancel_action_follows_status(self, shell, branch):
+        built, context = branch
+        with context.session() as session:
+            session.get(Booking, built.upcoming.booking_id).status = "pending"
+        page = BookingsPage(shell)
+        page.refresh()
+        _wait_for_bookings(page)
+        self._select(page, f"#{built.upcoming.booking_id}")
+        assert page.cancel_button.isEnabled() is True
+        self._select(page, f"#{built.finished.booking_id}")
+        assert page.cancel_button.isEnabled() is False
 
     def test_focus_booking_selects_and_finds_the_row(self, shell, branch):
         built, _context = branch
@@ -6023,6 +6081,107 @@ class TestRentalWizard:
                 < overlay.scroll.viewport().height() // 2
             )
         finally:
+            overlay.hide_overlay()
+
+    def _complete_rental(self, qapp, shell, branch):
+        """Drive a cash rental through payment and return the Done panel."""
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        wizard = page._wizard
+        wizard._current._on_continue()
+        qapp_process(page)
+        licence_step = wizard._current
+        with branch[1].reading() as session:
+            licence = (
+                session.query(Users)
+                .filter(
+                    Users.role == "customer",
+                    Users.license_expiry > TODAY,
+                )
+                .first()
+                .license_number
+            )
+        licence_step.licence_edit.setText(licence)
+        licence_step.find_button.click()
+        qapp_process(page)
+        licence_step.next_button.click()
+        qapp_process(page)
+        pay_step = wizard._current
+        pay_step.full_button.setChecked(True)
+        pay_step.pay_button.click()
+        qapp_process(page)
+        return page, overlay, wizard
+
+    def test_view_in_bookings_handoff_focuses_the_new_booking(
+        self, qapp, shell, branch, tmp_path
+    ):
+        from app.services import receipt_service
+
+        old_dir = receipt_service.RECEIPTS_DIR
+        receipt_service.RECEIPTS_DIR = tmp_path
+        page, overlay, wizard = self._complete_rental(qapp, shell, branch)
+        try:
+            booking_id = wizard.last_booking_id
+            assert booking_id is not None
+            assert overlay.isVisible() is True
+            wizard._current.view_button.click()
+            bookings = shell._page_widgets["bookings"]
+            assert bookings._pending_focus == booking_id
+            _wait_for_bookings(bookings)
+            assert bookings.selected_booking_id() == booking_id
+            assert bookings._pending_focus is None
+        finally:
+            receipt_service.RECEIPTS_DIR = old_dir
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_done_handoff_resets_the_new_rental_page(
+        self, qapp, shell, branch, tmp_path
+    ):
+        from app.services import receipt_service
+
+        old_dir = receipt_service.RECEIPTS_DIR
+        receipt_service.RECEIPTS_DIR = tmp_path
+        page, overlay, wizard = self._complete_rental(qapp, shell, branch)
+        try:
+            assert page.selected_vehicle_id is not None
+            assert page.selected_window is not None
+            refreshes = []
+            original = page.refresh
+            page.refresh = lambda: (refreshes.append(True), original())[1]
+            wizard._current.done_button.click()
+            qapp_process(page)
+            assert refreshes
+            assert page.selected_vehicle_id is None
+            assert page.selected_window is None
+            assert overlay.isHidden() is True
+        finally:
+            receipt_service.RECEIPTS_DIR = old_dir
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_cancel_handoff_resets_the_new_rental_page(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from PySide6.QtWidgets import QPushButton
+
+        from app.staff import rental_wizard
+
+        monkeypatch.setattr(rental_wizard, "confirm", lambda *a, **k: True)
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            assert page.selected_vehicle_id is not None
+            assert page.selected_window is not None
+            button = next(
+                button
+                for button in page._wizard._current.findChildren(QPushButton)
+                if button.text() == "Cancel rental"
+            )
+            button.click()
+            qapp_process(page)
+            assert page.selected_vehicle_id is None
+            assert page.selected_window is None
+        finally:
+            overlay.set_dismissible(True)
             overlay.hide_overlay()
 
     def test_escape_does_not_leave_the_wizard(self, qapp, shell, branch):

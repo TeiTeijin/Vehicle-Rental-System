@@ -37,6 +37,23 @@ from app.utils.money import ZERO, money, pesos
 #: Actions a plain staff member may perform. Anything else is admin.
 COUNTER_ACTIONS = ("check_in", "check_out", "record_payment")
 
+#: The table shows status as a human label ("Active" for "ongoing"); the
+#: action map speaks the stored code, so read the label back through this.
+_STATUS_CODES_BY_LABEL = {
+    theme.status_label(code): code for code in theme.STATUS_LABELS
+}
+
+#: Booking statuses in which each row action is valid. Details is absent on
+#: purpose: any selected row may be opened by any staff role.
+ACTION_STATUSES: dict[str, tuple[str, ...]] = {
+    "confirm": ("pending",),
+    "check_in": ("pending", "confirmed"),
+    "check_out": ("ongoing",),
+    "record_payment": ("pending", "confirmed", "ongoing", "completed"),
+    "extend": ("pending", "confirmed", "ongoing"),
+    "cancel": ("pending", "confirmed"),
+}
+
 #: Display label -> stored booking status codes, for the filter combo.
 STATUS_FILTERS: tuple[tuple[str, tuple[str, ...] | None], ...] = (
     ("All statuses", None),
@@ -512,13 +529,30 @@ class BookingsPage(StaffPage):
             "record_payment": self.pay_button,
             "extend": self.extend_button,
             "cancel": self.cancel_button,
+            "details": self.details_button,
         }
         self._refresh_actions()
         return row
 
     def _refresh_actions(self) -> None:
+        status = self.selected_booking_status()
         for action, button in self._action_buttons.items():
-            button.setEnabled(self.can(action))
+            button.setEnabled(self.action_allowed(action, status))
+
+    def action_allowed(self, action: str, status: str | None) -> bool:
+        """Whether `action` applies to a row in `status` and this role.
+
+        The service layer re-checks the transition; this only keeps the
+        toolbar honest, so a clerk never opens Check out on a completed
+        rental or performs a row action with nothing selected.
+        """
+        if status is None:
+            return False
+        if action == "details":
+            return True
+        if not self.can(action):
+            return False
+        return status in ACTION_STATUSES.get(action, ())
 
     def _on_action_button(self, action: str) -> None:
         if action == "check_in":
@@ -562,6 +596,18 @@ class BookingsPage(StaffPage):
         if not text.startswith("#"):
             return None
         return int(text[1:])
+
+    def selected_booking_status(self) -> str | None:
+        # The action row is built before the table; until then nothing is
+        # selected, so every action stays disabled.
+        table = getattr(self, "table", None)
+        if table is None:
+            return None
+        row = table.table.currentRow()
+        if row < 0:
+            return None
+        label = table.cell_text(row, 5)
+        return _STATUS_CODES_BY_LABEL.get(label) or label.strip().lower() or None
 
     def selected_booking_dates(self) -> tuple[date, date] | None:
         """Current (From, To) of the selected row, for the extend dialog."""

@@ -844,6 +844,8 @@ class RentalWizard(QObject):
             vehicle_id=vehicle_id, start=start, end=end,
             customer_id=customer_id,
         )
+        #: Booking written by this run; View in Bookings focuses this row.
+        self.last_booking_id: int | None = None
         self._details = None
         self._current = None
 
@@ -966,6 +968,8 @@ class RentalWizard(QObject):
             panel.fail(_friendly(exc))
             return
 
+        self.last_booking_id = result["booking_id"]
+
         # The write transaction is closed and committed: a receipt failure can
         # no longer roll the rental back. Read the booking afresh so the PDF
         # never renders from a session mid-commit.
@@ -1016,11 +1020,12 @@ class RentalWizard(QObject):
         self.cancelled.emit()
 
     def _on_view_bookings(self) -> None:
+        booking_id = self.last_booking_id
         self._overlay.set_dismissible(True)
         self._overlay.hide_overlay()
         self.finished.emit()
         if self._navigate:
-            self._navigate("bookings")
+            self._navigate("bookings", booking_id)
 
     def _on_finished(self) -> None:
         self._overlay.set_dismissible(True)

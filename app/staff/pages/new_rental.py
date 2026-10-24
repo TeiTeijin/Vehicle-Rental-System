@@ -315,16 +315,42 @@ class NewRentalPage(StaffPage):
             vehicle_id,
             start,
             end,
-            navigate=self.shell.show_page,
+            navigate=self._navigate_to_bookings,
             notify=lambda message: toast(self, message, "ok"),
             customer_id=self._pending_customer_id,
         )
+        self._wizard.finished.connect(self._reset_after_wizard)
+        self._wizard.cancelled.connect(self._reset_after_wizard)
         self._pending_customer_id = None
         # The wizard owns the overlay from here: Escape and outside clicks
         # must ask before throwing the half-filled rental away.
         if overlay is not None:
             overlay.set_dismissible(False)
         self._wizard.start()
+
+    def _navigate_to_bookings(
+        self, key: str, booking_id: int | None = None
+    ) -> None:
+        """Land on Bookings with the just-written rental already selected."""
+        if key == "bookings" and booking_id is not None:
+            try:
+                spec = next(
+                    spec for spec in self.shell.pages if spec.key == "bookings"
+                )
+                bookings = self.shell._page_for(spec)
+                # The list loads asynchronously: remember the row and let
+                # the loaded handler select it once the rows are there.
+                bookings._pending_focus = booking_id
+                bookings.focus_booking(booking_id)
+            except Exception:  # noqa: BLE001 - focus is a nicety
+                pass
+        self.shell.show_page(key)
+
+    def _reset_after_wizard(self) -> None:
+        """Clear the one-rental selection once the wizard closes."""
+        self._selected_vehicle_id = None
+        self._selected_window = None
+        self.refresh()
 
     def clear_filters(self) -> None:
         blocked = self.search.blockSignals(True)
