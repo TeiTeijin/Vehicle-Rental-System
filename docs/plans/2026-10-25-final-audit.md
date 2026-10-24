@@ -577,7 +577,7 @@ git push origin final-audit
 - Consumes: showcase/search/filter services, branch data, media cache, CarImages client.
 - Produces: verified browsing, filtering, vehicle details, and media fallback behavior.
 
-- [ ] **Step 1: Run the discovery and media tests**
+- [x] **Step 1: Run the discovery and media tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -586,7 +586,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_security_hardening.py -q
 ```
 
-- [ ] **Step 2: Walk discovery on a temp database**
+- [x] **Step 2: Walk discovery on a temp database**
 
 Exercise search, category/body/fuel/transmission filters, rate bounds, vehicle details, and branch selection. Verify:
 - only rentable/available vehicles appear where expected
@@ -594,7 +594,7 @@ Exercise search, category/body/fuel/transmission filters, rate bounds, vehicle d
 - empty/error states are usable
 - a retired/maintenance vehicle is not bookable
 
-- [ ] **Step 3: Verify media behavior**
+- [x] **Step 3: Verify media behavior**
 
 With CarImages unavailable:
 - the UI must not crash or hang
@@ -608,13 +608,13 @@ With cache present:
 - `_paths` rejects traversal
 - cache clear/stats work
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `C4`, `X5` (branch), and `X6` (media) in the register. Include whether the failure was environmental.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/ui app/services tests docs/audits/final-audit-register.md
