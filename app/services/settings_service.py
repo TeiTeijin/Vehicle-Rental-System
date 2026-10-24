@@ -221,6 +221,26 @@ def scheduling_fee(session: Session | None = None) -> Decimal:
         return booking_service.SCHEDULING_FEE
 
 
+def validate_scheduling_fee(fee, total) -> None:
+    """Reject a fee the rental total can never cover.
+
+    The fee is part of the rental total and is non-refundable, so a fee above
+    the total is a configuration mistake: the customer would be asked to pay
+    more than the rental is worth before the first day. Both the quote the
+    wizard displays and the Pay service call this, so the number a clerk sees
+    can never be one the service later refuses to record.
+    """
+    fee_value = money(fee, field="scheduling_fee")
+    total_value = money(total, field="total_cost")
+    if fee_value > total_value:
+        raise ValidationError(
+            f"The scheduling fee ({fee_value:,.2f}) is higher than the rental "
+            f"total ({total_value:,.2f}). Lower the fee in Settings or choose "
+            "a longer rental.",
+            field="scheduling_fee",
+        )
+
+
 def late_fee_per_day(session: Session | None = None) -> Decimal:
     if session is None:
         from app.services import booking_service

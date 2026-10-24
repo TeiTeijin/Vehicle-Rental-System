@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -97,6 +98,16 @@ class TestSharedPolicy:
     def test_negative_fee_rejected(self, session):
         with pytest.raises(ValidationError):
             settings_service.set_value(session, "scheduling_fee", "-5")
+
+    def test_scheduling_fee_above_total_is_rejected(self):
+        with pytest.raises(ValidationError, match="higher than the rental total"):
+            settings_service.validate_scheduling_fee(
+                Decimal("300.00"), Decimal("200.00")
+            )
+        # Equal is the boundary: the whole rental can be paid as the fee.
+        settings_service.validate_scheduling_fee(
+            Decimal("200.00"), Decimal("200.00")
+        )
 
     def test_bad_choice_rejected(self, session):
         with pytest.raises(ValidationError):

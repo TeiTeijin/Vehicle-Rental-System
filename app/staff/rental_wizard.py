@@ -573,7 +573,8 @@ class PaymentPanel(_StepBase):
             if state.scheduling_fee is not None
             else booking_service.SCHEDULING_FEE
         )
-        minimum = min(fee, total)
+        # The quote rejects a fee above the total, so this is always payable.
+        minimum = fee
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)

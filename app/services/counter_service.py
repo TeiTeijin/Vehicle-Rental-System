@@ -38,13 +38,15 @@ def quote(
 ) -> CounterQuote:
     """Price one counter rental through the same settings the Pay button uses."""
     days, total = booking_service.quote_for(session, vehicle, start_date, end_date)
+    fee = settings_service.scheduling_fee(session)
+    settings_service.validate_scheduling_fee(fee, total)
     return CounterQuote(
         days=days,
         total=total,
         deposit=settings_service.deposit_for_class(
             session, getattr(vehicle, "vehicle_class", None)
         ),
-        scheduling_fee=settings_service.scheduling_fee(session),
+        scheduling_fee=fee,
         default_method=settings_service.get_raw(session, "default_payment_method"),
         default_channel=settings_service.get_raw(session, "default_channel"),
     )

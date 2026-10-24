@@ -162,8 +162,9 @@ def complete_counter_rental(
     """The wizard's Pay button: booking + payments + confirm-if-settled.
 
     `rental_amount` is the rental-kind payment: anything from the scheduling
-    fee (minimum that locks the dates) up to the full total. The deposit is
-    always collected in full alongside it. Returns (booking, confirmed).
+    fee (minimum that locks the dates) up to the full total. The configured
+    deposit is collected in full alongside it; a zero deposit records no
+    deposit row. Returns (booking, confirmed).
     The caller commits: any raise rolls everything back, nothing half-written.
 
     `fee_floor` and `deposit` are the exact values the wizard displayed, from
@@ -182,6 +183,21 @@ def complete_counter_rental(
             raise ValidationError(
                 "The security deposit cannot be negative.", field="deposit"
             )
+    # Price before writing anything: a fee the rental total can never cover
+    # is a configuration error the clerk must see before any payment.
+    _days, total = quote_for(session, vehicle, start_date, end_date)
+    try:
+        from app.services import settings_service as _settings
+        if fee_floor is None:
+            fee_floor = _settings.scheduling_fee(session)
+        gcash_required = _settings.get_bool(session, "gcash_ref_required")
+    except Exception:
+        if fee_floor is None:
+            fee_floor = SCHEDULING_FEE
+        gcash_required = True
+    from app.services import settings_service as _settings_check
+    _settings_check.validate_scheduling_fee(fee_floor, total)
+
     booking = create_booking(
         session, user, vehicle, start_date, end_date,
         created_by=staff_id, channel=channel,
@@ -192,21 +208,7 @@ def complete_counter_rental(
         booking.flag_override_note = flag_override_note.strip()
         booking.flag_override_by = flag_override_by
         booking.flag_override_at = _datetime.now()
-    total = money(booking.total_cost, field="total_cost")
     pay = money(rental_amount, field="rental_amount")
-    try:
-        from app.services import settings_service as _settings
-        if fee_floor is None:
-            fee_floor = _settings.scheduling_fee(session)
-        gcash_required = _settings.get_bool(session, "gcash_ref_required")
-    except Exception:
-        if fee_floor is None:
-            fee_floor = SCHEDULING_FEE
-        gcash_required = True
-    # A configured fee can exceed a short rental's total. The wizard already
-    # shows `min(fee, total)`; cap the service the same way so the displayed
-    # minimum is always payable, and the total remains the hard ceiling.
-    fee_floor = min(fee_floor, total)
     if pay < fee_floor:
         raise ValidationError(
             f"At least the {fee_floor} scheduling fee is due today.",

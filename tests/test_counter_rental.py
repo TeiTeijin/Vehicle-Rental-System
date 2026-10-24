@@ -295,6 +295,29 @@ class TestCounterQuoteAgreement:
         assert [p.kind for p in booking.payments] == ["rental"]
         assert payment_service.deposit_held(session, booking) == Decimal("0.00")
 
+    def test_configured_zero_deposit_quotes_and_records_no_row(
+        self, session, customer, staff, vehicle
+    ):
+        settings_service.set_value(session, "deposit_suv", "0.00")
+        vehicle.vehicle_class = "suv"
+        start, end = _rental()
+        q = counter_service.quote(session, vehicle, start, end)
+        assert q.deposit == Decimal("0.00")
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=start,
+            end_date=end,
+            rental_amount=q.scheduling_fee,
+            method="cash",
+            staff_id=staff.user_id,
+            fee_floor=q.scheduling_fee,
+            deposit=q.deposit,
+        )
+        assert [p.kind for p in booking.payments] == ["rental"]
+        assert payment_service.deposit_held(session, booking) == Decimal("0.00")
+
     @pytest.mark.parametrize("keyword", ["fee_floor", "deposit"])
     def test_negative_overrides_are_rejected_without_writing(
         self, session, customer, staff, vehicle, keyword
@@ -340,30 +363,29 @@ class TestCounterQuoteAgreement:
         )
         assert booking.channel == "online"
 
-    def test_fee_above_total_still_allows_paying_the_total(
+    def test_fee_above_total_is_rejected_before_payment(
         self, session, customer, staff, vehicle
     ):
         settings_service.set_value(session, "scheduling_fee", "5000.00")
         start, end = _rental(days=1)  # 2,500 rental against a 5,000 fee
-        q = counter_service.quote(session, vehicle, start, end)
-        assert q.total == Decimal("2500.00")
-        assert q.scheduling_fee == Decimal("5000.00")
+        with pytest.raises(ValidationError, match="higher than the rental total"):
+            counter_service.quote(session, vehicle, start, end)
 
-        booking, confirmed = booking_service.complete_counter_rental(
-            session,
-            user=customer,
-            vehicle=vehicle,
-            start_date=start,
-            end_date=end,
-            rental_amount=q.total,
-            method="cash",
-            staff_id=staff.user_id,
-            fee_floor=q.scheduling_fee,
-            deposit=q.deposit,
-        )
-        assert confirmed is True
-        rental_row = next(p for p in booking.payments if p.kind == "rental")
-        assert rental_row.amount == Decimal("2500.00")
+        before_payments = session.query(Payment).count()
+        with pytest.raises(ValidationError, match="higher than the rental total"):
+            booking_service.complete_counter_rental(
+                session,
+                user=customer,
+                vehicle=vehicle,
+                start_date=start,
+                end_date=end,
+                rental_amount=Decimal("2500.00"),
+                method="cash",
+                staff_id=staff.user_id,
+                fee_floor=Decimal("5000.00"),
+                deposit=Decimal("2500.00"),
+            )
+        assert session.query(Payment).count() == before_payments
 
 
 class TestDepositSettlement:
