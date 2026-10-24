@@ -511,7 +511,7 @@ git push origin final-audit
 - Consumes: `auth_service.register_customer`, `sign_in_customer`, `password_reset_account`, `reset_customer_password`, `location_service.resolve`.
 - Produces: verified account creation, login, reset, and role-boundary behavior.
 
-- [ ] **Step 1: Run the account tests**
+- [x] **Step 1: Run the account tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -521,7 +521,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_customer_flow_audit.py -q
 ```
 
-- [ ] **Step 2: Walk the signup flow on a temp database**
+- [x] **Step 2: Walk the signup flow on a temp database**
 
 Use a temporary SQLite database and the customer app. Exercise:
 - valid signup
@@ -536,7 +536,7 @@ Use a temporary SQLite database and the customer app. Exercise:
 
 Verify the `USERS` row: password hash (not plaintext), `role="customer"`, `source="online"`, PSGC codes, formatted address, licence, guarantor, `is_active=True`.
 
-- [ ] **Step 3: Walk login and reset**
+- [x] **Step 3: Walk login and reset**
 
 Verify:
 - valid customer login
@@ -546,15 +546,15 @@ Verify:
 - password reset does not enumerate accounts
 - reset password follows the same policy as signup
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Add `C1`, `C2`, `C3`, and the auth part of `X8` to the register. Record exact test commands and DB values.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
 If a blocking defect exists, add a regression test first, then fix the service/UI. Do not change the policy silently.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/ui app/services tests docs/audits/final-audit-register.md
