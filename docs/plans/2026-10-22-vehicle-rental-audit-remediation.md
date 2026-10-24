@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 11, 16, 17.
-- In progress: None — next is Task 9.
-- Not started: Tasks 9, 10, 12, 13, 14, 15, 18, 19, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 17.
+- In progress: None — next is Task 10.
+- Not started: Tasks 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -757,35 +757,35 @@ git commit -m "fix: guard wizard exits and clear one-shot customer intent"
 - `RentalWizard` stores `last_booking_id`. Its `navigate` callable accepts `(key: str, booking_id: int | None = None)`. `NewRentalPage._navigate_to_bookings` sets `BookingsPage._pending_focus` before navigation completes.
 - `RentalWizard.finished` refreshes/resets New Rental after Done; `cancelled` does the same.
 
-- [ ] **Step 1: Write the failing action-state tests**
+- [x] **Step 1: Write the failing action-state tests**
 
 Select a completed booking and assert Check in/Check out are disabled. Select an ongoing booking and assert Check out is enabled while Check in is disabled. Clear the selection and assert all row actions are disabled. Add an admin test that Cancel is enabled for pending and disabled for completed.
 
-- [ ] **Step 2: Write the failing handoff tests**
+- [x] **Step 2: Write the failing handoff tests**
 
 - After “View in Bookings”, the Bookings page receives the new booking id in `_pending_focus`.
 - After “Done”, the New Rental page refreshes and clears the selected vehicle/window.
 - The focus helper selects the row once the async table load completes.
 
-- [ ] **Step 3: Run them to verify failure**
+- [x] **Step 3: Run them to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "action or focus or handoff" -q -o addopts=`
 Expected: FAIL because action buttons ignore status and the wizard only calls `show_page("bookings")` without focus.
 
-- [ ] **Step 4: Implement the status map and button refresh**
+- [x] **Step 4: Implement the status map and button refresh**
 
 Add `selected_booking_status` and `action_allowed`; include `details` in `_action_buttons`; keep the service-level validations as the final safety net. Do not change who may perform an action: admins still get the admin-only actions, staff still get `COUNTER_ACTIONS`.
 
-- [ ] **Step 5: Implement the post-booking handoff**
+- [x] **Step 5: Implement the post-booking handoff**
 
 Store the completed booking id in `RentalWizard`; pass a two-argument navigation wrapper from `NewRentalPage`; set `_pending_focus` and call `focus_booking` on the Bookings page. Connect `finished` and `cancelled` to a page reset handler that clears the selected vehicle/window and calls `refresh()`. Keep the overlay hidden before navigation.
 
-- [ ] **Step 6: Run the handoff tests**
+- [x] **Step 6: Run the handoff tests**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -q -o addopts=`
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/staff/pages/bookings.py app/staff/pages/new_rental.py app/staff/rental_wizard.py tests/test_staff_pages.py
