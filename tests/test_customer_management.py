@@ -12,8 +12,8 @@ from sqlalchemy import create_engine
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.database import Base  # noqa: E402
-from app.models import Booking, Users, Vehicle, Vehicle_Category  # noqa: E402
-from app.services import customer_service  # noqa: E402
+from app.models import Booking, Penalty, Users, Vehicle, Vehicle_Category  # noqa: E402
+from app.services import customer_service, payment_service  # noqa: E402
 from app.services.errors import ConflictError, ValidationError  # noqa: E402
 from app.staff.context import (  # noqa: E402
     DatabaseSelection,
@@ -196,6 +196,44 @@ class TestEligibility:
                 session, customer, today, today + timedelta(days=2)
             )
         assert verdict["blocked"] is True
+
+
+class TestAggregateBalances:
+    def test_maps_match_single_customer_balance(
+        self, session, customer, customer_factory, vehicle, booking_factory
+    ):
+        booking = booking_factory(
+            user=customer,
+            vehicle=vehicle,
+            status="confirmed",
+            total_cost="3000.00",
+        )
+        session.add(
+            Penalty(
+                booking_id=booking.booking_id,
+                penalty_type="late_return",
+                amount=Decimal("500.00"),
+                description="Late",
+                created_at=datetime.now(),
+            )
+        )
+        payment_service.record_payment(
+            session, booking, Decimal("1000.00"), "cash"
+        )
+
+        owed = customer_service.outstanding_by_customer(session)
+        assert owed[customer.user_id] == Decimal("2500.00")
+        assert owed[customer.user_id] == customer_service.outstanding_for(
+            session, customer
+        )
+
+        done_customer = customer_factory()
+        booking_factory(
+            user=done_customer, vehicle=vehicle, status="completed"
+        )
+        open_map = customer_service.open_bookings_by_customer(session)
+        assert open_map[customer.user_id] is True
+        assert open_map.get(done_customer.user_id, False) is False
 
 
 class TestDuplicates:

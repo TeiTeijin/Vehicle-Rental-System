@@ -2718,6 +2718,77 @@ class TestCustomersPage:
         }
         assert names == {"Ana Reyes"}
 
+    def test_customer_page_load_is_not_n_plus_one(self, branch):
+        from sqlalchemy import event
+
+        from app.staff.pages.customers import CustomerFilter, _customer_rows
+
+        _built, context = branch
+        with context.session() as session:
+            for index in range(50):
+                session.add(
+                    Users(
+                        full_name=f"Load Test {index}",
+                        email=f"load{index}@example.com",
+                        phone=f"0918{index:07d}",
+                        password_hash="x",
+                        address="1 Load Street",
+                        license_number=f"LOAD{index:06d}",
+                        license_expiry=date.today() + timedelta(days=365),
+                        role="customer",
+                        birthdate=date(1995, 1, 1),
+                        source="walk_in",
+                        is_active=True,
+                        created_at=datetime.now(),
+                    )
+                )
+
+        queries = []
+
+        def before_cursor_execute(
+            _conn, _cursor, statement, _params, _context, _many
+        ):
+            queries.append(statement)
+
+        event.listen(
+            context.engine, "before_cursor_execute", before_cursor_execute
+        )
+        try:
+            rows = _customer_rows(context, CustomerFilter())
+        finally:
+            event.remove(
+                context.engine,
+                "before_cursor_execute",
+                before_cursor_execute,
+            )
+        assert len(rows) >= 50
+        assert len(queries) < 20, f"{len(queries)} queries for 50 customers"
+
+    def test_duplicate_check_is_debounced(
+        self, qapp, branch, monkeypatch
+    ):
+        from PySide6.QtTest import QTest
+
+        from app.services import customer_service
+        from app.staff.customer_panels import CustomerFormPanel
+
+        _built, context = branch
+        calls = []
+        monkeypatch.setattr(
+            customer_service,
+            "find_duplicates",
+            lambda *a, **k: calls.append(1) or [],
+        )
+        panel = CustomerFormPanel(context)
+        try:
+            for text in ("0", "09", "091"):
+                panel.phone_edit.setText(text)
+            assert calls == []
+            QTest.qWait(350)
+            assert len(calls) == 1
+        finally:
+            panel.deleteLater()
+
     def test_writes_need_a_selection_first(self, shell, branch, monkeypatch):
         import app.staff.pages.customers as module
 

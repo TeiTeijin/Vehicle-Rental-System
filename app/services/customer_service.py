@@ -9,6 +9,7 @@ renters resolve to their existing row instead of piling up duplicates.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import or_
@@ -29,6 +30,12 @@ MIN_RENTING_AGE = 21
 
 #: Licence-expiry warning window (matches the Customers tab bucket).
 EXPIRING_SOON_DAYS = 30
+
+#: Bookings whose balance still matters to the customer list.
+BALANCE_STATUSES = ("confirmed", "ongoing", "completed")
+
+#: Bookings that count as "currently open" for the customer list.
+OPEN_STATUSES = ("pending", "confirmed", "ongoing")
 
 #: Column widths the services must not exceed. MySQL rejects or silently
 #: truncates anything longer, so validate in the service (and cap the form)
@@ -377,12 +384,86 @@ def outstanding_for(session: Session, customer: Users):
         session.query(Booking)
         .filter(
             Booking.user_id == customer.user_id,
-            Booking.status.in_(("confirmed", "ongoing", "completed")),
+            Booking.status.in_(BALANCE_STATUSES),
         )
         .all()
     ):
         total += payment_service.booking_balance(session, booking).balance
     return payment_service.money(total, field="balance")
+
+
+def outstanding_by_customer(session: Session) -> dict[int, Decimal]:
+    """Every customer's balance in three grouped queries.
+
+    The page previously called `outstanding_for` once per customer, which
+    turned one list load into a booking, penalty, and payment query per row.
+    The arithmetic is the same as `booking_balance`: rental total plus
+    penalties minus paid rental/applied-deposit money.
+    """
+    from sqlalchemy import func, select
+
+    from app.models import Booking, Payment, Penalty
+    from app.services import payment_service
+
+    rental = dict(
+        session.execute(
+            select(
+                Booking.user_id,
+                func.coalesce(func.sum(Booking.total_cost), 0),
+            )
+            .where(Booking.status.in_(BALANCE_STATUSES))
+            .group_by(Booking.user_id)
+        ).all()
+    )
+    penalties = dict(
+        session.execute(
+            select(
+                Booking.user_id,
+                func.coalesce(func.sum(Penalty.amount), 0),
+            )
+            .join(Booking, Penalty.booking_id == Booking.booking_id)
+            .where(Booking.status.in_(BALANCE_STATUSES))
+            .group_by(Booking.user_id)
+        ).all()
+    )
+    paid = dict(
+        session.execute(
+            select(
+                Booking.user_id,
+                func.coalesce(func.sum(Payment.amount), 0),
+            )
+            .join(Booking, Payment.booking_id == Booking.booking_id)
+            .where(
+                Booking.status.in_(BALANCE_STATUSES),
+                Payment.status == "paid",
+                Payment.kind.in_(("rental", "deposit_applied")),
+            )
+            .group_by(Booking.user_id)
+        ).all()
+    )
+    return {
+        user_id: payment_service.money(
+            rental.get(user_id, 0)
+            + penalties.get(user_id, 0)
+            - paid.get(user_id, 0),
+            field="balance",
+        )
+        for user_id in set(rental) | set(penalties) | set(paid)
+    }
+
+
+def open_bookings_by_customer(session: Session) -> dict[int, bool]:
+    """Customer ids with at least one pending/confirmed/ongoing booking."""
+    from sqlalchemy import select
+
+    from app.models import Booking
+
+    ids = session.execute(
+        select(Booking.user_id)
+        .where(Booking.status.in_(OPEN_STATUSES))
+        .distinct()
+    ).scalars()
+    return {user_id: True for user_id in ids}
 
 
 def unpaid_bookings(session: Session, customer: Users) -> list[tuple[int, object]]:

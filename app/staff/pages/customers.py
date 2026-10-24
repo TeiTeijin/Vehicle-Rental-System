@@ -109,6 +109,8 @@ def _customer_rows(context, filtr: CustomerFilter):
                 session, "licence_expiring_days"
             )
         )
+        owed_by_customer = customer_service.outstanding_by_customer(session)
+        open_by_customer = customer_service.open_bookings_by_customer(session)
         rental_counts = dict(
             session.execute(
                 select(Booking.user_id, func.count(Booking.booking_id)).group_by(
@@ -140,11 +142,8 @@ def _customer_rows(context, filtr: CustomerFilter):
                 licence = f"Valid to {expiry:%d %b %Y}"
                 blocked = "-"
 
-            owed = customer_service.outstanding_for(session, customer)
-            has_open = any(
-                b.status in ("pending", "confirmed", "ongoing")
-                for b in customer.bookings
-            )
+            owed = owed_by_customer.get(customer.user_id, ZERO)
+            has_open = open_by_customer.get(customer.user_id, False)
             if not _matches_customer(customer, bucket, blocked, owed, has_open, filtr):
                 continue
 

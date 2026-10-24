@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QDate, Qt, QUrl, Signal
+from PySide6.QtCore import QDate, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -157,8 +157,14 @@ class CustomerFormPanel(_StepBase):
         self._body.addLayout(doc_row)
         self._doc_paths: dict[str, str] = {}
 
+        self._duplicate_timer = QTimer(self)
+        self._duplicate_timer.setSingleShot(True)
+        self._duplicate_timer.setInterval(250)
+        self._duplicate_timer.timeout.connect(self._check_duplicates)
         for widget in (self.phone_edit, self.licence_edit):
-            widget.textChanged.connect(lambda _t: self._check_duplicates())
+            widget.textChanged.connect(
+                lambda _t: self._duplicate_timer.start()
+            )
 
         back, go = self._buttons("Create & continue" if user_id is None and preset_licence else "Save customer")
         back.clicked.connect(self.cancelled.emit)
