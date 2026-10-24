@@ -5437,6 +5437,58 @@ class TestDimOverlay:
         assert dim.isHidden() is True
 
 
+class TestDismissibleOverlay:
+    """An overlay can be pinned open while a wizard owns the screen."""
+
+    def _overlay(self, qapp, shell):
+        from app.staff.overlay import FrostedOverlay
+
+        shell.show()
+        shell.resize(1000, 700)
+        overlay = FrostedOverlay(shell)
+        overlay.set_content(QWidget(overlay.scroll))
+        overlay.show_overlay()
+        qapp_process(overlay)
+        return overlay
+
+    def test_escape_does_not_dismiss_a_guarded_overlay(self, qapp, shell):
+        overlay = self._overlay(qapp, shell)
+        try:
+            overlay.set_dismissible(False)
+            overlay.setFocus()
+            QTest.keyClick(overlay, Qt.Key.Key_Escape)
+            qapp_process(overlay)
+            assert overlay.isVisible() is True
+        finally:
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_outside_click_does_not_dismiss_a_guarded_overlay(
+        self, qapp, shell
+    ):
+        overlay = self._overlay(qapp, shell)
+        try:
+            overlay.set_dismissible(False)
+            QTest.mouseClick(
+                overlay,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                QPoint(10, 10),
+            )
+            qapp_process(overlay)
+            assert overlay.isVisible() is True
+        finally:
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_overlay_is_dismissible_by_default(self, qapp, shell):
+        overlay = self._overlay(qapp, shell)
+        overlay.setFocus()
+        QTest.keyClick(overlay, Qt.Key.Key_Escape)
+        qapp_process(overlay)
+        assert overlay.isHidden() is True
+
+
 class TestRentalWizard:
     """Counter flow: schedule -> licence -> pay -> done, one overlay."""
 
@@ -5972,3 +6024,156 @@ class TestRentalWizard:
             )
         finally:
             overlay.hide_overlay()
+
+    def test_escape_does_not_leave_the_wizard(self, qapp, shell, branch):
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            overlay.setFocus()
+            QTest.keyClick(overlay, Qt.Key.Key_Escape)
+            qapp_process(page)
+            assert overlay.isVisible() is True
+            assert page._wizard._current is not None
+        finally:
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_cancel_rental_confirmed_hides_and_emits(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from PySide6.QtWidgets import QPushButton
+
+        from app.staff import rental_wizard
+
+        calls = []
+
+        def _confirm(parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(rental_wizard, "confirm", _confirm)
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            cancelled = []
+            wizard.cancelled.connect(lambda: cancelled.append(True))
+            button = next(
+                button
+                for button in wizard._current.findChildren(QPushButton)
+                if button.text() == "Cancel rental"
+            )
+            button.click()
+            qapp_process(page)
+            assert overlay.isHidden() is True
+            assert cancelled == [True]
+            assert calls[0][0] == "Discard this rental?"
+            assert calls[0][1]["detail"] == (
+                "The customer, dates, and payment choice will be lost."
+            )
+            assert calls[0][1]["destructive"] is True
+        finally:
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_cancel_rental_declined_keeps_the_wizard(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from PySide6.QtWidgets import QPushButton
+
+        from app.staff import rental_wizard
+
+        monkeypatch.setattr(rental_wizard, "confirm", lambda *a, **k: False)
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            step = wizard._current
+            cancelled = []
+            wizard.cancelled.connect(lambda: cancelled.append(True))
+            button = next(
+                button
+                for button in step.findChildren(QPushButton)
+                if button.text() == "Cancel rental"
+            )
+            button.click()
+            qapp_process(page)
+            assert overlay.isVisible() is True
+            assert wizard._current is step
+            assert cancelled == []
+        finally:
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_pending_customer_is_one_shot(self, qapp, shell, branch):
+        from PySide6.QtCore import QDate
+
+        built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
+        page = NewRentalPage(shell)
+        shell.show()
+        page.show()
+        page.resize(1440, 900)
+        page.set_pending_customer(built.customer.user_id)
+        page.refresh()
+        assert page.pending_customer_id is None
+        vid = next(s.vehicle.vehicle_id for s in page.slots)
+        page._open_vehicle_details(vid)
+        qapp_process(page)
+        overlay = page._details_overlay
+        try:
+            today = QDate.currentDate()
+            overlay.panel.start_edit.setDate(today.addDays(10))
+            overlay.panel.end_edit.setDate(today.addDays(11))
+            overlay.panel.check_button.click()
+            overlay.panel.rent_button.click()
+            qapp_process(page)
+            assert page._wizard.state.customer_id is None
+        finally:
+            overlay.set_dismissible(True)
+            overlay.hide_overlay()
+
+    def test_blocked_new_customer_shows_the_eligibility_reason(
+        self, qapp, branch
+    ):
+        from datetime import timedelta as _timedelta
+
+        from PySide6.QtCore import QDate
+
+        from app.staff.rental_wizard import LicencePanel, WizardState
+
+        built, context = branch
+        start = TODAY + _timedelta(days=5)
+        end = TODAY + _timedelta(days=10)
+        state = WizardState(
+            vehicle_id=built.free_car.vehicle_id,
+            start=QDate(start.year, start.month, start.day),
+            end=QDate(end.year, end.month, end.day),
+        )
+        step = LicencePanel(context, state)
+        try:
+            step._on_create_values(
+                {
+                    "full_name": "Short Licence",
+                    "email": "short2@example.com",
+                    "phone": None,
+                    "address": "1 Test Street",
+                    "license_number": "SHORT-002",
+                    "license_expiry": TODAY + _timedelta(days=5),
+                    "birthdate": TODAY - _timedelta(days=365 * 30),
+                    "emergency_contact": None,
+                    "source": "walk_in",
+                }
+            )
+            assert step._error.isHidden() is False
+            assert "before the return date" in step._error.text()
+            assert (
+                step._error.text()
+                != "Something went wrong loading this. Try again."
+            )
+            with context.reading() as session:
+                created = (
+                    session.query(Users)
+                    .filter(Users.license_number == "SHORT-002")
+                    .first()
+                )
+                assert created is None
+        finally:
+            step.deleteLater()

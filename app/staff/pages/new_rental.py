@@ -271,6 +271,10 @@ class NewRentalPage(StaffPage):
     def selected_window(self):
         return self._selected_window
 
+    @property
+    def pending_customer_id(self) -> int | None:
+        return self._pending_customer_id
+
     def set_pending_customer(self, user_id: int) -> None:
         """Attach a customer from the Customers tab to the next wizard run."""
         self._pending_customer_id = user_id
@@ -316,6 +320,10 @@ class NewRentalPage(StaffPage):
             customer_id=self._pending_customer_id,
         )
         self._pending_customer_id = None
+        # The wizard owns the overlay from here: Escape and outside clicks
+        # must ask before throwing the half-filled rental away.
+        if overlay is not None:
+            overlay.set_dismissible(False)
         self._wizard.start()
 
     def clear_filters(self) -> None:
@@ -330,6 +338,10 @@ class NewRentalPage(StaffPage):
     # -- data --------------------------------------------------------------
 
     def refresh(self) -> None:
+        # One-shot intent: a customer attached by the Customers tab is for
+        # the next rental only. Leaving and coming back must not silently
+        # attach them to a different car.
+        self._pending_customer_id = None
         super().refresh()
         with self.context.reading() as session:
             self._brands = vehicle_brands(session)

@@ -536,6 +536,9 @@ class VehicleDetailsOverlay(QWidget):
     def __init__(self, context, vehicle_id: int, window: QWidget) -> None:
         super().__init__(window)
         self._window = window
+        #: False while the rental wizard owns this overlay: Escape and
+        #: outside clicks must not discard a half-filled rental.
+        self._dismissible = True
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # Scoped dim over the whole window: the selector matches only the
         # overlay itself, so no `background` ever cascades onto descendants
@@ -598,6 +601,14 @@ class VehicleDetailsOverlay(QWidget):
         self.scroll.setWidget(self.panel)
         self.backdrop.lower()
         self.hide()
+
+    def set_dismissible(self, flag: bool) -> None:
+        """Allow or refuse Escape/outside-click closing.
+
+        Defaults to True. The rental wizard turns this off so a stray click
+        cannot discard the form, then back on before hiding.
+        """
+        self._dismissible = bool(flag)
 
     def _render_backdrop(self) -> bool:
         """Freeze, blur and dim the live page into the backdrop label.
@@ -715,10 +726,10 @@ class VehicleDetailsOverlay(QWidget):
             return False
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        if event.key() == Qt.Key.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape and self._dismissible:
             self.hide_overlay()
-        else:
-            super().keyPressEvent(event)
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
         # Outside-click-to-close only: presses inside the card column do
@@ -726,7 +737,8 @@ class VehicleDetailsOverlay(QWidget):
         # propagate up here -- closing on them was the bug). The scroll is
         # the stable frame: wizard steps swap panels, never the scroll.
         if (
-            event.button() == Qt.MouseButton.LeftButton
+            self._dismissible
+            and event.button() == Qt.MouseButton.LeftButton
             and not self.scroll.geometry().contains(event.position().toPoint())
         ):
             self.hide_overlay()

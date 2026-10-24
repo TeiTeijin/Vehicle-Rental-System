@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from PySide6.QtCore import QDate, Qt, QUrl, Signal
+from PySide6.QtCore import QDate, QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -42,10 +42,12 @@ from app.services import (
     customer_service,
     payment_service,
 )
+from app.services.errors import ValidationError
 from app.services.receipt_service import generate_receipt_pdf
 from app.staff import theme
 from app.staff.cards import Caption, Card, MoneyNumber, SectionLabel
 from app.staff.feedback import describe
+from app.staff.widgets import confirm
 from app.utils.money import money, pesos
 
 
@@ -78,6 +80,8 @@ WIZARD_SPACING = 8
 
 class _StepBase(QWidget):
     """Transparent host holding the white 8px card in wizard density."""
+
+    cancel_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -119,10 +123,17 @@ class _StepBase(QWidget):
         self._body.addWidget(label)
         return label
 
-    def _buttons(self, primary_text: str) -> tuple[QPushButton, QPushButton]:
+    def _buttons(
+        self, primary_text: str, *, cancel: bool = False
+    ) -> tuple[QPushButton, QPushButton]:
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
+        if cancel:
+            leave = QPushButton("Cancel rental", self.card)
+            leave.setObjectName("secondaryButton")
+            leave.clicked.connect(self.cancel_requested.emit)
+            row.addWidget(leave)
         row.addStretch(1)
         back = QPushButton("Back", self.card)
         back.setObjectName("secondaryButton")
@@ -182,7 +193,7 @@ class SchedulePanel(_StepBase):
             if vehicle is None:
                 self._missing = True
                 self._body.addWidget(Caption("That vehicle no longer exists.", parent=self.card))
-                back, self.next_button = self._buttons("Continue")
+                back, self.next_button = self._buttons("Continue", cancel=True)
                 back.clicked.connect(self.backed.emit)
                 self.next_button.setEnabled(False)
                 return
@@ -228,7 +239,7 @@ class SchedulePanel(_StepBase):
         self.fee_caption = Caption("", parent=self.card)
         self._body.addWidget(self.fee_caption)
 
-        back, self.next_button = self._buttons("Continue")
+        back, self.next_button = self._buttons("Continue", cancel=True)
         back.clicked.connect(self.backed.emit)
         self.next_button.clicked.connect(self._on_continue)
         self._refresh_quote()
@@ -350,7 +361,7 @@ class LicencePanel(_StepBase):
         self._body.addWidget(self._form)
         self._form_panel = None
 
-        back, self.next_button = self._buttons("Continue to payment")
+        back, self.next_button = self._buttons("Continue to payment", cancel=True)
         back.clicked.connect(self.backed.emit)
         self.next_button.clicked.connect(self._on_continue)
         self.next_button.setEnabled(False)
@@ -495,7 +506,7 @@ class LicencePanel(_StepBase):
                     self._state.start.toPython(), self._state.end.toPython(),
                 )
                 if verdict["blocked"]:
-                    raise RuntimeError("; ".join(verdict["reasons"]))
+                    raise ValidationError("; ".join(verdict["reasons"]))
                 picked = customer.user_id
                 name = customer.full_name
         except Exception as exc:  # noqa: BLE001 - inline, nothing committed
@@ -644,7 +655,7 @@ class PaymentPanel(_StepBase):
             button.clicked.connect(self._sync_ref)
         self._sync_ref()
 
-        back, self.pay_button = self._buttons("Pay")
+        back, self.pay_button = self._buttons("Pay", cancel=True)
         back.clicked.connect(self.backed.emit)
         self.pay_button.clicked.connect(self._on_pay)
         self._refresh_pay_button()
@@ -802,12 +813,15 @@ class DonePanel(_StepBase):
 # -- controller ----------------------------------------------------------------
 
 
-class RentalWizard:
+class RentalWizard(QObject):
     """Owns the wizard state and swaps step panels in the overlay scroll.
 
     The frosted backdrop is rendered once for the details panel and left
     alone: the page behind never changes between steps.
     """
+
+    cancelled = Signal()
+    finished = Signal()
 
     def __init__(
         self,
@@ -821,6 +835,7 @@ class RentalWizard:
         notify=None,
         customer_id: int | None = None,
     ) -> None:
+        super().__init__()
         self._context = context
         self._overlay = overlay
         self._navigate = navigate
@@ -849,6 +864,9 @@ class RentalWizard:
         self._overlay.scroll.setWidget(widget)
         self._overlay.scroll.verticalScrollBar().setValue(0)
         self._current = widget
+        cancel = getattr(widget, "cancel_requested", None)
+        if cancel is not None:
+            cancel.connect(self._on_cancel)
         return widget
 
     def _back_to_details(self) -> None:
@@ -985,10 +1003,26 @@ class RentalWizard:
             detail = str(exc).strip() or _friendly(exc)
             return None, detail
 
-    def _on_view_bookings(self) -> None:
+    def _on_cancel(self) -> None:
+        if not confirm(
+            self._overlay,
+            "Discard this rental?",
+            detail="The customer, dates, and payment choice will be lost.",
+            destructive=True,
+        ):
+            return
+        self._overlay.set_dismissible(True)
         self._overlay.hide_overlay()
+        self.cancelled.emit()
+
+    def _on_view_bookings(self) -> None:
+        self._overlay.set_dismissible(True)
+        self._overlay.hide_overlay()
+        self.finished.emit()
         if self._navigate:
             self._navigate("bookings")
 
     def _on_finished(self) -> None:
+        self._overlay.set_dismissible(True)
         self._overlay.hide_overlay()
+        self.finished.emit()

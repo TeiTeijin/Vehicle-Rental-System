@@ -39,6 +39,9 @@ class FrostedOverlay(QWidget):
     def __init__(self, window: QWidget) -> None:
         super().__init__(window)
         self._window = window
+        #: False while a wizard owns the overlay: Escape and outside clicks
+        #: must not throw away a half-filled rental.
+        self._dismissible = True
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # Scoped dim: matches only the overlay itself, so no `background`
         # ever cascades onto descendants. The blurred snapshot carries its
@@ -89,6 +92,14 @@ class FrostedOverlay(QWidget):
         middle.addStretch(1)
         outer.addLayout(middle, 1)
         self.hide()
+
+    def set_dismissible(self, flag: bool) -> None:
+        """Allow or refuse Escape/outside-click closing.
+
+        Defaults to True. A wizard turns this off while it owns the overlay so
+        a stray click cannot discard the form, then back on before hiding.
+        """
+        self._dismissible = bool(flag)
 
     # -- content ---------------------------------------------------------
 
@@ -204,16 +215,17 @@ class FrostedOverlay(QWidget):
             return False
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        if event.key() == Qt.Key.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape and self._dismissible:
             self.hide_overlay()
-        else:
-            super().keyPressEvent(event)
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
         # Outside-click-to-close only: presses inside the card column do
         # nothing at all; right-clicks never close.
         if (
-            event.button() == Qt.MouseButton.LeftButton
+            self._dismissible
+            and event.button() == Qt.MouseButton.LeftButton
             and not self.scroll.geometry().contains(event.position().toPoint())
         ):
             self.hide_overlay()
