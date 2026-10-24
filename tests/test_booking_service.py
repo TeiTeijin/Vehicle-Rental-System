@@ -13,6 +13,7 @@ import pytest
 from app.models import Booking, Maintenance_Record, Payment, Penalty, Vehicle
 from app.services import booking_service, fleet_service, payment_service
 from app.services.errors import ConflictError, StateError, ValidationError
+from app.utils.money import ZERO
 
 TODAY = date(2026, 9, 10)
 D1 = date(2026, 9, 1)
@@ -329,6 +330,35 @@ class TestCheckIn:
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         booking_service.confirm_booking(session, booking)
         booking_service.check_in(session, booking, staff, 42000, "full")
+        assert booking.status == "ongoing"
+
+    def test_check_in_requires_a_settled_pickup(
+        self, session, customer, vehicle, staff
+    ):
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=D1,
+            end_date=D3,
+            rental_amount=booking_service.SCHEDULING_FEE,
+            method="cash",
+            staff_id=staff.user_id,
+        )
+        balance = payment_service.booking_balance(session, booking)
+        assert balance.balance > ZERO
+
+        with pytest.raises(ConflictError, match="outstanding"):
+            booking_service.check_in(
+                session, booking, staff, 42000, "full", require_settlement=True
+            )
+
+        payment_service.record_payment(
+            session, booking, balance.balance, "cash", recorded_by=staff.user_id
+        )
+        booking_service.check_in(
+            session, booking, staff, 42000, "full", require_settlement=True
+        )
         assert booking.status == "ongoing"
 
     def test_cannot_check_in_twice(self, session, customer, vehicle, staff):

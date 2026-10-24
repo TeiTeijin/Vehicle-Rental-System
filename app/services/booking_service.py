@@ -451,6 +451,7 @@ def check_in(
     *,
     photo_url: str | None = None,
     damage_notes: str | None = None,
+    require_settlement: bool = False,
 ) -> Inspection_Report:
     if booking.status not in CHECK_IN_STATUSES:
         raise StateError(
@@ -476,6 +477,15 @@ def check_in(
             f"{vehicle.mileage:,} km already on record. Check the reading.",
             field="mileage_reading",
         )
+
+    if require_settlement:
+        balance = payment_service.booking_balance(session, booking)
+        if balance.balance > ZERO:
+            raise ConflictError(
+                f"Booking #{booking.booking_id} still has "
+                f"{balance.balance} outstanding. Collect the pickup balance "
+                "before releasing the vehicle."
+            )
 
     fleet_service.mark_rented(session, vehicle)
     vehicle.mileage = mileage_reading

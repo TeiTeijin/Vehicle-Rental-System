@@ -4422,19 +4422,33 @@ class TestBookingsPageActions:
         import app.staff.pages.bookings as module
 
         from app.models import Vehicle
+        from app.services import payment_service
 
         monkeypatch.setattr(module, "toast", lambda *a, **k: None)
         built, context = branch
         page = BookingsPage(shell)
         page.refresh()
         _wait_for_bookings(page)
-        # upcoming is confirmed: check it out for pickup first.
+        # upcoming is confirmed but unpaid: release must be refused.
         self._select(page, f"#{built.upcoming.booking_id}")
         with context.session() as session:
             vehicle = session.get(
                 Vehicle, built.promised_car.vehicle_id
             )
             vehicle.mileage = 10_000
+        assert page.run(
+            "check_in", mileage=12_000, fuel_level="full", damage_notes=""
+        ) is False
+        with context.session() as session:
+            booking = session.get(Booking, built.upcoming.booking_id)
+            payment_service.record_payment(
+                session,
+                booking,
+                booking.total_cost,
+                "cash",
+                recorded_by=built.counter.user_id,
+            )
+        self._select(page, f"#{built.upcoming.booking_id}")
         assert page.run(
             "check_in", mileage=12_000, fuel_level="full", damage_notes=""
         ) is True
@@ -4533,6 +4547,31 @@ class TestBookingsPageActions:
         panel._on_go()
         assert len(seen) == 1 and seen[0]["method"] == "gcash"
         panel.deleteLater()
+
+    def test_check_in_panel_blocks_release_with_balance(self, qapp):
+        from app.staff.booking_panels import CheckInPanel
+
+        panel = CheckInPanel(outstanding=Decimal("1500.00"))
+        assert panel.go_button.isEnabled() is False
+        assert panel.collect_button.isHidden() is False
+        panel.deleteLater()
+
+    def test_check_in_with_a_balance_routes_to_payment(self, shell, branch):
+        from app.staff.booking_panels import CheckInPanel, PaymentPanel
+
+        built, _context = branch
+        page = BookingsPage(shell)
+        page.refresh()
+        _wait_for_bookings(page)
+        self._select(page, f"#{built.upcoming.booking_id}")
+        assert page.open_check_in() is True
+        panel = page._booking_overlay.scroll.widget()
+        assert isinstance(panel, CheckInPanel)
+        assert panel.go_button.isEnabled() is False
+        assert panel.collect_button.isHidden() is False
+        panel.collect_button.click()
+        assert isinstance(page._booking_overlay.scroll.widget(), PaymentPanel)
+        page._booking_overlay.hide_overlay()
 
     def test_action_panels_open_in_glass_not_windows(self, shell, branch):
         from app.staff.overlay import FrostedOverlay

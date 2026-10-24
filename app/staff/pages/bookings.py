@@ -683,11 +683,24 @@ class BookingsPage(StaffPage):
                 _toast(self, "That booking no longer exists.", "error")
                 return False
             floor = int(booking.vehicle.mileage or 0)
-        panel = CheckInPanel(self, current_mileage=floor)
-        panel.submitted.connect(lambda values: self._submit("check_in", values))
+            outstanding = payment_service.booking_balance(session, booking).balance
+        panel = CheckInPanel(
+            self, current_mileage=floor, outstanding=outstanding
+        )
+        panel.submitted.connect(
+            lambda values: self._submit_for(booking_id, "check_in", values)
+        )
+        panel.collect_requested.connect(
+            lambda: self._collect_pickup_balance(booking_id)
+        )
         panel.cancelled.connect(self._hide_overlay)
         self._overlay_panel(panel)
         return True
+
+    def _collect_pickup_balance(self, booking_id: int) -> None:
+        """Hand the clerk straight from check-in to the payment form."""
+        self._hide_overlay()
+        self.open_payment_for(booking_id)
 
     def open_check_out(self) -> bool:
         booking_id = self._selected_or_warn()
@@ -828,6 +841,7 @@ def _do_check_in(session, booking, context, *, mileage: int, fuel_level: str, da
         mileage_reading=mileage,
         fuel_level=fuel_level,
         damage_notes=damage_notes or None,
+        require_settlement=True,
     )
 
 

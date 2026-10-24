@@ -49,12 +49,28 @@ def _friendly(error: BaseException) -> str:
 class CheckInPanel(_StepBase):
     submitted = Signal(dict)
     cancelled = Signal()
+    collect_requested = Signal()
 
-    def __init__(self, parent=None, *, current_mileage: int = 0) -> None:
+    def __init__(
+        self,
+        parent=None,
+        *,
+        current_mileage: int = 0,
+        outstanding: Decimal = ZERO,
+    ) -> None:
         super().__init__(parent)
         self._head("Check in", "Release the vehicle")
         self._error = self._error_label()
         self._floor = int(current_mileage or 0)
+        self._outstanding = money(outstanding, field="outstanding")
+        if self._outstanding > ZERO:
+            self._body.addWidget(
+                Caption(
+                    f"Outstanding {pesos(self._outstanding)}: record payment "
+                    "before releasing the vehicle.",
+                    parent=self.card,
+                )
+            )
         grid = QFormLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(6)
@@ -71,10 +87,24 @@ class CheckInPanel(_StepBase):
         grid.addRow(_field_label("Damage notes", self.card), self.damage_edit)
         self._body.addLayout(grid)
         back, go = self._buttons("Check in")
+        self.go_button = go
         back.clicked.connect(self.cancelled.emit)
         go.clicked.connect(self._on_go)
+        self.collect_button = QPushButton("Record payment first", self.card)
+        self.collect_button.setObjectName("secondaryButton")
+        self.collect_button.setVisible(self._outstanding > ZERO)
+        self.collect_button.clicked.connect(self.collect_requested.emit)
+        self._body.addWidget(self.collect_button)
+        if self._outstanding > ZERO:
+            self.go_button.setEnabled(False)
 
     def _on_go(self) -> None:
+        if self._outstanding > ZERO:
+            self._error.setText(
+                "Collect the outstanding balance before releasing the vehicle."
+            )
+            self._error.setVisible(True)
+            return
         mileage = int(self.mileage_edit.value())
         if mileage < 0:
             self._error.setText("Mileage cannot be negative.")
