@@ -389,7 +389,7 @@ git push origin final-audit
 - Consumes: the legacy `old_db` fixture and `Base.metadata`.
 - Produces: one documented migration order that produces all model tables/columns on a legacy database.
 
-- [ ] **Step 1: Write the failing full-schema test**
+- [x] **Step 1: Write the failing full-schema test**
 
 Add `test_documented_migration_order_matches_models` to `tests/test_migrate_staff_schema.py`. It must:
 1. Build the legacy database.
@@ -399,7 +399,7 @@ Add `test_documented_migration_order_matches_models` to `tests/test_migrate_staf
 
 Before the fix, expected FAIL: `BRANCH` missing or `BOOKING.pickup_dt` missing.
 
-- [ ] **Step 2: Run it and capture the failure**
+- [x] **Step 2: Run it and capture the failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_migrate_staff_schema.py -k "documented_migration_order" -v
@@ -407,7 +407,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/test_migrate_staff_schema.py -k
 
 Record the exact missing table/column.
 
-- [ ] **Step 3: Decide the canonical order**
+- [x] **Step 3: Decide the canonical order**
 
 Preferred order:
 1. `python -m scripts.migrate_staff_schema`
@@ -417,11 +417,11 @@ Preferred order:
 
 If a migration script already performs another's work, document that instead of duplicating it. Record the decision in the register.
 
-- [ ] **Step 4: Fix the test fixture or production migration**
+- [x] **Step 4: Fix the test fixture or production migration**
 
 If the separate customer migration is intentional, update the `old_db` fixture to run the documented order and keep the staff migration focused. If a production script is incomplete, add the missing table/column with an idempotent guard. Do not make the test pass by weakening the metadata comparison.
 
-- [ ] **Step 5: Run all migration tests**
+- [x] **Step 5: Run all migration tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_migrate_*.py -q
@@ -429,7 +429,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/test_migrate_*.py -q
 
 Expected: PASS.
 
-- [ ] **Step 6: Verify fresh and legacy databases**
+- [x] **Step 6: Verify fresh and legacy databases**
 
 ```bash
 rm -f /tmp/opencode/final-audit-fresh.db
@@ -441,7 +441,7 @@ DATABASE_URL=sqlite:////tmp/opencode/final-audit-fresh.db python -m scripts.migr
 
 Run the same order against a copied legacy SQLite database. Both must be idempotent on a second run.
 
-- [ ] **Step 7: Commit and push**
+- [x] **Step 7: Commit and push**
 
 ```bash
 git add tests/test_migrate_staff_schema.py scripts/ docs/audits/final-audit-register.md

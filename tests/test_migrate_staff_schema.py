@@ -14,7 +14,9 @@ migration would do nothing, passing without ever exercising an ALTER.
 from __future__ import annotations
 
 import importlib
+import io
 import sys
+from contextlib import redirect_stdout
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -154,22 +156,41 @@ def old_db(tmp_path):
 
     migration = importlib.import_module("scripts.migrate_staff_schema")
     migration.engine = engine
+    customer_booking = importlib.import_module("scripts.migrate_customer_booking")
+    customer_booking.engine = engine
+    guarantor = importlib.import_module("scripts.migrate_guarantor_profile")
+    guarantor.engine = engine
+
+    def _run_customer_booking(dry_run: bool) -> None:
+        customer_booking.create_branch_table(dry_run)
+        customer_booking.create_reference_tables(dry_run)
+        customer_booking.add_columns(dry_run)
+
+    def _run_guarantor(dry_run: bool) -> None:
+        guarantor._add_columns(guarantor._columns(), dry_run)
+        guarantor._licence_nullable(dry_run)
 
     def run(*args):
-        """Run the migration; return the exit code instead of raising.
+        """Run the documented migration order; return the staff exit code.
 
-        main() ends with SystemExit(1) when verification finds a problem, which
-        is the behaviour a command-line user wants but would otherwise abort
-        every test before it could inspect the resulting schema.
+        The order is staff schema -> customer booking schema -> guarantor
+        profile. main() ends with SystemExit(1) when verification finds a
+        problem, which is the behaviour a command-line user wants but would
+        otherwise abort every test before it could inspect the schema.
         """
+        dry_run = "--dry-run" in args
         sys.argv = ["migrate_staff_schema", *args]
+        code = 0
         try:
             migration.main()
         except SystemExit as exc:
-            return exc.code
+            code = exc.code
         finally:
             sys.argv = ["pytest"]
-        return 0
+        with redirect_stdout(io.StringIO()):
+            _run_customer_booking(dry_run)
+            _run_guarantor(dry_run)
+        return code
 
     try:
         yield engine, run
@@ -419,3 +440,90 @@ class TestResultMatchesModels:
             assert booking.created_by == staff.user_id
             assert pending.recorded_by == staff.user_id
             assert pending.created_at is not None
+
+
+class TestDocumentedMigrationOrder:
+    def test_documented_migration_order_matches_models(self, old_db):
+        """Staff + customer booking + guarantor produce every model column.
+
+        The live database is not built by `create_all`; it is built by this
+        order. A column that only exists on a fresh database is a production
+        migration bug, so compare the migrated schema with the ORM metadata
+        instead of a hand-written list.
+        """
+        from datetime import date, datetime
+
+        from app.database import Base
+        import app.models  # noqa: F401  (registers the tables on Base)
+        from app.models import Booking, Branch, Users, Vehicle, Vehicle_Category
+
+        engine, run = old_db
+        assert run() == 0
+
+        existing = set(inspect(engine).get_table_names())
+        for table in Base.metadata.sorted_tables:
+            assert table.name in existing, f"{table.name} is missing"
+            db_columns = {
+                column["name"] for column in inspect(engine).get_columns(table.name)
+            }
+            model_columns = {column.name for column in table.columns}
+            missing = model_columns - db_columns
+            assert not missing, f"{table.name} is missing {sorted(missing)}"
+
+        with Session(engine, future=True) as session:
+            category = Vehicle_Category(
+                category_name="Car", base_rate_multiplier=1.0
+            )
+            branch = Branch(
+                name="Main Branch",
+                address="1 Main Street",
+                is_active=True,
+                created_at=datetime(2026, 1, 1, 8, 0),
+            )
+            session.add_all([category, branch])
+            session.flush()
+
+            customer = Users(
+                full_name="Audit Customer",
+                email="audit@example.com",
+                password_hash="hash",
+                address="1 Audit Street",
+                license_number="AUD-001",
+                license_expiry=date(2027, 1, 1),
+                role="customer",
+                created_at=datetime(2026, 1, 1, 8, 0),
+            )
+            vehicle = Vehicle(
+                category_id=category.category_id,
+                make="Toyota",
+                model="Vios",
+                year=2022,
+                plate_number="MIG-001",
+                daily_rate="2500.00",
+                mileage=0,
+                status="available",
+                created_at=datetime(2026, 1, 1, 8, 0),
+            )
+            session.add_all([customer, vehicle])
+            session.flush()
+
+            booking = Booking(
+                user_id=customer.user_id,
+                vehicle_id=vehicle.vehicle_id,
+                start_date=date(2026, 9, 1),
+                end_date=date(2026, 9, 5),
+                total_cost="10000.00",
+                status="pending",
+                created_at=datetime(2026, 1, 1, 8, 0),
+                pickup_dt=datetime(2026, 9, 1, 10, 0),
+                return_dt=datetime(2026, 9, 5, 10, 0),
+                pickup_branch_id=branch.branch_id,
+                return_branch_id=branch.branch_id,
+            )
+            session.add(booking)
+            session.commit()
+
+            assert booking.pickup_dt == datetime(2026, 9, 1, 10, 0)
+            assert booking.return_dt == datetime(2026, 9, 5, 10, 0)
+            assert booking.pickup_branch_id == branch.branch_id
+            assert booking.return_branch_id == branch.branch_id

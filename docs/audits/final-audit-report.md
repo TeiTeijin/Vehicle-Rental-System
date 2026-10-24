@@ -47,16 +47,19 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Severity | Open | Fixed | Deferred | Waived |
 |---|---|---|---|---|
 | Critical | 0 | 0 | 0 | 0 |
-| High | 0 | 0 | 0 | 0 |
+| High | 0 | 2 | 0 | 0 |
 | Medium | 0 | 0 | 0 | 0 |
-| Low | 0 | 0 | 0 | 0 |
+| Low | 1 | 0 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
+
+Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition.
 
 Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 
 ## Fixes and regression tests
 
-Pending.
+- **F-001 / F-002 (Task 3):** `migrate_customer_booking` now emits SQLite-compatible DDL for the `payment_method` enum and creates the PSGC reference tables idempotently. Regression test: `tests/test_migrate_staff_schema.py::TestDocumentedMigrationOrder::test_documented_migration_order_matches_models`. All 119 migration tests pass; fresh and legacy orders are repeatable.
+- **F-003 (Task 3, Low):** legacy SQLite cannot relax `USERS.license_number` in place; documented in the register for Task 24 disposition.
 
 ## Deferred and waived items
 

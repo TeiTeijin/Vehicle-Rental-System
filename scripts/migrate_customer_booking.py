@@ -3,6 +3,8 @@
 Adds, safely and idempotently:
 
 * BRANCH                    -- pickup/return counters with opening hours
+* PSGC reference tables     -- province and city/municipality rows used by
+                               the sign-up address form
 * BOOKING online columns    -- pickup/return datetimes, branches, payment
                                method, the price breakdown and the reference
 
@@ -25,7 +27,7 @@ import argparse
 from sqlalchemy import inspect, text
 
 from app.database import engine
-from app.models import Booking, Branch
+from app.models import Booking, Branch, PsgcCityMunicipality, PsgcProvince
 
 #: (table, column, DDL fragment). Keep in step with the Column declarations in
 #: app/models/*.py -- the ENUM lists especially.
@@ -52,6 +54,18 @@ def existing_columns(table: str) -> set[str]:
     return {column["name"] for column in inspector.get_columns(table)}
 
 
+def ddl_for_dialect(ddl: str) -> str:
+    """Translate MySQL-only DDL fragments for SQLite.
+
+    SQLite has no ENUM type; SQLAlchemy's model creates a VARCHAR with a
+    CHECK constraint, but ALTER TABLE cannot add that constraint portably.
+    The column still stores the same short strings.
+    """
+    if engine.dialect.name.startswith("sqlite") and ddl.upper().startswith("ENUM("):
+        return "VARCHAR(16) NULL"
+    return ddl
+
+
 def create_branch_table(dry_run: bool) -> None:
     print("=== 1. BRANCH table ===")
     if Branch.__tablename__ in inspect(engine).get_table_names():
@@ -64,9 +78,30 @@ def create_branch_table(dry_run: bool) -> None:
     print(f"  + {Branch.__tablename__} created")
 
 
+def create_reference_tables(dry_run: bool) -> None:
+    """Create the PSGC tables a legacy database may not have.
+
+    The live database already ships the full PSGC reference set; a database
+    built only from the staff schema does not. Creating the empty tables is
+    enough for sign-up to load; the rows remain the operator's data.
+    """
+    print()
+    print("=== 2. PSGC reference tables ===")
+    for model in (PsgcProvince, PsgcCityMunicipality):
+        name = model.__tablename__
+        if name in inspect(engine).get_table_names():
+            print(f"  = {name} already exists, skipping")
+            continue
+        if dry_run:
+            print(f"  + {name} WOULD BE CREATED")
+            continue
+        model.__table__.create(engine, checkfirst=True)
+        print(f"  + {name} created")
+
+
 def add_columns(dry_run: bool) -> None:
     print()
-    print("=== 2. BOOKING online columns ===")
+    print("=== 3. BOOKING online columns ===")
     present: dict[str, set[str]] = {}
     for table, column, ddl in NEW_COLUMNS:
         if table not in present:
@@ -77,12 +112,15 @@ def add_columns(dry_run: bool) -> None:
         if column in present[table]:
             print(f"  = {table}.{column:<18} already exists, skipping")
             continue
+        column_ddl = ddl_for_dialect(ddl)
         if dry_run:
-            print(f"  + {table}.{column:<18} WOULD ADD  ({ddl})")
+            print(f"  + {table}.{column:<18} WOULD ADD  ({column_ddl})")
         else:
             with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-            print(f"  + {table}.{column:<18} added       ({ddl})")
+                conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {column} {column_ddl}")
+                )
+            print(f"  + {table}.{column:<18} added       ({column_ddl})")
         present[table].add(column)
 
 
@@ -110,6 +148,7 @@ def main() -> None:
     args = parser.parse_args()
 
     create_branch_table(args.dry_run)
+    create_reference_tables(args.dry_run)
     add_columns(args.dry_run)
     report()
 

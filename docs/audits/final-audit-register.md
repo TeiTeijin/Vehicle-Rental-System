@@ -46,7 +46,7 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 | X6 | Shared | Media/photos → customer and staff surfaces | `app/ui/vehicle_details.py`, `vehicle_photo.py`, `app/staff/vehicle_cards.py` | `media_service`, `vehicle_photos`, `carimages_client`, `image_cache`, `api_cache` | `VEHICLE_MEDIA` | Customer, staff | No crash/hang on API failure; cache fallback; variant keys distinct; no traversal; no customer/staff data in metadata | `test_media_warning.py`, `test_security_hardening.py`, `scripts/test_image_cache.py` | Pending Tasks 6, 15, 22 | Not started | — | — |
 | X7 | Shared | Booking state → customer notifications | `app/services/notification_service.py`, `app/ui/notifications.py` | `notification_service`, `booking_service` | `BOOKING`, `PAYMENT` | Customer, staff | Status changes produce correct customer-visible notifications; no cross-customer leak | `test_customer_notifications.py`, `test_booking_service.py` | Pending Tasks 8, 11, 13 | Not started | — | — |
 | X8 | Security | Roles/authorization/PII/branch scope | All auth/customer/profile/payment/booking/media/backup paths | `auth_service`, `customer_service`, `profile_service`, `payment_service`, `backup_service` | `USERS`, `BOOKING`, `PAYMENT`, `VEHICLE_MEDIA` | Customer, staff, admin, inactive, flagged | Customer/staff boundary enforced; IDOR blocked; inactive/flagged per policy; passwords hashed; temp passwords not plaintext; licence docs/cache paths safe; backups sanitized; errors do not leak internals; Decimal money | `test_security_hardening.py`, `test_customer_flow_audit.py`, `test_staff_login.py`, `test_staff_pages.py`, `test_backup_live_db.py` | Pending Tasks 5, 8, 9, 17, 20, 21 | Not started | — | — |
-| X9 | Data | Migration/seed/data integrity | `scripts/migrate_*`, `scripts/init_db.py`, `scripts/seed_*` | migration scripts, `app.database`, models | All tables | System | Documented order produces all model tables/columns on fresh and legacy DBs; idempotent; seeds consistent; no data loss | `tests/test_migrate_*.py`, `test_seed_demo_data.py` | Pending Tasks 3, 21 | Not started | — | — |
+| X9 | Data | Migration/seed/data integrity | `scripts/migrate_*`, `scripts/init_db.py`, `scripts/seed_*` | migration scripts, `app.database`, models | All tables | System | Documented order produces all model tables/columns on fresh and legacy DBs; idempotent; seeds consistent; no data loss | `tests/test_migrate_*.py`, `test_seed_demo_data.py` | Task 3: full-schema test added; 119 migration tests passed; fresh order 0/0/0 twice; legacy order 0/0/1 (SQLite `license_number` limitation, F-003) | Pass | — | F-001/F-002 fixed; F-003 Low open |
 
 ## Traceability
 
@@ -184,7 +184,9 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 
 | ID | Task | Severity | Flow(s) | Reproduction | Expected | Status | Fix commit | Regression test |
 |---|---|---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — | — | — |
+| F-001 | 3 | High | X9 | Run `migrate_customer_booking` against SQLite: `ALTER TABLE BOOKING ADD COLUMN payment_method ENUM('cash','card','gcash') NULL` fails with `near "'cash'": syntax error`. | Dialect-appropriate DDL for SQLite (`VARCHAR(16)`). | Fixed | Task 3 | `test_documented_migration_order_matches_models` |
+| F-002 | 3 | High | X9, C1 | The documented migration order leaves `PSGC_PROVINCES` and `PSGC_CITIES_MUNICIPALITIES` absent on a legacy database, so sign-up location lookups have no tables. | Create both reference tables idempotently in the customer migration. | Fixed | Task 3 | `test_documented_migration_order_matches_models` |
+| F-003 | 3 | Low | X9 | On legacy SQLite, `migrate_guarantor_profile` cannot relax `USERS.license_number` from NOT NULL and exits 1 with instructions. | Document the limitation; MySQL migration path relaxes the column; fresh SQLite matches the model. | Open (Task 24) | — | — |
 
 ## Baseline
 
@@ -196,6 +198,18 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 - Baseline log: `.superpowers/sdd/2026-10-25-final-audit/baseline.log` (local scratch; not committed).
 - Command: `$env:QT_QPA_PLATFORM='offscreen'; .venv\Scripts\python.exe -m pytest -q`.
 
+## Task 3 notes: canonical migration order
+
+1. `python -m scripts.migrate_staff_schema`
+2. `python -m scripts.migrate_customer_booking`
+3. `python -m scripts.migrate_guarantor_profile`
+4. seeds (`seed_data`, `seed_customer_catalog`, `seed_demo_data` as needed)
+
+- `migrate_staff_schema` already adds the guarantor columns, so step 3 is a no-op for columns; its remaining job is relaxing `USERS.license_number` on MySQL.
+- `migrate_customer_booking` now creates `BRANCH` and the two PSGC reference tables, then adds the online booking columns. The PSGC tables are created empty; reference rows remain operator data.
+- `migrate_customer_booking` now translates MySQL `ENUM(...)` DDL to `VARCHAR(16)` on SQLite (F-001).
+- Legacy SQLite cannot relax `USERS.license_number` in place; step 3 reports that and exits 1. Fresh SQLite and the MySQL production path are correct. Recorded as F-003 for Task 24 disposition.
+
 ## Open questions
 
 | Question | Owner task | Resolution |
@@ -203,7 +217,7 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 | Is there a staff branch assignment, or is branch scope only pickup/return? | Task 21 | Open |
 | Is no-show represented as `cancelled`, or is it missing? | Task 14 | Open |
 | Are old image-cache keys migrated or invalidated? | Task 22 | Open |
-| Does `migrate_guarantor_profile` belong in the canonical migration order? | Task 3 | Open |
+| Does `migrate_guarantor_profile` belong in the canonical migration order? | Task 3 | Resolved: yes, for MySQL `license_number` nullability; its columns are already added by `migrate_staff_schema`. Legacy SQLite reports an in-place limitation (F-003). |
 | Is `reserved` ever stored, or is it a dead enum value? | Task 15 | Open |
 | Does `fleet_service.mark_rented` bypass `LEGAL_TRANSITIONS` (`available → rented`)? | Task 15 | Open |
 | Should the legacy `app/ui/dashboard.py` / `hero.py` be deleted? | Task 24 (backlog) | Open |
