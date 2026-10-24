@@ -47,12 +47,12 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Severity | Open | Fixed | Deferred | Waived |
 |---|---|---|---|---|
 | Critical | 0 | 0 | 0 | 0 |
-| High | 0 | 2 | 0 | 0 |
+| High | 2 | 2 | 0 | 0 |
 | Medium | 0 | 1 | 0 | 0 |
 | Low | 1 | 0 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
 
-Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition.
+Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied.
 
 Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 

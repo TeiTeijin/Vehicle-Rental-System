@@ -636,7 +636,7 @@ git push origin final-audit
 - Consumes: `booking_service.create_online_booking`, `assert_window_free`, `pricing.quote`, `branch_service.validate_window`, `card_validation.collect`.
 - Produces: verified booking creation, pricing, payment-method, and branch rules.
 
-- [ ] **Step 1: Run the booking tests**
+- [x] **Step 1: Run the booking tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -646,7 +646,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_pricing_policy.py -q
 ```
 
-- [ ] **Step 2: Walk the booking flow**
+- [x] **Step 2: Walk the booking flow**
 
 Verify:
 - pickup/return date and time are required
@@ -660,7 +660,7 @@ Verify:
 - `channel="online"`, `reference_code` is unique, pickup/return branches are stored
 - expired licence, inactive customer, staff account, and workshop vehicle are rejected
 
-- [ ] **Step 3: Walk payment methods**
+- [x] **Step 3: Walk payment methods**
 
 For card, GCash, and pay-at-pickup:
 - card number is never stored in full; only `card_last4`
@@ -669,13 +669,13 @@ For card, GCash, and pay-at-pickup:
 - failed/pending payments do not mark the booking paid
 - customer cannot submit an impossible amount
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `C5`, `X2`, `X5`, and the booking part of `X1` in the register.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/ui app/services tests docs/audits/final-audit-register.md
