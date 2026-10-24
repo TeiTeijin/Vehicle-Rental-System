@@ -281,7 +281,7 @@ Create `docs/audits/final-audit-register.md` with one row per flow and cross-cut
 - Consumes: `final-audit` branch at `515c014`.
 - Produces: a committed audit register with all IDs, baseline logs, and a canonical plan path in the repo.
 
-- [ ] **Step 1: Refresh and verify the branch**
+- [x] **Step 1: Refresh and verify the branch**
 
 ```bash
 git fetch origin --prune
@@ -293,15 +293,15 @@ git log --oneline --decorate -5
 
 Record the exact commit in the register.
 
-- [ ] **Step 2: Copy the plan into the repo**
+- [x] **Step 2: Copy the plan into the repo**
 
 Copy `/home/tei/.opencode/plan/2026-10-25-final-audit.md` to `docs/plans/2026-10-25-final-audit.md`. This is the canonical copy for other devices.
 
-- [ ] **Step 3: Create the register skeleton**
+- [x] **Step 3: Create the register skeleton**
 
 Add the 29 flow IDs (`C1`–`C8`, `S1`–`S12`, `X1`–`X9`) with the fields from the Audit Register Contract. Set every status to `Not started`.
 
-- [ ] **Step 4: Record the test baseline**
+- [x] **Step 4: Record the test baseline**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest --collect-only -q
@@ -311,11 +311,11 @@ echo $?
 
 Record the collected count, failures, skips, and log path. Expected current failures: the two `test_migrate_staff_schema.py` tests.
 
-- [ ] **Step 5: Create the report skeleton**
+- [x] **Step 5: Create the report skeleton**
 
 Add sections for scope, branch/commit, environment, baseline failures, findings summary, fixes, and sign-off status.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add docs/plans/2026-10-25-final-audit.md docs/audits/final-audit-register.md docs/audits/final-audit-report.md
