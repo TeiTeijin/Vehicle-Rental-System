@@ -90,7 +90,14 @@ def _fleet_rows(context, filtr: FleetFilter):
             )
             issues = []
             if blocked:
-                issues.append(f"Maintenance until {blocked.end_date:%d %b}")
+                if getattr(blocked, "end_date", None):
+                    issues.append(f"Maintenance until {blocked.end_date:%d %b}")
+                elif getattr(blocked, "start_date", None):
+                    issues.append(
+                        f"Maintenance since {blocked.start_date:%d %b} (open)"
+                    )
+                else:
+                    issues.append("In maintenance")
             if not fleet_service.is_rentable(vehicle):
                 issues.append("Not rentable")
 

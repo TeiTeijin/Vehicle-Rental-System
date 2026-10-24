@@ -141,6 +141,13 @@ class CheckOutPanel(_StepBase):
         self._head("Check out", "Take the vehicle back")
         self._error = self._error_label()
         self._floor = int(pickup_mileage or 0)
+        self._body.addWidget(
+            Caption(
+                f"Pickup odometer {self._floor:,} km: the return reading "
+                "cannot be below this.",
+                parent=self.card,
+            )
+        )
         if outstanding > ZERO:
             self._body.addWidget(
                 Caption(
@@ -154,6 +161,7 @@ class CheckOutPanel(_StepBase):
         grid.setSpacing(6)
         self.mileage_edit = QSpinBox(self.card)
         self.mileage_edit.setRange(0, 9_999_999)
+        self.mileage_edit.setValue(self._floor)
         grid.addRow(_field_label("Odometer (km)", self.card), self.mileage_edit)
         self.fuel_combo = QComboBox(self.card)
         self.fuel_combo.addItems(list(FUEL_LEVELS))
@@ -217,16 +225,31 @@ class PaymentPanel(_StepBase):
         parent=None,
         *,
         heading: str = "Record payment",
+        total: Decimal | None = None,
+        paid: Decimal | None = None,
     ) -> None:
         super().__init__(parent)
         self.heading = heading
         self._head(heading, "Take money against this booking")
         self._error = self._error_label()
-        if outstanding > ZERO:
+        if total is not None and paid is not None:
+            self._body.addWidget(
+                Caption(
+                    f"Total {pesos(total)}"
+                    f" · Paid {pesos(paid)}"
+                    f" · Owed {pesos(outstanding if outstanding > ZERO else ZERO)}",
+                    parent=self.card,
+                )
+            )
+        elif outstanding > ZERO:
             self._body.addWidget(
                 Caption(
                     f"Outstanding: {pesos(outstanding)}", parent=self.card
                 )
+            )
+        else:
+            self._body.addWidget(
+                Caption("Nothing owed: this booking is paid in full.", parent=self.card)
             )
         grid = QFormLayout()
         grid.setContentsMargins(0, 0, 0, 0)

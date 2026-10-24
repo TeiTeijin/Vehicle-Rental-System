@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedLayout,
     QTableWidget,
     QTableWidgetItem,
@@ -85,6 +86,11 @@ class LoadStateTable(QWidget):
         self._error.setObjectName(theme.OBJ_ERROR)
         self._error.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._error.setWordWrap(True)
+        # Hug the text instead of spanning the panel end to end: the
+        # white error box sizes to its content and stays centred.
+        self._error.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
+        )
 
         self._error_detail = QLabel("", self)
         self._error_detail.setObjectName("errorDetail")
@@ -105,7 +111,7 @@ class LoadStateTable(QWidget):
         error_column.setContentsMargins(0, 0, 0, 0)
         error_column.setSpacing(8)
         error_column.addStretch(1)
-        error_column.addWidget(self._error)
+        error_column.addWidget(self._error, 0, Qt.AlignmentFlag.AlignHCenter)
         error_column.addWidget(self._error_detail)
         error_column.addLayout(error_row)
         error_column.addStretch(1)

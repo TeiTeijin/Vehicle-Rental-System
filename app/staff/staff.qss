@@ -278,6 +278,7 @@ QLabel#errorState {
     color: #A8452F;
     font-size: 14px;
     font-weight: 600;
+    padding: 12px 20px;
 }
 
 QLabel#errorDetail {

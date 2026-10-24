@@ -125,7 +125,7 @@ def _booking_rows(context, filtr: BookingFilter):
         cap = 500
     with context.reading() as session:
         bookings = session.execute(
-            select(Booking).order_by(Booking.start_date.desc()).limit(cap)
+            select(Booking).order_by(Booking.created_at.desc(), Booking.booking_id.desc()).limit(cap)
         ).scalars().all()
         rows = []
         for booking in bookings:
@@ -835,14 +835,21 @@ class BookingsPage(StaffPage):
         from app.staff.widgets import toast as _toast
 
         with self.context.reading() as session:
-            if session.get(Booking, booking_id) is None:
+            booking = session.get(Booking, booking_id)
+            if booking is None:
                 _toast(self, "That booking no longer exists.", "error")
                 return False
+            balance = payment_service.booking_balance(session, booking)
         try:
             self.focus_booking(booking_id)
         except Exception:  # noqa: BLE001 - highlight only, never blocks payment
             pass
-        panel = PaymentPanel(self._outstanding(booking_id), self)
+        panel = PaymentPanel(
+            balance.balance,
+            self,
+            total=balance.total_due,
+            paid=balance.amount_paid,
+        )
         panel.submitted.connect(
             lambda values: self._submit_for(booking_id, "record_payment", values)
         )
@@ -918,6 +925,30 @@ def _inspector_row(session, context):
 
 
 def _do_confirm(session, booking, context, **_) -> None:
+    from app.services.errors import StateError
+
+    # The manual Confirm button means "verified paid": rental covered in
+    # full plus the refundable deposit on file. The wizard's Pay button
+    # keeps its own path (fee-only walk-ins stay confirmed + OUTSTANDING),
+    # so the service stays permissive and only this button gates.
+    balance = payment_service.booking_balance(session, booking)
+    try:
+        from app.services import settings_service as _settings
+
+        required_deposit = _settings.deposit_for_class(
+            session, getattr(booking.vehicle, "vehicle_class", None)
+        )
+    except Exception:  # noqa: BLE001 - fall back to code constants
+        required_deposit = booking_service.deposit_for_vehicle(booking.vehicle)
+    problems = []
+    if balance.balance > ZERO:
+        problems.append(f"rental balance {pesos(balance.balance)} still owed")
+    if balance.deposit_held < required_deposit:
+        problems.append(f"deposit {pesos(required_deposit)} not recorded")
+    if problems:
+        raise StateError(
+            "Cannot confirm: " + "; ".join(problems) + ". Record payment first."
+        )
     booking_service.confirm_booking(session, booking)
 
 
