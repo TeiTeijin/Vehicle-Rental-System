@@ -874,7 +874,7 @@ git push origin final-audit
 - Consumes: an online booking created in Task 7 and the staff Bookings page.
 - Produces: verified customer-to-staff visibility and staff confirmation/cancellation.
 
-- [ ] **Step 1: Run the handoff tests**
+- [x] **Step 1: Run the handoff tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -883,7 +883,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_booking_service.py -q
 ```
 
-- [ ] **Step 2: Create an online booking and open staff Bookings**
+- [x] **Step 2: Create an online booking and open staff Bookings**
 
 Verify the booking appears with:
 - customer identity
@@ -895,17 +895,17 @@ Verify the booking appears with:
 - pending status
 - correct price breakdown
 
-- [ ] **Step 3: Confirm and cancel from staff**
+- [x] **Step 3: Confirm and cancel from staff**
 
 Verify staff can confirm a pending online booking, cancel with a reason, and that the customer app sees the new status. Verify cancellation releases the vehicle and handles any payment/refund state.
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S3` and `X1`. Record any missing customer data or staff-side assumptions.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md

@@ -48,7 +48,7 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 |---|---|---|---|---|
 | Critical | 0 | 0 | 0 | 0 |
 | High | 2 | 2 | 0 | 0 |
-| Medium | 1 | 1 | 0 | 0 |
+| Medium | 1 | 3 | 0 | 0 |
 | Low | 1 | 0 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
 
@@ -61,6 +61,7 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 - **F-001 / F-002 (Task 3):** `migrate_customer_booking` now emits SQLite-compatible DDL for the `payment_method` enum and creates the PSGC reference tables idempotently. Regression test: `tests/test_migrate_staff_schema.py::TestDocumentedMigrationOrder::test_documented_migration_order_matches_models`. All 119 migration tests pass; fresh and legacy orders are repeatable.
 - **F-003 (Task 3, Low):** legacy SQLite cannot relax `USERS.license_number` in place; documented in the register for Task 24 disposition.
 - **F-004 (Task 4, Medium):** receipts now print the online booking's customer-facing reference code. Regression test: `tests/test_final_audit_flow.py::test_online_booking_reaches_staff_and_completes`. Receipt/customer-payment suites pass (30 tests).
+- **F-008 / F-009 (Task 11, Medium):** staff can search online bookings by the customer-facing reference, and the details panel shows the reference, pickup/return times, and branch names. Regression tests: `test_search_matches_the_customer_facing_reference`, `test_details_panel_shows_reference_branches_and_times`.
 
 ## Deferred and waived items
 

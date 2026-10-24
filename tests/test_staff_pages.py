@@ -4522,6 +4522,54 @@ class TestBookingsPageActions:
         assert "latest" in caption
         assert str(prefs.rows_limit(100)) in caption
 
+    def test_search_matches_the_customer_facing_reference(self, branch):
+        from app.staff.pages.bookings import BookingFilter, _booking_rows
+
+        built, context = branch
+        with context.session() as session:
+            booking = session.get(Booking, built.upcoming.booking_id)
+            booking.reference_code = "RW-SEARCH42"
+
+        rows = _booking_rows(context, BookingFilter(search="RW-SEARCH42"))
+        assert [row[0] for row in rows] == [f"#{built.upcoming.booking_id}"]
+
+    def test_details_panel_shows_reference_branches_and_times(self, shell, branch):
+        from datetime import time
+
+        from app.models import Branch as BranchRow
+        from app.staff.booking_panels import BookingDetailsPanel
+
+        built, context = branch
+        with context.session() as session:
+            counter = BranchRow(
+                name="Main Branch",
+                address="1 Main Street",
+                open_time=time(7, 0),
+                close_time=time(21, 0),
+                is_active=True,
+                created_at=datetime(2026, 1, 1, 8, 0),
+            )
+            session.add(counter)
+            session.flush()
+            booking = session.get(Booking, built.upcoming.booking_id)
+            booking.reference_code = "RW-DETAILS42"
+            booking.pickup_dt = datetime.combine(booking.start_date, time(10, 0))
+            booking.return_dt = datetime.combine(booking.end_date, time(18, 0))
+            booking.pickup_branch_id = counter.branch_id
+            booking.return_branch_id = counter.branch_id
+
+        panel = BookingDetailsPanel(context, built.upcoming.booking_id)
+        texts = [
+            panel._body.itemAt(i).widget().text()
+            for i in range(panel._body.count())
+            if panel._body.itemAt(i).widget() is not None
+        ]
+        joined = "\n".join(texts)
+        assert "RW-DETAILS42" in joined
+        assert "10:00" in joined and "18:00" in joined
+        assert joined.count("Main Branch") == 2
+        panel.deleteLater()
+
     def test_booking_page_load_is_not_n_plus_one(self, branch):
         from app.staff.pages.bookings import BookingFilter, _booking_rows
         from app.staff.query_metrics import count_queries

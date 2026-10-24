@@ -100,6 +100,7 @@ def _matches(booking: Booking, balance, filtr: BookingFilter, today: date) -> bo
     if needle:
         haystacks = [
             str(booking.booking_id),
+            (booking.reference_code or ""),
             (booking.user.full_name if booking.user else ""),
             (booking.vehicle.plate_number if booking.vehicle else ""),
             (booking.vehicle.make if booking.vehicle else ""),

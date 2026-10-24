@@ -433,15 +433,31 @@ class BookingDetailsPanel(_StepBase):
             user = booking.user
             vehicle = booking.vehicle
             balance = payment_service.booking_balance(session, booking)
-            self._section(
-                "Booking",
-                [
-                    f"#{booking.booking_id} · "
-                    f"{theme.status_label(booking.status)} · "
-                    f"{booking.channel or 'walk-in'}",
-                    f"{booking.start_date:%d %b %Y} → {booking.end_date:%d %b %Y}",
-                ],
-            )
+            details = [
+                f"#{booking.booking_id} · "
+                f"{theme.status_label(booking.status)} · "
+                f"{booking.channel or 'walk-in'}",
+            ]
+            if booking.reference_code:
+                details.append(f"Reference {booking.reference_code}")
+            if booking.pickup_dt and booking.return_dt:
+                details.append(
+                    f"{booking.pickup_dt:%d %b %Y %H:%M} → "
+                    f"{booking.return_dt:%d %b %Y %H:%M}"
+                )
+            else:
+                details.append(
+                    f"{booking.start_date:%d %b %Y} → "
+                    f"{booking.end_date:%d %b %Y}"
+                )
+            pickup_branch = booking.pickup_branch
+            return_branch = booking.return_branch
+            if pickup_branch or return_branch:
+                details.append(
+                    f"Pickup {pickup_branch.name if pickup_branch else '-'} · "
+                    f"Return {return_branch.name if return_branch else '-'}"
+                )
+            self._section("Booking", details)
             self._section(
                 "Customer",
                 [
