@@ -15,6 +15,7 @@ throwaway SQLite and ``tmp_path`` files; no live database and no network.
 from __future__ import annotations
 
 import os
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
@@ -217,8 +218,9 @@ class TestSecureLocalFiles:
 
         results = {name: status for name, status, _path in secure_local_files.secure(tmp_path)}
 
-        assert (env.stat().st_mode & 0o777) == 0o600
-        assert (ca.stat().st_mode & 0o777) == 0o600
+        if os.name != "nt":
+            assert (env.stat().st_mode & 0o777) == 0o600
+            assert (ca.stat().st_mode & 0o777) == 0o600
         assert results[".env"] == "secured"
         assert results["ca.pem"] == "secured"
 
@@ -240,7 +242,23 @@ class TestSecureLocalFiles:
         assert [status for _n, status, _p in first] == [
             status for _n, status, _p in second
         ]
-        assert (tmp_path / ".env").stat().st_mode & 0o777 == 0o600
+        if os.name != "nt":
+            assert (tmp_path / ".env").stat().st_mode & 0o777 == 0o600
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows ACL check")
+    def test_windows_acl_has_only_the_current_user(self, tmp_path):
+        from scripts import secure_local_files
+
+        env = tmp_path / ".env"
+        env.write_text("SECRET=1\n")
+        secure_local_files.secure(tmp_path)
+
+        acl = subprocess.run(
+            ["icacls", str(env)], capture_output=True, text=True, check=True
+        ).stdout
+        assert os.environ["USERNAME"] in acl
+        assert "BUILTIN\\Users" not in acl
+        assert "Everyone" not in acl
 
     def test_main_never_fails_on_missing_files(self, tmp_path, monkeypatch):
         from scripts import secure_local_files

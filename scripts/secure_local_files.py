@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 from pathlib import Path
 
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +34,33 @@ SECRET_FILES = (
 )
 
 PRIVATE_FILE_MODE = 0o600
+
+
+def _restrict_windows_acl(path: Path) -> None:
+    """Drop inherited ACEs and leave only the current user with full control.
+
+    Windows does not implement POSIX mode bits; ``os.chmod(0o600)`` only
+    toggles the read-only attribute. The ACL is the meaningful control there,
+    and ``icacls`` is present on every supported Windows install.
+    """
+    user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+    if not user:
+        raise OSError("cannot determine the current Windows user")
+    completed = subprocess.run(
+        [
+            "icacls",
+            str(path),
+            "/inheritance:r",
+            "/grant:r",
+            f"{user}:F",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise OSError(detail or f"icacls failed with {completed.returncode}")
 
 
 def secure(
@@ -58,7 +86,10 @@ def secure(
             results.append((name, "skipped-not-a-file", path))
             continue
         try:
-            os.chmod(path, PRIVATE_FILE_MODE)
+            if os.name == "nt":
+                _restrict_windows_acl(path)
+            else:
+                os.chmod(path, PRIVATE_FILE_MODE)
         except OSError as exc:
             results.append((name, f"error: {exc}", path))
             continue
