@@ -5680,6 +5680,81 @@ class TestRentalWizard:
             receipt_service.RECEIPTS_DIR = old_dir
             overlay.hide_overlay()
 
+    def test_receipt_failure_keeps_the_booking_and_offers_done(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from app.staff import rental_wizard
+        from app.staff.rental_wizard import DonePanel
+        from PySide6.QtWidgets import QLabel
+
+        def _read_only(_session, _booking):
+            raise OSError("read-only")
+
+        monkeypatch.setattr(
+            rental_wizard, "generate_receipt_pdf", _read_only
+        )
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            wizard._current._on_continue()
+            qapp_process(page)
+            licence_step = wizard._current
+            with branch[1].reading() as session:
+                customer = (
+                    session.query(Users)
+                    .filter(
+                        Users.role == "customer",
+                        Users.license_expiry > TODAY,
+                    )
+                    .first()
+                )
+                licence = customer.license_number
+                customer_id = customer.user_id
+            licence_step.licence_edit.setText(licence)
+            licence_step.find_button.click()
+            qapp_process(page)
+            licence_step.next_button.click()
+            qapp_process(page)
+
+            pay_step = wizard._current
+            pay_step.full_button.setChecked(True)
+            pay_step.pay_button.click()
+            qapp_process(page)
+
+            done = wizard._current
+            assert isinstance(done, DonePanel)
+            assert done.receipt_path is None
+            assert done.receipt_error
+            assert done.print_button.isEnabled() is False
+            assert done.view_button.isEnabled() is True
+            assert done.done_button.isEnabled() is True
+            warnings = [
+                label
+                for label in done.findChildren(QLabel)
+                if "Receipt could not be generated" in label.text()
+            ]
+            assert warnings and warnings[0].isVisible()
+            assert "saved" in warnings[0].text().lower()
+
+            # The booking and its payments survived the receipt failure.
+            with branch[1].reading() as session:
+                booking = (
+                    session.query(Booking)
+                    .filter_by(user_id=customer_id)
+                    .order_by(Booking.booking_id.desc())
+                    .first()
+                )
+                assert booking is not None
+                assert booking.payments
+                booking_id = booking.booking_id
+
+            # The helper never raises: it reports the failure instead.
+            path, error = wizard._generate_receipt_safely(booking_id)
+            assert path is None
+            assert error
+        finally:
+            overlay.hide_overlay()
+
     def test_wizard_has_no_stadium_shapes(self, qapp, shell, branch):
         from PySide6.QtWidgets import QPushButton
 
