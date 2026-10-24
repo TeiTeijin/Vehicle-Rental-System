@@ -7,11 +7,17 @@ specifications after the bugs are long forgotten.
 """
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 
 from app.models import Booking, Maintenance_Record, Payment, Penalty, Vehicle
-from app.services import booking_service, fleet_service, payment_service
+from app.services import (
+    booking_service,
+    counter_service,
+    fleet_service,
+    payment_service,
+)
 from app.services.errors import ConflictError, StateError, ValidationError
 from app.utils.money import ZERO
 
@@ -404,6 +410,45 @@ class TestCheckIn:
 # ---------------------------------------------------------------------------
 
 
+def _counter_rental_with_deposit(session, customer, vehicle, staff, *, deposit=Decimal("3000.00")):
+    """A paid counter rental with a held deposit, already on the road."""
+    quote = counter_service.quote(session, vehicle, D1, D3)
+    booking, _ = booking_service.complete_counter_rental(
+        session,
+        user=customer,
+        vehicle=vehicle,
+        start_date=D1,
+        end_date=D3,
+        rental_amount=quote.total,
+        method="cash",
+        staff_id=staff.user_id,
+        fee_floor=quote.scheduling_fee,
+        deposit=deposit,
+    )
+    booking_service.check_in(session, booking, staff, 42000, "full")
+    return booking
+
+
+class TestCheckoutQuote:
+    def test_checkout_quote_reports_shortfall_above_deposit(
+        self, session, customer, vehicle, staff
+    ):
+        booking = _counter_rental_with_deposit(
+            session, customer, vehicle, staff
+        )
+        quote = booking_service.checkout_quote(
+            session,
+            booking,
+            actual_return_date=D3,
+            damage_charge=Decimal("4000.00"),
+        )
+        assert quote.late_fee == ZERO
+        assert quote.damage_charge == Decimal("4000.00")
+        assert quote.deposit_applied == Decimal("3000.00")
+        assert quote.deposit_refund == ZERO
+        assert quote.balance_due == Decimal("1000.00")
+
+
 class TestCheckOut:
     @pytest.fixture
     def ongoing(self, session, customer, vehicle, staff):
@@ -499,6 +544,66 @@ class TestCheckOut:
             booking_service.check_out(
                 session, settled_ongoing, staff, D6, 42100, "full", damage_charge=1500
             )
+
+    def test_a_checkout_shortfall_can_be_collected(
+        self, session, customer, vehicle, staff
+    ):
+        booking = _counter_rental_with_deposit(
+            session, customer, vehicle, staff
+        )
+        with pytest.raises(ConflictError, match="outstanding"):
+            booking_service.check_out(
+                session,
+                booking,
+                staff,
+                D3,
+                42100,
+                "full",
+                damage_charge=Decimal("4000.00"),
+            )
+        with pytest.raises(ValidationError, match="exactly"):
+            booking_service.check_out(
+                session,
+                booking,
+                staff,
+                D3,
+                42100,
+                "full",
+                damage_charge=Decimal("4000.00"),
+                settlement_amount=Decimal("999.00"),
+                settlement_method="cash",
+            )
+        with pytest.raises(ValidationError, match="exactly"):
+            booking_service.check_out(
+                session,
+                booking,
+                staff,
+                D3,
+                42100,
+                "full",
+                damage_charge=Decimal("4000.00"),
+                settlement_amount=Decimal("1001.00"),
+                settlement_method="cash",
+            )
+        # A rejected settlement must not half-close the rental.
+        assert booking.status == "ongoing"
+
+        booking_service.check_out(
+            session,
+            booking,
+            staff,
+            D3,
+            42100,
+            "full",
+            damage_charge=Decimal("4000.00"),
+            settlement_amount=Decimal("1000.00"),
+            settlement_method="cash",
+        )
+        assert booking.status == "completed"
+        assert payment_service.booking_balance(session, booking).balance == Decimal(
+            "0.00"
+        )
+        assert payment_service.deposit_held(session, booking) == Decimal("0.00")
 
     def test_returning_a_vehicle_sends_it_to_maintenance(
         self, session, ongoing, vehicle, staff

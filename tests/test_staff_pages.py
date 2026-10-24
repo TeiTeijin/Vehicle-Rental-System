@@ -4573,6 +4573,61 @@ class TestBookingsPageActions:
         assert isinstance(page._booking_overlay.scroll.widget(), PaymentPanel)
         page._booking_overlay.hide_overlay()
 
+    def test_checkout_shortfall_opens_settlement_then_completes(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.bookings as module
+        from app.services import payment_service
+        from app.staff.booking_panels import PaymentPanel
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        built, context = branch
+        page = BookingsPage(shell)
+        page.refresh()
+        _wait_for_bookings(page)
+        with context.session() as session:
+            booking = session.get(Booking, built.out_booking.booking_id)
+            payment_service.record_payment(
+                session,
+                booking,
+                booking.total_cost,
+                "cash",
+                recorded_by=built.counter.user_id,
+            )
+            payment_service.record_payment(
+                session,
+                booking,
+                Decimal("2500.00"),
+                "cash",
+                kind="deposit",
+                recorded_by=built.counter.user_id,
+            )
+        self._select(page, f"#{built.out_booking.booking_id}")
+        assert page._submit_check_out(
+            built.out_booking.booking_id,
+            {
+                "mileage": 20_500,
+                "fuel_level": "full",
+                "damage_notes": "Bent bumper",
+                "damage_charge": Decimal("4000.00"),
+            },
+        ) is True
+        panel = page._booking_overlay.scroll.widget()
+        assert isinstance(panel, PaymentPanel)
+        assert panel.heading == "Settle and check out"
+        assert panel.amount_edit.text() == "1,500.00"
+
+        panel.method_combo.setCurrentText("cash")
+        panel._on_go()
+        with context.reading() as session:
+            booking = session.get(Booking, built.out_booking.booking_id)
+            vehicle = session.get(Vehicle, built.out_car.vehicle_id)
+            assert booking.status == "completed"
+            assert vehicle.status == "available"
+            assert payment_service.booking_balance(
+                session, booking
+            ).balance == Decimal("0.00")
+
     def test_action_panels_open_in_glass_not_windows(self, shell, branch):
         from app.staff.overlay import FrostedOverlay
 

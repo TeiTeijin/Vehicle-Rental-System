@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -506,6 +507,106 @@ def check_in(
     return report
 
 
+@dataclass(frozen=True)
+class CheckoutQuote:
+    """What a return costs and how much of it the deposit covers."""
+
+    late_fee: Decimal
+    damage_charge: Decimal
+    deposit_applied: Decimal
+    deposit_refund: Decimal
+    balance_due: Decimal
+
+
+def _late_fee_per_day(session: Session, per_day=None) -> Decimal:
+    """The configured daily late fee, unless the caller pinned one."""
+    if per_day is None:
+        per_day = LATE_PENALTY_PER_DAY
+    value = money(per_day, field="late_penalty_per_day")
+    if per_day == LATE_PENALTY_PER_DAY:
+        try:
+            from app.services import settings_service as _settings
+
+            value = money(
+                _settings.late_fee_per_day(session), field="late_penalty_per_day"
+            )
+        except Exception:  # noqa: BLE001 - fall back to the code constant
+            pass
+    return value
+
+
+def checkout_quote(
+    session: Session,
+    booking: Booking,
+    *,
+    actual_return_date: date,
+    damage_charge=None,
+    late_penalty_per_day=None,
+) -> CheckoutQuote:
+    """Price a return without writing anything.
+
+    The held deposit is a liability: it covers penalties up to its value,
+    the rest is handed back, and any penalty shortfall stays due. An
+    overpaid rental offsets penalties before the deposit is touched.
+    """
+    if actual_return_date < booking.start_date:
+        raise ValidationError(
+            f"Return date {actual_return_date:%d %b %Y} is before the pick-up "
+            f"date {booking.start_date:%d %b %Y}.",
+            field="actual_return_date",
+        )
+
+    per_day = _late_fee_per_day(session, late_penalty_per_day)
+    late_fee = ZERO
+    if actual_return_date > booking.end_date:
+        late_fee = money(
+            per_day * (actual_return_date - booking.end_date).days,
+            field="late_fee",
+        )
+
+    damage = ZERO
+    if damage_charge is not None:
+        damage = money(damage_charge, field="damage_charge")
+    if damage < ZERO:
+        raise ValidationError(
+            "A damage charge cannot be negative.", field="damage_charge"
+        )
+
+    balance = payment_service.booking_balance(session, booking)
+    rental_paid = money(
+        sum(
+            (
+                payment.amount
+                for payment in booking.payments
+                if payment.kind == "rental"
+                and payment.status in payment_service.SETTLED_STATUSES
+            ),
+            ZERO,
+        ),
+        field="rental_paid",
+    )
+    overpaid_rental = max(ZERO, rental_paid - balance.rental_cost)
+    penalties = money(
+        balance.penalty_total + late_fee + damage, field="penalty_total"
+    )
+    penalties_outstanding = max(ZERO, penalties - overpaid_rental)
+    applied = money(
+        min(balance.deposit_held, penalties_outstanding),
+        field="deposit_applied",
+    )
+    refund = money(balance.deposit_held - applied, field="deposit_refund")
+    due = money(
+        balance.balance + late_fee + damage - applied, field="balance_due"
+    )
+    return CheckoutQuote(
+        late_fee=late_fee,
+        damage_charge=damage,
+        deposit_applied=applied,
+        deposit_refund=refund,
+        balance_due=max(ZERO, due),
+    )
+
+
 def check_out(
     session: Session,
     booking: Booking,
@@ -519,6 +620,9 @@ def check_out(
     damage_charge=None,
     late_penalty_per_day=LATE_PENALTY_PER_DAY,
     require_settlement: bool = True,
+    settlement_amount=None,
+    settlement_method: str | None = None,
+    settlement_reference: str | None = None,
 ) -> Inspection_Report:
     if booking.status != "ongoing":
         raise StateError(
@@ -537,42 +641,60 @@ def check_out(
         )
 
     vehicle = booking.vehicle
-
-    fleet_service.mark_available(session, vehicle)
-    if mileage_reading >= vehicle.mileage:
-        vehicle.mileage = mileage_reading
-    else:
+    if mileage_reading < vehicle.mileage:
         raise ValidationError(
             f"Return odometer reading of {mileage_reading:,} km is below the "
             f"{vehicle.mileage:,} km recorded at pick-up.",
             field="mileage_reading",
         )
 
-    if actual_return_date > booking.end_date:
+    quote = checkout_quote(
+        session,
+        booking,
+        actual_return_date=actual_return_date,
+        damage_charge=damage_charge,
+        late_penalty_per_day=late_penalty_per_day,
+    )
+    settlement = None
+    if settlement_amount is not None:
+        settlement = money(settlement_amount, field="settlement_amount")
+        if settlement != quote.balance_due:
+            raise ValidationError(
+                f"The settlement must be exactly {quote.balance_due}, "
+                f"not {settlement}.",
+                field="settlement_amount",
+            )
+        if settlement > ZERO and not (settlement_method or "").strip():
+            raise ValidationError(
+                "Choose a settlement method.", field="settlement_method"
+            )
+    elif require_settlement and quote.balance_due > ZERO:
+        raise ConflictError(
+            f"Booking #{booking.booking_id} still has {quote.balance_due} "
+            "outstanding. Collect the balance before closing the rental."
+        )
+
+    fleet_service.mark_available(session, vehicle)
+    vehicle.mileage = mileage_reading
+
+    if quote.late_fee > ZERO:
         days_late = (actual_return_date - booking.end_date).days
-        if late_penalty_per_day == LATE_PENALTY_PER_DAY:
-            try:
-                from app.services import settings_service as _settings
-                late_penalty_per_day = _settings.late_fee_per_day(session)
-            except Exception:
-                pass
         apply_penalty(
             session,
             booking,
             penalty_type="late_return",
-            amount=money(late_penalty_per_day, field="late_penalty_per_day")
-            * days_late,
+            amount=quote.late_fee,
             description=(
                 f"Returned {days_late} day(s) after the scheduled return date."
             ),
         )
 
-    if damage_charge is not None and money(damage_charge, field="damage_charge") > ZERO:
+    if quote.damage_charge > ZERO:
         apply_penalty(
             session,
             booking,
             penalty_type="damage",
-            amount=damage_charge,
+            amount=quote.damage_charge,
             description=damage_notes or "Damage charge applied at return.",
         )
     elif damage_notes:
@@ -582,6 +704,36 @@ def check_out(
             penalty_type="damage",
             amount=ZERO,
             description=f"{damage_notes} (no charge applied)",
+        )
+
+    # Deposit first: penalties consume it, the remainder is returned, and only
+    # then is the settlement verdict read.
+    payment_service.settle_deposit(session, booking)
+
+    balance = payment_service.booking_balance(session, booking)
+    if settlement is not None:
+        if settlement != balance.balance:
+            raise ValidationError(
+                f"The balance changed to {balance.balance}; review the "
+                "checkout quote before taking payment.",
+                field="settlement_amount",
+            )
+        if settlement > ZERO:
+            payment_service.record_payment(
+                session,
+                booking,
+                settlement,
+                settlement_method,
+                recorded_by=inspector.user_id,
+                reference_no=settlement_reference,
+                note="Checkout settlement",
+            )
+            balance = payment_service.booking_balance(session, booking)
+
+    if require_settlement and balance.balance > ZERO:
+        raise ConflictError(
+            f"Booking #{booking.booking_id} still has {balance.balance} "
+            "outstanding after settlement."
         )
 
     booking.actual_return_date = actual_return_date
@@ -599,20 +751,6 @@ def check_out(
     )
     session.add(report)
     session.flush()
-
-    # Deposit first: penalties consume it, the remainder is returned, and only
-    # then is the settlement verdict read.
-    payment_service.settle_deposit(session, booking)
-
-    if require_settlement:
-        balance = payment_service.booking_balance(session, booking)
-        if balance.balance > ZERO:
-            raise ConflictError(
-                f"Booking #{booking.booking_id} still has "
-                f"{balance.balance} outstanding. Record the balance before "
-                "closing the rental, or pass require_settlement=False."
-            )
-
     return report
 
 

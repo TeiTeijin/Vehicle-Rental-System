@@ -210,9 +210,16 @@ class PaymentPanel(_StepBase):
     submitted = Signal(dict)
     cancelled = Signal()
 
-    def __init__(self, outstanding: Decimal, parent=None) -> None:
+    def __init__(
+        self,
+        outstanding: Decimal,
+        parent=None,
+        *,
+        heading: str = "Record payment",
+    ) -> None:
         super().__init__(parent)
-        self._head("Record payment", "Take money against this booking")
+        self.heading = heading
+        self._head(heading, "Take money against this booking")
         self._error = self._error_label()
         if outstanding > ZERO:
             self._body.addWidget(

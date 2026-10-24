@@ -664,10 +664,12 @@ class BookingsPage(StaffPage):
         # On failure run() already toasted the reason; the form stays open
         # so the clerk can fix it instead of starting over.
 
-    def _submit_for(self, booking_id: int, action: str, values: dict) -> None:
+    def _submit_for(self, booking_id: int, action: str, values: dict) -> bool:
         if self.run_for(booking_id, action, **values):
             self._hide_overlay()
+            return True
         # Same contract as _submit: the form stays open on failure.
+        return False
 
     def open_check_in(self) -> bool:
         booking_id = self._selected_or_warn()
@@ -719,7 +721,51 @@ class BookingsPage(StaffPage):
         panel = CheckOutPanel(
             self._outstanding(booking_id), self, pickup_mileage=floor
         )
-        panel.submitted.connect(lambda values: self._submit("check_out", values))
+        panel.submitted.connect(
+            lambda values: self._submit_check_out(booking_id, values)
+        )
+        panel.cancelled.connect(self._hide_overlay)
+        self._overlay_panel(panel)
+        return True
+
+    def _submit_check_out(self, booking_id: int, values: dict) -> bool:
+        """Quote the return; a penalty shortfall is collected before closing."""
+        try:
+            with self.context.reading() as session:
+                booking = session.get(Booking, booking_id)
+                if booking is None:
+                    toast(self, "That booking no longer exists.", "error")
+                    return False
+                quote = booking_service.checkout_quote(
+                    session,
+                    booking,
+                    actual_return_date=date.today(),
+                    damage_charge=values.get("damage_charge"),
+                )
+        except Exception as exc:  # noqa: BLE001 - surfaced as a toast
+            message, _field, _kind = describe(exc)
+            toast(self, message, "error")
+            return False
+
+        if quote.balance_due <= ZERO:
+            return self._submit_for(booking_id, "check_out", values)
+
+        from app.staff.booking_panels import PaymentPanel
+
+        panel = PaymentPanel(
+            quote.balance_due, self, heading="Settle and check out"
+        )
+
+        def _settle(payment: dict) -> None:
+            combined = dict(values)
+            combined.update(
+                settlement_amount=payment["amount"],
+                settlement_method=payment["method"],
+                settlement_reference=payment.get("reference_no") or "",
+            )
+            self._submit_for(booking_id, "check_out", combined)
+
+        panel.submitted.connect(_settle)
         panel.cancelled.connect(self._hide_overlay)
         self._overlay_panel(panel)
         return True
@@ -854,6 +900,9 @@ def _do_check_out(
     fuel_level: str,
     damage_notes: str,
     damage_charge: Decimal | None,
+    settlement_amount: Decimal | None = None,
+    settlement_method: str | None = None,
+    settlement_reference: str | None = None,
     **_,
 ) -> None:
     booking_service.check_out(
@@ -865,6 +914,9 @@ def _do_check_out(
         fuel_level=fuel_level,
         damage_notes=damage_notes or None,
         damage_charge=damage_charge,
+        settlement_amount=settlement_amount,
+        settlement_method=settlement_method,
+        settlement_reference=settlement_reference,
     )
 
 
