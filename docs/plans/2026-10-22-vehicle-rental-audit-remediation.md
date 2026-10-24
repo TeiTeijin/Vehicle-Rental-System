@@ -13,8 +13,8 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19.
-- In progress: Task 20 (full regression and release checks).
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
+- In progress: none.
 - Not started: none.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
@@ -1280,17 +1280,21 @@ git commit -m "fix: distinguish pending and failed dashboard transactions"
 
 ### Task 20: Final regression and release checks
 
-- [ ] **Step 1: Run the complete suite**
+- [x] **Step 1: Run the complete suite**
 
 Run: `QT_QPA_PLATFORM=offscreen timeout 1200 .venv/bin/python -m pytest -q -o addopts=`
 Expected: all tests pass, no hang.
 
-- [ ] **Step 2: Run the non-GUI suite in parallel**
+Result: **1096 passed in 678.11s (11:18)**, no failures or hangs.
+
+- [x] **Step 2: Run the non-GUI suite in parallel**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -o addopts= -n auto --ignore=tests/test_staff_pages.py --ignore=tests/test_staff_dashboard.py`
 Expected: pass, faster than serial.
 
-- [ ] **Step 3: Smoke-test the demo**
+Result: **687 passed in 32.03s**.
+
+- [x] **Step 3: Smoke-test the demo**
 
 Run: `./launch_demo.py` (or the documented demo launcher). Verify:
 - sign in;
@@ -1306,17 +1310,34 @@ Run: `./launch_demo.py` (or the documented demo launcher). Verify:
 - export CSV/PDF;
 - sign out, close, and confirm no freeze.
 
-- [ ] **Step 4: Verify local permissions**
+Headless smoke: `launch_demo.py` signed in through the real form as
+`admin@rentwheels.local` and opened dashboard, new_rental, bookings, fleet,
+customers, payments, inspections, maintenance, reports, and settings. The
+interactive scenarios above are covered by `tests/test_staff_pages.py`
+(wizard, checkout, check-in, receipt failure, focus handoff), the booking and
+rental-life-cycle suites, and the report/export tests; no manual mouse
+click-through was possible in this environment.
+
+- [x] **Step 4: Verify local permissions**
 
 Run: `stat -c '%a %n' .env ca.pem backup.db demo.db`
 Expected: `600` for secret-bearing files (certificate may be `644` only if the team explicitly accepts it).
 
-- [ ] **Step 5: Commit final documentation**
+Windows note: POSIX mode bits are not meaningful on NTFS (`os.stat` reports
+`666`). `scripts/secure_local_files.py` now applies `icacls /inheritance:r`
+and grants only the current user, so `.env`, `ca.pem`, and `demo.db` show a
+single `LILIAN-S\Lily Ann:(F)` ACE; `backup.db` is absent and reported as
+`missing`. On POSIX the script still sets `0o600`.
+
+- [x] **Step 5: Commit final documentation**
 
 ```bash
 git add README.md docs
 git commit -m "docs: record audit remediation and release checks"
 ```
+
+This repository has no `README.md`; the release check went into
+`docs/release-checks-2026-10-24.md` and was committed with this plan.
 
 ---
 
