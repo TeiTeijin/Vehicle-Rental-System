@@ -718,11 +718,14 @@ class DonePanel(_StepBase):
         paid_amount,
         balance,
         deposit,
-        receipt_path: str,
+        receipt_path: str | None,
         confirmed: bool,
+        receipt_error: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self.receipt_path = receipt_path
+        self.receipt_error = receipt_error
         settled = balance <= 0
         self._head("Done", f"Rental #{booking_id} is booked")
         verdict = make_status_box(
@@ -749,7 +752,19 @@ class DonePanel(_StepBase):
                 Caption("Confirmed", parent=self.card, colour=theme.TEXT),
             )
         self._body.addLayout(form)
-        self._body.addWidget(Caption(f"Receipt: {receipt_path}", parent=self.card))
+        if receipt_path is None:
+            warning = (
+                "Receipt could not be generated"
+                + (f": {receipt_error}" if receipt_error else ".")
+                + " The booking is saved."
+            )
+            self._body.addWidget(
+                make_status_box(warning, theme.WARN, self.card)
+            )
+        else:
+            self._body.addWidget(
+                Caption(f"Receipt: {receipt_path}", parent=self.card)
+            )
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -757,9 +772,15 @@ class DonePanel(_StepBase):
         row.addStretch(1)
         self.print_button = QPushButton("Print receipt", self.card)
         self.print_button.setObjectName("secondaryButton")
-        self.print_button.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(receipt_path))
-        )
+        if receipt_path is None:
+            # Nothing was written: keep the action visible but honest.
+            self.print_button.setEnabled(False)
+        else:
+            self.print_button.clicked.connect(
+                lambda: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(receipt_path)
+                )
+            )
         self.view_button = QPushButton("View in Bookings", self.card)
         self.view_button.setObjectName("secondaryButton")
         self.view_button.clicked.connect(self.view_bookings.emit)
@@ -913,25 +934,56 @@ class RentalWizard:
                     deposit=self.state.deposit,
                 )
                 balance = payment_service.booking_balance(session, booking)
-                receipt_path = generate_receipt_pdf(session, booking)
                 result = {
                     "booking_id": booking.booking_id,
                     "total": balance.total_due,
                     "paid_amount": balance.amount_paid,
                     "balance": balance.balance,
                     "deposit": balance.deposit_held,
-                    "receipt_path": receipt_path,
+                    "receipt_path": None,
+                    "receipt_error": None,
                     "confirmed": confirmed,
                 }
         except Exception as exc:  # noqa: BLE001 - inline, nothing committed
             panel.fail(_friendly(exc))
             return
+
+        # The write transaction is closed and committed: a receipt failure can
+        # no longer roll the rental back. Read the booking afresh so the PDF
+        # never renders from a session mid-commit.
+        receipt_path, receipt_error = self._generate_receipt_safely(
+            result["booking_id"]
+        )
+        result["receipt_path"] = receipt_path
+        result["receipt_error"] = receipt_error
         done = DonePanel(parent=self._overlay.scroll, **result)
         self._swap(done)
         done.view_bookings.connect(self._on_view_bookings)
         done.finished.connect(self._on_finished)
         if self._notify:
             self._notify(f"Rental #{result['booking_id']} is booked.")
+
+    def _generate_receipt_safely(
+        self, booking_id: int
+    ) -> tuple[str | None, str | None]:
+        """Render the receipt after the booking is committed.
+
+        Returns ``(path, None)`` on success or ``(None, error)`` on failure.
+        Never raises: by the time this runs the rental is already saved, so a
+        dead export folder must not look like a failed booking.
+        """
+        try:
+            with self._context.reading() as session:
+                booking = session.get(Booking, booking_id)
+                if booking is None:
+                    return (
+                        None,
+                        f"Booking #{booking_id} could not be reloaded.",
+                    )
+                return generate_receipt_pdf(session, booking), None
+        except Exception as exc:  # noqa: BLE001 - the booking is already saved
+            detail = str(exc).strip() or _friendly(exc)
+            return None, detail
 
     def _on_view_bookings(self) -> None:
         self._overlay.hide_overlay()
