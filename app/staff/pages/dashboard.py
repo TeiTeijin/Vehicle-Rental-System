@@ -578,6 +578,8 @@ class DashboardPage(StaffPage):
             radius=8,
         )
 
+        status = (getattr(entry, "status", "paid") or "").strip().lower()
+        amount_colour = _amount_colour(status, entry.refunded)
         amount = QLabel(_signed_pesos(entry.amount, entry.refunded))
         amount_font = QFont("Inter")
         amount_font.setPixelSize(15)
@@ -585,18 +587,36 @@ class DashboardPage(StaffPage):
         amount_font.setFeature(QFont.Tag("tnum"), 1)
         amount.setFont(amount_font)
         amount.setStyleSheet(
-            "background: transparent; color: "
-            f"{theme.DANGER if entry.refunded else theme.TEXT};"
+            f"background: transparent; color: {amount_colour};"
         )
         amount.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
 
+        # The amount and its status caption share the last column, so a
+        # pending transfer never reads as the same thing as received cash.
+        amount_cell = QWidget()
+        amount_cell.setStyleSheet("background: transparent;")
+        cell = QVBoxLayout(amount_cell)
+        cell.setContentsMargins(0, 0, 0, 0)
+        cell.setSpacing(0)
+        cell.addStretch(1)
+        cell.addWidget(amount, 0, Qt.AlignmentFlag.AlignRight)
+        if status != "paid":
+            caption = Caption(
+                theme.status_label(status), colour=amount_colour, size=11
+            )
+            caption.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            cell.addWidget(caption, 0, Qt.AlignmentFlag.AlignRight)
+        cell.addStretch(1)
+
         align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         self.transactions_list.addWidget(name, row, 0, align)
         self.transactions_list.addWidget(method, row, 1, align)
         self.transactions_list.addWidget(channel, row, 2, align)
-        self.transactions_list.addWidget(amount, row, 3)
+        self.transactions_list.addWidget(amount_cell, row, 3)
         self.transactions_list.setRowMinimumHeight(row, 46)
         self._transaction_rows.append(name)
 
@@ -657,6 +677,15 @@ def _signed_pesos(amount: Decimal, refunded: bool) -> str:
     if refunded:
         return f"−₱{abs(float(amount)):,.2f}"
     return f"₱{abs(float(amount)):,.2f}"
+
+
+def _amount_colour(status: str, refunded: bool) -> str:
+    """Only a paid row is drawn in the received-cash colour."""
+    if refunded or status == "failed":
+        return theme.DANGER
+    if status == "pending":
+        return theme.WARN
+    return theme.TEXT
 
 
 def build_dashboard_page(shell, *, animate: bool = True) -> DashboardPage:

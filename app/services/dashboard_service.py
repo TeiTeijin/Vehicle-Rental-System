@@ -90,6 +90,8 @@ class TransactionRow:
     method: str
     amount: Decimal  # always positive; `refunded` carries the sign
     refunded: bool
+    #: `payment.status`: only ``paid`` is money that actually arrived.
+    status: str
 
 
 def orders_between(
@@ -215,6 +217,7 @@ def recent_transactions(
                 method=payment.method,
                 amount=payment.amount,
                 refunded=payment.status == "refunded",
+                status=payment.status,
             )
         )
     return out

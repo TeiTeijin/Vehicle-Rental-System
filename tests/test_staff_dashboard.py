@@ -34,7 +34,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QRect  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from tests.test_staff_pages import (  # noqa: E402,F401
     as_admin,
@@ -357,6 +357,7 @@ class TestCardGeometry:
                         method="gcash",
                         amount=Decimal("15675.00"),
                         refunded=False,
+                        status="paid",
                     )
                 ],
             )
@@ -372,6 +373,7 @@ class TestCardGeometry:
                         method="gcash",
                         amount=Decimal("15675.00"),
                         refunded=False,
+                        status="paid",
                     )
                 ],
             )
@@ -767,12 +769,15 @@ class TestFiguresMatchTheService:
 class _Payment:
     """The fields `_transaction_row` reads, without a database row."""
 
-    def __init__(self, customer, method, channel, amount, refunded=False):
+    def __init__(
+        self, customer, method, channel, amount, refunded=False, status="paid"
+    ):
         self.customer = customer
         self.method = method
         self.channel = channel
         self.amount = Decimal(amount)
         self.refunded = refunded
+        self.status = status
 
 
 class TestTransactionRows:
@@ -853,6 +858,90 @@ class TestTransactionRows:
             "the walk-in caramel mark was never drawn"
         )
         assert _count(image, theme.SURFACE) > 0, "the chip lost its fill"
+
+
+class TestPaymentStatus:
+    """A transfer that has not cleared is not money in the drawer.
+
+    The Recent Transactions card used to render every payment with the same
+    received-cash styling, so a pending GCash transfer and a failed card
+    attempt looked like takings. The service now carries the status through and
+    the row labels anything that is not paid.
+    """
+
+    @staticmethod
+    def _failed_payment(built, context) -> None:
+        from datetime import datetime
+
+        from app.models import Payment
+
+        with context.session() as session:
+            session.add(
+                Payment(
+                    booking_id=built.finished.booking_id,
+                    amount=Decimal("1200.00"),
+                    method="card",
+                    status="failed",
+                    paid_at=None,
+                    recorded_by=built.counter.user_id,
+                    created_at=datetime.now(),
+                )
+            )
+
+    def test_recent_transactions_keep_each_payments_status(self, branch):
+        built, context = branch
+        self._failed_payment(built, context)
+
+        with context.reading() as session:
+            rows = dashboard_service.recent_transactions(session, 5)
+
+        by_amount = {
+            Decimal(row.amount).quantize(Decimal("0.01")): row.status
+            for row in rows
+        }
+        assert by_amount[Decimal("15000.00")] == "paid"
+        assert by_amount[Decimal("2500.00")] == "pending"
+        assert by_amount[Decimal("1200.00")] == "failed"
+
+    @staticmethod
+    def _amount_labels(page, row: int) -> list:
+        """The amount and, when there is one, its status caption."""
+        cell = page.transactions_list.itemAtPosition(row, 3).widget()
+        if cell is None:
+            return []
+        labels = [cell] if isinstance(cell, QLabel) else cell.findChildren(QLabel)
+        return labels
+
+    def test_pending_and_failed_amounts_are_not_styled_as_received_cash(
+        self, shell, branch
+    ):
+        page = DashboardPage(shell, animate=False)
+        page._clear_transactions()
+        for row, (customer, status) in enumerate(
+            [
+                ("Paid Pat", "paid"),
+                ("Pending Pia", "pending"),
+                ("Failed Fred", "failed"),
+            ]
+        ):
+            page._transaction_row(
+                _Payment(customer, "gcash", "online", "500.00", status=status),
+                row,
+            )
+
+        paid = self._amount_labels(page, 0)
+        pending = self._amount_labels(page, 1)
+        failed = self._amount_labels(page, 2)
+
+        assert theme.TEXT in paid[0].styleSheet()
+        assert theme.TEXT not in pending[0].styleSheet()
+        assert theme.TEXT not in failed[0].styleSheet()
+        assert theme.WARN in pending[0].styleSheet()
+        assert theme.DANGER in failed[0].styleSheet()
+
+        assert [label.text() for label in pending[1:]] == ["Pending"]
+        assert [label.text() for label in failed[1:]] == ["Failed"]
+        assert paid[1:] == []
 
 
 class TestPace:
