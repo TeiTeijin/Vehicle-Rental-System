@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 17.
-- In progress: None — next is Task 10.
-- Not started: Tasks 10, 12, 13, 14, 15, 18, 19, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17.
+- In progress: Tasks 13, 18, 19 in parallel worktrees; next serial is Task 12.
+- Not started: Tasks 12, 14, 15, 20 (plus the three in-flight).
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -807,7 +807,7 @@ git commit -m "fix: gate booking actions by status and focus completed bookings"
 - A configured scheduling fee greater than the rental total is rejected with a clear `ValidationError` before payment.
 - `complete_counter_rental` keeps its explicit `deposit`/`fee_floor` parameters.
 
-- [ ] **Step 1: Write the failing zero-deposit test**
+- [x] **Step 1: Write the failing zero-deposit test**
 
 ```python
 def test_a_zero_deposit_rental_does_not_fail(...):
@@ -821,20 +821,20 @@ def test_a_zero_deposit_rental_does_not_fail(...):
     assert [p.kind for p in booking.payments] == ["rental"]
 ```
 
-- [ ] **Step 2: Write the fee validation test**
+- [x] **Step 2: Write the fee validation test**
 
 Set `scheduling_fee` above the rental total and assert the service raises a configuration error instead of accepting a payment the customer was told was valid.
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_counter_rental.py -q -o addopts=`
 Expected: FAIL with `Payment amount must be greater than zero`.
 
-- [ ] **Step 4: Implement skip/validation**
+- [x] **Step 4: Implement skip/validation**
 
 Skip the deposit `record_payment` call when `deposit == 0`. Reject `scheduling_fee > total` with a clear `ValidationError`. Keep the Settings-page validation honest.
 
-- [ ] **Step 5: Run and commit**
+- [x] **Step 5: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_counter_rental.py tests/test_staff_settings.py -q -o addopts=`
 
