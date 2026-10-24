@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 16, 17, 19.
-- In progress: Task 18 in a parallel worktree; next serial is Task 12.
-- Not started: Tasks 12, 14, 15, 20 (plus Task 18 in flight).
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 16, 17, 18, 19.
+- In progress: Task 12.
+- Not started: Tasks 14, 15, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -1205,7 +1205,7 @@ git commit -m "security: sanitize media URLs in local database snapshots"
 - CI runs non-GUI tests in parallel and GUI tests serially with `QT_QPA_PLATFORM=offscreen` and a hard timeout.
 - `ruff check app tests` and `pytest` are required jobs.
 
-- [ ] **Step 1: Add the CI workflow**
+- [x] **Step 1: Add the CI workflow**
 
 Install `requirements.txt` and `requirements-dev.txt`; run `ruff check app tests`. Run non-GUI tests with `-n auto` while ignoring the GUI modules, then run the GUI modules serially with `QT_QPA_PLATFORM=offscreen` and a timeout:
 
@@ -1222,17 +1222,17 @@ QT_QPA_PLATFORM=offscreen timeout 1200 .venv/bin/python -m pytest -q -o addopts=
 
 Do not provide `.env` or network credentials.
 
-- [ ] **Step 2: Remove tracked junk and fix VS Code**
+- [x] **Step 2: Remove tracked junk and fix VS Code**
 
 Use `git rm` for the three tracked junk files. Update `.vscode/settings.json` to `${workspaceFolder}/.venv/bin/python`.
 
-- [ ] **Step 3: Run Ruff and the full suite**
+- [x] **Step 3: Run Ruff and the full suite**
 
 Run: `.venv/bin/ruff check app tests`
 Run: `QT_QPA_PLATFORM=offscreen timeout 1200 .venv/bin/python -m pytest -q -o addopts=`
 Expected: pass. Fix new lint findings only; do not mass-reformat in this task.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/tests.yml pyproject.toml requirements-dev.txt .vscode/settings.json .gitignore
