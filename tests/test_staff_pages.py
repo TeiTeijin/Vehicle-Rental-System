@@ -1984,6 +1984,25 @@ class TestVehicleCard:
         qapp.processEvents()
         assert rail.horizontalScrollBar().maximum() > 0
 
+    def test_a_deleted_rail_stops_building_cards(self, qapp):
+        """A queued build timer must not touch a deleted C++ widget.
+
+        `_alive` is normally cleared by `destroyed`, but a timer can already
+        be queued when the section is torn down during a filter change. The
+        shiboken validity check is the backstop; without it the timer raises
+        `RuntimeError: Internal C++ object already deleted`.
+        """
+        rail = VehicleRail(QThreadPool(), [self._vehicle(index) for index in range(3)])
+        rail._build_queue = [0]
+        rail.deleteLater()
+        QTest.qWait(10)
+
+        # Simulate the stale flag the queued timer sees before `destroyed`
+        # catches up: only shiboken can tell the widget is gone now.
+        rail._alive = True
+        rail._build_queue = [0]
+        rail._process_queue()
+
 
 def test_the_shimmer_skeleton_is_shared_with_the_hero():
     import app.ui.hero as hero

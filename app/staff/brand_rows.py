@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from app.staff.metrics import (
     VEHICLE_CARD_GUTTER,
@@ -91,6 +92,8 @@ class VehicleRail(QScrollArea):
 
     def _visible_edge(self) -> int:
         """X of the rightmost card worth building right now."""
+        if not isValid(self):
+            return 0
         return (
             self.horizontalScrollBar().value()
             + self.viewport().width()
@@ -122,7 +125,7 @@ class VehicleRail(QScrollArea):
                 slot.build(self._pool)
 
     def _process_queue(self) -> None:
-        if not getattr(self, "_alive", False):
+        if not getattr(self, "_alive", False) or not isValid(self):
             return
         if self._building:
             return
