@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 11, 16, 17.
-- In progress: None — next is Task 8.
-- Not started: Tasks 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 11, 16, 17.
+- In progress: None — next is Task 9.
+- Not started: Tasks 9, 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -693,40 +693,40 @@ git commit -m "fix: keep bookings committed when receipt generation fails"
 - `NewRentalPage` sets `overlay.set_dismissible(False)` when the wizard starts and restores `True` before hiding it. It clears `_pending_customer_id` at the start of every `refresh()` and exposes `pending_customer_id` for tests.
 - `LicencePanel._on_create_values` raises `ValidationError` with the eligibility reasons instead of a bare `RuntimeError`, so the form shows the actual age/licence problem.
 
-- [ ] **Step 1: Write the failing dismiss test**
+- [x] **Step 1: Write the failing dismiss test**
 
 Show a `FrostedOverlay`, call `set_dismissible(False)`, send Escape with `QTest.keyClick`, and assert the overlay is still visible. Also click outside the card column and assert it remains visible.
 
-- [ ] **Step 2: Write the failing wizard cancel and pending-customer tests**
+- [x] **Step 2: Write the failing wizard cancel and pending-customer tests**
 
 - With the wizard overlay guarded, Escape does not hide it.
 - Clicking “Cancel rental” with `confirm` patched to `True` hides the overlay and emits `cancelled`.
 - Set `page.set_pending_customer(42)`, call `page.refresh()`, and assert `page.pending_customer_id is None`; the next wizard receives `customer_id=None`.
 - A blocked new-customer eligibility result displays the actual reason text, not the generic failure message.
 
-- [ ] **Step 3: Run them to verify failure**
+- [x] **Step 3: Run them to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "wizard or pending or dismiss" -q -o addopts=`
 Expected: FAIL because the overlay has no dismissible guard, no wizard cancel button, and pending customer survives refresh.
 
-- [ ] **Step 4: Implement the overlay guard**
+- [x] **Step 4: Implement the overlay guard**
 
 Add `_dismissible`/`set_dismissible` to both overlay classes. In the Escape and outside-click handlers, return early when dismissal is disabled. Keep default behavior unchanged for customer, fleet, and ordinary details overlays.
 
-- [ ] **Step 5: Implement the wizard cancel path**
+- [x] **Step 5: Implement the wizard cancel path**
 
 Add the cancel signal/button to `_StepBase._buttons` and connect it in `RentalWizard._swap`. In `_on_cancel`, use `confirm(self._overlay, "Discard this rental?", detail="The customer, dates, and payment choice will be lost.", destructive=True)`; only hide and emit when confirmed. Restore dismissibility in `_on_cancel`, `_on_finished`, and `_on_view_bookings`.
 
-- [ ] **Step 6: Clear pending intent and improve the eligibility message**
+- [x] **Step 6: Clear pending intent and improve the eligibility message**
 
 Clear `_pending_customer_id` in `NewRentalPage.refresh()` before reloading. Replace the `RuntimeError` in `LicencePanel._on_create_values` with `ValidationError("; ".join(verdict["reasons"]))`; keep the transaction rollback so no blocked customer is written.
 
-- [ ] **Step 7: Run the flow tests**
+- [x] **Step 7: Run the flow tests**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -q -o addopts=`
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/staff/overlay.py app/staff/vehicle_details.py app/staff/rental_wizard.py app/staff/pages/new_rental.py app/staff/pages/customers.py tests/test_staff_pages.py
