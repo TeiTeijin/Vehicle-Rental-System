@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 16, 17, 18, 19.
-- In progress: Task 12.
-- Not started: Tasks 14, 15, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19.
+- In progress: Task 14.
+- Not started: Tasks 15, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -923,7 +923,7 @@ def policy_from_settings(session) -> PricingPolicy: ...
 ```
 `RentalCalculator.total_cost(vehicle, start_date, end_date, *, policy=None) -> Decimal`; `Vehicle.calculate_rate(days, *, policy=None)` with defaults preserving old behavior. `customer_service.eligibility_for(..., expiring_days: int = 30)`; `customers._customer_rows` reads the setting. `maintenance_service.due_soon(..., within_days: int | None = None, within_km: int | None = None)` reads settings when omitted. `booking_service.create_booking` rejects same-day when `allow_same_day` is false. `PaymentPanel` selects `default_payment_method`; `_on_scheduled` uses `default_channel`; `receipt_auto_open` controls opening the generated receipt.
 
-- [ ] **Step 1: Write failing policy tests**
+- [x] **Step 1: Write failing policy tests**
 
 ```python
 def test_long_term_setting_changes_quote(...):
@@ -937,7 +937,7 @@ def test_moto_multiplier_setting_changes_quote(...):
     ...
 ```
 
-- [ ] **Step 2: Write failing operational tests**
+- [x] **Step 2: Write failing operational tests**
 
 - `allow_same_day=0` rejects same-day `create_booking`.
 - `licence_expiring_days=90` changes the "expires soon" warning.
@@ -945,19 +945,19 @@ def test_moto_multiplier_setting_changes_quote(...):
 - `default_payment_method=gcash` preselects GCash.
 - `receipt_auto_open=0` does not call `QDesktopServices.openUrl`.
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_pricing_policy.py tests/test_counter_rental.py tests/test_customer_management.py tests/test_maintenance_service.py -q -o addopts=`
 
-- [ ] **Step 4: Implement the pricing policy**
+- [x] **Step 4: Implement the pricing policy**
 
 Move the hardcoded `7`, `0.90`, and `0.70` into `PricingPolicy`; keep the old defaults so domain tests still express the default business rules. Pass the policy from `booking_service.quote_for`, `create_booking`, `extension_quote`, and `extend_booking`.
 
-- [ ] **Step 5: Wire the operational settings**
+- [x] **Step 5: Wire the operational settings**
 
 Add readers for `allow_same_day`, `licence_expiring_days`, `maint_due_days`, `maint_due_km`, `receipt_auto_open`, `default_payment_method`, and `default_channel`. Remove/retain constants only as defaults.
 
-- [ ] **Step 6: Run and commit**
+- [x] **Step 6: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_domain.py tests/test_pricing_policy.py tests/test_counter_rental.py tests/test_customer_management.py tests/test_maintenance_service.py tests/test_staff_settings.py -q -o addopts=`
 
