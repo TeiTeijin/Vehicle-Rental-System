@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 7, 11, 16, 17.
-- In progress: None — next is Task 5.
-- Not started: Tasks 5, 6, 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 7, 11, 16, 17.
+- In progress: None — next is Task 6.
+- Not started: Tasks 6, 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -411,6 +411,8 @@ git commit -m "fix: treat deposits as liabilities and apply them to penalties"
 
 This task closes the counter-flow gap where the wizard allows “pay minimum now, rest at pick-up” but check-in releases the vehicle without showing or collecting that balance.
 
+**Status:** ✅ complete — commit `8c6c59a`; service guard, panel checkpoint, and payment hand-off tested.
+
 **Files:**
 - Modify: `app/services/booking_service.py`
 - Modify: `app/staff/booking_panels.py`
@@ -423,7 +425,7 @@ This task closes the counter-flow gap where the wizard allows “pay minimum now
 - `CheckInPanel(parent=None, *, current_mileage: int = 0, outstanding: Decimal = ZERO)` gains `collect_requested = Signal()`. If `outstanding > ZERO`, the primary button is disabled and a “Record payment first” secondary button is visible; the latter emits `collect_requested`.
 - `BookingsPage._do_check_in` always passes `require_settlement=True`. `open_check_in` passes `outstanding=self._outstanding(booking_id)` and connects `collect_requested` to hiding the check-in overlay and calling `open_payment_for(booking_id)`.
 
-- [ ] **Step 1: Write the failing service test**
+- [x] **Step 1: Write the failing service test**
 
 ```python
 def test_check_in_requires_a_settled_pickup(session, customer, vehicle, staff):
@@ -454,7 +456,7 @@ def test_check_in_requires_a_settled_pickup(session, customer, vehicle, staff):
     assert booking.status == "ongoing"
 ```
 
-- [ ] **Step 2: Write the failing panel test**
+- [x] **Step 2: Write the failing panel test**
 
 ```python
 def test_check_in_panel_blocks_release_with_balance(qapp):
@@ -463,29 +465,29 @@ def test_check_in_panel_blocks_release_with_balance(qapp):
     assert panel.collect_button.isHidden() is False
 ```
 
-- [ ] **Step 3: Run both to verify failure**
+- [x] **Step 3: Run both to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_booking_service.py tests/test_staff_pages.py -q -o addopts=`
 Expected: FAIL because the service ignores `require_settlement` and the panel has no balance controls.
 
-- [ ] **Step 4: Implement the service guard**
+- [x] **Step 4: Implement the service guard**
 
 In `check_in`, after the status/fuel checks and before `mark_rented`, read the booking balance when `require_settlement` is true. Raise `ConflictError` with the exact amount and a message that the balance must be collected before release. Keep the default `False` so existing service callers and tests remain compatible; the staff UI is the caller that opts in.
 
-- [ ] **Step 5: Add the panel checkpoint**
+- [x] **Step 5: Add the panel checkpoint**
 
 In `CheckInPanel`, show `Outstanding ...` when positive, assign the primary button to `self.go_button`, disable it while a balance is due, and add `self.collect_button` with the text “Record payment first”. Emit `collect_requested` when it is clicked. Do not change the fields or validation for a zero-balance pickup.
 
-- [ ] **Step 6: Wire the Bookings page**
+- [x] **Step 6: Wire the Bookings page**
 
 In `open_check_in`, pass the current outstanding and connect `collect_requested` to close the check-in overlay and open `open_payment_for(booking_id)`. After the payment panel succeeds, the clerk returns to Bookings and starts check-in again; the refreshed table and zero balance allow release.
 
-- [ ] **Step 7: Run the pickup tests**
+- [x] **Step 7: Run the pickup tests**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_booking_service.py tests/test_staff_pages.py -q -o addopts=`
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/services/booking_service.py app/staff/booking_panels.py app/staff/pages/bookings.py tests/test_booking_service.py tests/test_staff_pages.py
