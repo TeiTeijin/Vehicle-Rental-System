@@ -698,7 +698,7 @@ git push origin final-audit
 - Consumes: signed-in customer identity and customer-scoped service queries.
 - Produces: verified customer-only visibility, profile updates, notifications, and logout.
 
-- [ ] **Step 1: Run the self-service tests**
+- [x] **Step 1: Run the self-service tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -709,7 +709,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_customer_flow_audit.py -q
 ```
 
-- [ ] **Step 2: Verify customer isolation**
+- [x] **Step 2: Verify customer isolation**
 
 Create two customers with bookings and payments. Sign in as each and verify:
 - bookings list only own rows
@@ -718,21 +718,21 @@ Create two customers with bookings and payments. Sign in as each and verify:
 - profile only own row
 - direct service calls with another user's ID are not exposed through the UI
 
-- [ ] **Step 3: Verify status and money display**
+- [x] **Step 3: Verify status and money display**
 
 For each booking state (`pending`, `confirmed`, `ongoing`, `completed`, `cancelled`), verify the customer sees the correct bucket/status. Verify rental, deposit, and `deposit_applied` rows are labeled correctly and totals match `payment_service.booking_balance`.
 
-- [ ] **Step 4: Verify profile and session**
+- [x] **Step 4: Verify profile and session**
 
 Edit name, phone, address, licence, guarantor, and location. Verify validation, DB persistence, and refresh across the navbar/profile. Verify logout clears identity and protected actions show the auth gate.
 
-- [ ] **Step 5: Record evidence and findings**
+- [x] **Step 5: Record evidence and findings**
 
 Mark `C6`, `C7`, `C8`, `X7`, and the customer-data part of `X8`.
 
-- [ ] **Step 6: Fix blocking findings with TDD**
+- [x] **Step 6: Fix blocking findings with TDD**
 
-- [ ] **Step 7: Commit and push**
+- [x] **Step 7: Commit and push**
 
 ```bash
 git add app/ui app/services tests docs/audits/final-audit-register.md
