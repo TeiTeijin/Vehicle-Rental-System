@@ -953,6 +953,7 @@ class TestNewRentalMuting:
         pop = page.filter_popover
 
         pop.type_group.boxes["motorcycle"].setChecked(True)
+        _wait_for_new_rental(page)
         page._availability_timer.stop()
         page._refresh_availability()
         qapp_process(page)
@@ -970,11 +971,13 @@ class TestNewRentalMuting:
         pop = page.filter_popover
 
         pop.type_group.boxes["motorcycle"].setChecked(True)
+        _wait_for_new_rental(page)
         while not page._exhausted:
             page._load_page()
         # This is the user's case: Honda has the CRV and no bike, so engine size
         # has nothing left to say.
         pop.brand_pane.boxes["Honda"].setChecked(True)
+        _wait_for_new_rental(page)
         page._availability_timer.stop()
         page._refresh_availability()
         qapp_process(page)
@@ -991,14 +994,17 @@ class TestNewRentalMuting:
         pop = page.filter_popover
 
         pop.type_group.boxes["motorcycle"].setChecked(True)
+        _wait_for_new_rental(page)
         while not page._exhausted:
             page._load_page()
         pop.brand_pane.boxes["Honda"].setChecked(True)
+        _wait_for_new_rental(page)
         page._availability_timer.stop()
         page._refresh_availability()
         assert "cc_buckets" in pop.muted_axes()
 
         pop.brand_pane.boxes["Honda"].setChecked(False)
+        _wait_for_new_rental(page)
         page._availability_timer.stop()
         page._refresh_availability()
         assert "cc_buckets" not in pop.muted_axes()
@@ -1015,11 +1021,13 @@ class TestNewRentalMuting:
 
         pop.type_group.boxes["motorcycle"].setChecked(True)
         pop.cc_group.boxes["126 - 155cc"].setChecked(True)
+        _wait_for_new_rental(page)
         while not page._exhausted:
             page._load_page()
         # Brand last, on purpose: the axis the clerk just touched is never greyed,
         # so the brand must be the final tick for engine size to be the casualty.
         pop.brand_pane.boxes["Honda"].setChecked(True)
+        _wait_for_new_rental(page)
         page._availability_timer.stop()
         page._refresh_availability()
         assert "cc_buckets" in pop.muted_axes()
@@ -1057,9 +1065,11 @@ class TestNewRentalMuting:
 
         # A real narrowing first, so there is a genuine grey to be left behind.
         pop.type_group.boxes["motorcycle"].setChecked(True)
+        _wait_for_new_rental(page)
         while not page._exhausted:
             page._load_page()
         pop.brand_pane.boxes["Honda"].setChecked(True)
+        _wait_for_new_rental(page)
         page._availability_timer.stop()
         page._refresh_availability()
         assert pop.muted_axes() != []
@@ -1359,7 +1369,7 @@ class TestNewRentalPage:
         assert set(page.brands_shown) == {"Toyota", "Honda", "Ford"}
 
         page.filter_popover.type_group.boxes["pickup"].setChecked(True)
-        qapp_process(page)
+        _wait_for_new_rental(page)
         assert page.brands_shown == ["Ford"]
         assert page.slots[0].vehicle.model == "Ranger"
 
@@ -1373,12 +1383,44 @@ class TestNewRentalPage:
         before = list(page.brands_shown)
 
         page.filter_popover.type_group.boxes["pickup"].setChecked(True)
-        qapp_process(page)
+        _wait_for_new_rental(page)
         assert page.brands_shown != before
 
         page.clear_filters()
         qapp_process(page)
         assert page.brands_shown == before
+
+    def test_a_filter_change_does_not_block_the_gui(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        import time
+
+        from app.services.vehicle_service import VehicleFilter
+        from app.staff.pages import new_rental as module
+
+        page = NewRentalPage(shell)
+        page.show()
+        page.refresh()
+        _wait_for_new_rental(page)
+
+        real = module.showcase_vehicle_rows
+
+        def slow_showcase(*args, **kwargs):
+            time.sleep(0.1)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(
+            module, "showcase_vehicle_rows", slow_showcase
+        )
+        started = time.perf_counter()
+        page._apply_filters(VehicleFilter(search="Honda"))
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < 0.05
+        assert page._loading is True
+        assert "Loading" in page.count_label.text()
+        _wait_for_new_rental(page)
+        assert page._loading is False
 
     def test_a_search_narrows_the_fleet_to_what_it_names(self, qapp, shell, branch):
         _built, context = branch
@@ -1390,7 +1432,7 @@ class TestNewRentalPage:
         page.refresh()
 
         page.search.setText("Ranger")
-        qapp_process(page)
+        _wait_for_new_rental(page)
         assert page.brands_shown == ["Ford"]
 
     def test_a_search_matching_no_vehicle_says_so_instead_of_breaking(self, qapp, shell, branch):
@@ -1401,6 +1443,7 @@ class TestNewRentalPage:
         page.refresh()
 
         page.search.setText("no-such-vehicle")
+        _wait_for_new_rental(page)
         page._settle_timer.stop()
         while not page._exhausted:
             page._load_page()
@@ -1417,7 +1460,7 @@ class TestNewRentalPage:
         page.refresh()
 
         page.filter_popover.price_group.min_rate.setValue(900_000)
-        qapp_process(page)
+        _wait_for_new_rental(page)
         assert page._sections == []
 
     def test_a_filter_that_matches_nothing_reports_zero(self, qapp, shell, branch):
@@ -1427,7 +1470,7 @@ class TestNewRentalPage:
         page.resize(1440, 900)
         page.refresh()
         page.filter_popover.price_group.min_rate.setValue(900_000)
-        qapp_process(page)
+        _wait_for_new_rental(page)
         assert page.matched == 0
         assert page.count_label.text() == "0 of 6 vehicles"
 
@@ -4098,6 +4141,22 @@ def _wait_for_bookings(page, timeout_ms: int = 15000) -> None:
     while page._done_gen != page._load_gen and time.monotonic() < deadline:
         QTest.qWait(5)
     assert page._done_gen == page._load_gen, "bookings reload never landed"
+
+
+def _wait_for_new_rental(page, timeout_ms: int = 15000) -> None:
+    """Block until the New Rental async filter load has landed."""
+    import time
+
+    from app.staff.workers import loader_pool
+
+    # Let any queued filter signal (range widgets emit on the next turn) start
+    # its worker before we ask the pool to drain.
+    QTest.qWait(20)
+    loader_pool().waitForDone(timeout_ms)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while page._done_gen != page._load_gen and time.monotonic() < deadline:
+        QTest.qWait(5)
+    assert page._done_gen == page._load_gen, "new-rental reload never landed"
 
 
 def _wait_for_fleet(page, timeout_ms: int = 15000) -> None:

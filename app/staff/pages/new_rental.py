@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QObject,
+    QPoint,
+    QRect,
+    QRunnable,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -36,7 +45,7 @@ from app.staff.metrics import (
 )
 from app.staff.pages.base import StaffPage
 from app.staff.vehicle_cards import MediaResolver, to_rental_vehicle
-from app.staff.workers import media_pool
+from app.staff.workers import emit_safely, loader_pool, media_pool
 
 #: Brands appended per scroll gesture. Not a page break -- brands are appended as
 #: the list is scrolled, so this only sets how many queries one gesture makes.
@@ -76,6 +85,110 @@ def popover_position(anchor: QPoint, size: QSize, available: QRect) -> QPoint:
     return QPoint(max(x, available.left()), max(y, available.top()))
 
 
+class _NewRentalSignals(QObject):
+    loaded = Signal(object)
+    failed = Signal(int, object)
+
+
+class _NewRentalLoader(QRunnable):
+    """One filtered page plus the count/availability questions it asks.
+
+    Everything that touches an ORM row happens under ``context.reading()`` and
+    is converted to plain ``RentalVehicle`` values before the signal leaves the
+    worker. The GUI thread only lays out those values.
+    """
+
+    def __init__(
+        self,
+        context,
+        filters: VehicleFilter,
+        page_brands: list[str],
+        *,
+        reset: bool,
+        exempt: str | None,
+        gen: int,
+        signals: _NewRentalSignals,
+    ) -> None:
+        super().__init__()
+        self._context = context
+        self._filters = filters
+        self._page_brands = tuple(page_brands)
+        self._reset = reset
+        self._exempt = exempt
+        self._gen = gen
+        self._loaded = signals.loaded
+        self._failed = signals.failed
+
+    def run(self) -> None:
+        try:
+            with self._context.reading() as session:
+                rows = showcase_vehicle_rows(
+                    session,
+                    category=None,
+                    # A rented or reserved car can still be booked for later
+                    # dates; only the shop and retired cars leave this view.
+                    # Fleet remains the all-status list.
+                    statuses=VISIBLE_STATUSES,
+                    makes=list(self._page_brands),
+                    filters=self._filters,
+                )
+                grouped: dict[str, list] = {}
+                for vehicle, url in rows:
+                    grouped.setdefault(vehicle.make, []).append(
+                        to_rental_vehicle(vehicle, url)
+                    )
+
+                matched = total = None
+                reachable = high = None
+                count_error = None
+                availability_ok = True
+                if self._reset:
+                    try:
+                        matched = count_filtered_vehicles(
+                            session,
+                            self._filters,
+                            statuses=VISIBLE_STATUSES,
+                        )
+                        total = count_filtered_vehicles(
+                            session,
+                            VehicleFilter(),
+                            statuses=VISIBLE_STATUSES,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - count is advisory
+                        count_error = exc
+                    try:
+                        reachable = axis_availability(
+                            session,
+                            self._filters,
+                            exclude=self._exempt,
+                        )
+                        _low, high = rate_bounds(
+                            session,
+                            self._filters,
+                            exclude=self._exempt == "min_rate",
+                        )
+                    except Exception:  # noqa: BLE001 - availability is advisory
+                        availability_ok = False
+
+                payload = (
+                    self._gen,
+                    self._reset,
+                    self._page_brands,
+                    grouped,
+                    matched,
+                    total,
+                    reachable,
+                    high,
+                    self._exempt,
+                    availability_ok,
+                    count_error,
+                )
+        except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
+            emit_safely(self._failed, self._gen, exc)
+        else:
+            emit_safely(self._loaded, payload)
+
+
 class NewRentalPage(StaffPage):
     PANEL = True
     HEADER = False
@@ -109,6 +222,14 @@ class NewRentalPage(StaffPage):
         #: Customer id pushed from the Customers tab ("New rental"): the next
         #: wizard run pre-resolves Step 3 to them, checks included.
         self._pending_customer_id: int | None = None
+
+        # Filter loads are generation-tagged: a slow worker that lands after a
+        # newer filter was chosen must not repaint the old fleet.
+        self._load_gen = 0
+        self._done_gen = 0
+        self._load_signals = _NewRentalSignals(self)
+        self._load_signals.loaded.connect(self._on_load_loaded)
+        self._load_signals.failed.connect(self._on_load_failed)
 
         self._build_filter_bar()
         self._build_popover()
@@ -359,7 +480,7 @@ class NewRentalPage(StaffPage):
             self.filter_popover.clear()
         finally:
             self.search.blockSignals(blocked)
-        self._apply_filters(VehicleFilter(), force=True)
+        self._apply_filters(VehicleFilter(), force=True, defer=False)
 
     # -- data --------------------------------------------------------------
 
@@ -379,7 +500,7 @@ class NewRentalPage(StaffPage):
         self._media_requested = set()
         self._current_section = None
         self.scroll_area.verticalScrollBar().setValue(0)
-        self._apply_filters(self._filters, force=True)
+        self._apply_filters(self._filters, force=True, defer=False)
         # The first page is laid out but its geometry is not final until the event
         # loop has run the layout, so the first section can only be read then.
         QTimer.singleShot(0, self._track_section)
@@ -406,7 +527,11 @@ class NewRentalPage(StaffPage):
         )
 
     def _apply_filters(
-        self, filters: VehicleFilter, *, force: bool = False
+        self,
+        filters: VehicleFilter,
+        *,
+        force: bool = False,
+        defer: bool = True,
     ) -> None:
         if not force and filters == self._filters:
             return
@@ -416,10 +541,132 @@ class NewRentalPage(StaffPage):
         self._offset = 0
         self._exhausted = False
         self.scroll_area.verticalScrollBar().setValue(0)
-        self._load_page()
-        self._update_count()
-        # Debounced: see the note where the timer is built.
-        self._availability_timer.start()
+        self._availability_timer.stop()
+        self._load_gen += 1
+        gen = self._load_gen
+
+        # The initial refresh (and explicit programmatic calls) stay
+        # deterministic and fully painted; user-driven filter changes take the
+        # worker path.
+        if not defer:
+            self._loading = False
+            self._load_page()
+            self._update_count()
+            # Keep the old debounced availability read for the synchronous
+            # refresh path; it must not clamp a filter the clerk is about to
+            # type before the event loop gets a turn.
+            self._availability_timer.start()
+            self._done_gen = gen
+            return
+
+        page_brands = self._brands[:BRANDS_PER_PAGE]
+        self.clear_button.setEnabled(not filters.is_empty())
+        if not page_brands:
+            self._loading = False
+            self._exhausted = True
+            self._matched = 0
+            self._total = 0
+            self._done_gen = gen
+            self.count_label.setText("0 vehicles")
+            self._sync_empty_state()
+            return
+
+        self._loading = True
+        self.count_label.setText("Loading vehicles…")
+        self._empty.setVisible(False)
+        self._rows.setVisible(True)
+        worker = _NewRentalLoader(
+            self.context,
+            filters,
+            page_brands,
+            reset=True,
+            exempt=self.filter_popover.last_touched_axis(),
+            gen=gen,
+            signals=self._load_signals,
+        )
+        loader_pool().start(worker)
+
+    def _on_load_loaded(self, payload) -> None:
+        (
+            gen,
+            reset,
+            page_brands,
+            grouped,
+            matched,
+            total,
+            reachable,
+            high,
+            exempt,
+            availability_ok,
+            count_error,
+        ) = payload
+        if gen != self._load_gen:
+            return
+        self._loading = False
+        self._done_gen = gen
+
+        if reset:
+            self._offset = 0
+        vehicles = []
+        insert_at = self._rows_layout.count() - 1
+        for brand in page_brands:
+            brand_vehicles = grouped.get(brand, [])
+            if not brand_vehicles:
+                continue
+            section = BrandSection(brand, brand_vehicles, self._pool, self._rows)
+            section.setObjectName("brandSection")
+            section.setProperty("brand", brand)
+            self._rows_layout.insertWidget(insert_at, section)
+            insert_at += 1
+            self._sections.append(section)
+            for slot in section.slots:
+                slot.details_requested.connect(self._open_vehicle_details)
+                slot.media_needed.connect(
+                    lambda _vid, vehicle=slot.vehicle: self._on_slot_media(vehicle)
+                )
+            vehicles.extend(brand_vehicles)
+
+        self._offset += len(page_brands)
+        self._exhausted = self._offset >= len(self._brands)
+
+        if reset:
+            if matched is not None:
+                self._matched = matched
+                self._total = total
+                if matched == total:
+                    self.count_label.setText(
+                        f"{total:,} vehicle{'s' if total != 1 else ''}"
+                    )
+                else:
+                    self.count_label.setText(
+                        f"{matched:,} of {total:,} vehicles"
+                    )
+            elif count_error is not None:
+                message, _, _ = describe(count_error)
+                self.count_label.setText(f"Count unavailable: {message}")
+            if availability_ok:
+                self.filter_popover.set_availability(
+                    reachable, rate_high=high, exempt=exempt
+                )
+            else:
+                self.filter_popover.clear_availability()
+
+        self._update_filter_thumbs(vehicles)
+        self._sync_empty_state()
+        self._update_visible_sections()
+        QTimer.singleShot(0, self._fill_viewport)
+        QTimer.singleShot(0, self._track_section)
+
+    def _on_load_failed(self, gen: int, exc: BaseException) -> None:
+        if gen != self._load_gen:
+            return
+        self._loading = False
+        self._done_gen = gen
+        message, _, _ = describe(exc)
+        self.count_label.setText(f"Count unavailable: {message}")
+        self._exhausted = True
+        self.filter_popover.clear_availability()
+        self._sync_empty_state()
 
     def _refresh_availability(self) -> None:
         exempt = self.filter_popover.last_touched_axis()
