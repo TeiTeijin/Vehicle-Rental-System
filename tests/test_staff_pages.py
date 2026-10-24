@@ -4789,6 +4789,67 @@ class TestBookingsPageActions:
         assert len(seen) == 1 and seen[0]["method"] == "gcash"
         panel.deleteLater()
 
+    def test_payment_panel_can_record_a_security_deposit(self, qapp):
+        from app.staff.booking_panels import PaymentPanel
+
+        seen = []
+        panel = PaymentPanel(Decimal("2500.00"), show_kind=True)
+        panel.submitted.connect(seen.append)
+        panel.kind_combo.setCurrentIndex(1)
+        panel.method_combo.setCurrentText("cash")
+        panel.amount_edit.setText("2500.00")
+        panel._on_go()
+        assert seen and seen[0]["kind"] == "deposit"
+        panel.deleteLater()
+
+    def test_confirm_accepts_a_pending_booking_after_deposit(
+        self, shell, branch
+    ):
+        from app.services import booking_service
+
+        built, context = branch
+        with context.session() as session:
+            pending = Branch._booking(
+                session,
+                built.customer,
+                built.free_car,
+                TODAY + timedelta(days=5),
+                TODAY + timedelta(days=7),
+                status="pending",
+            )
+            pending_id = pending.booking_id
+            required_deposit = booking_service.deposit_for_vehicle(
+                built.free_car
+            )
+
+        page = BookingsPage(shell)
+        page.refresh()
+        _wait_for_bookings(page)
+        self._select(page, f"#{pending_id}")
+
+        assert page.run(
+            "record_payment",
+            amount=Decimal("7500.00"),
+            method="cash",
+            reference_no="",
+            note="",
+            kind="rental",
+        ) is True
+        self._select(page, f"#{pending_id}")
+        assert page.run(
+            "record_payment",
+            amount=required_deposit,
+            method="cash",
+            reference_no="",
+            note="",
+            kind="deposit",
+        ) is True
+        self._select(page, f"#{pending_id}")
+        assert page.run("confirm") is True
+
+        with context.reading() as session:
+            assert session.get(Booking, pending_id).status == "confirmed"
+
     def test_check_in_panel_blocks_release_with_balance(self, qapp):
         from app.staff.booking_panels import CheckInPanel
 

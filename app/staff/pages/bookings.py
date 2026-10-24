@@ -849,6 +849,7 @@ class BookingsPage(StaffPage):
             self,
             total=balance.total_due,
             paid=balance.amount_paid,
+            show_kind=True,
         )
         panel.submitted.connect(
             lambda values: self._submit_for(booking_id, "record_payment", values)
@@ -1010,6 +1011,7 @@ def _do_record_payment(
     method: str,
     reference_no: str,
     note: str,
+    kind: str = "rental",
     **_,
 ) -> None:
     payment_service.record_payment(
@@ -1017,6 +1019,7 @@ def _do_record_payment(
         booking,
         amount,
         method,
+        kind=kind,
         recorded_by=context.user.user_id,
         reference_no=reference_no or None,
         note=note or None,

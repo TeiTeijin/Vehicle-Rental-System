@@ -227,6 +227,7 @@ class PaymentPanel(_StepBase):
         heading: str = "Record payment",
         total: Decimal | None = None,
         paid: Decimal | None = None,
+        show_kind: bool = False,
     ) -> None:
         super().__init__(parent)
         self.heading = heading
@@ -254,6 +255,12 @@ class PaymentPanel(_StepBase):
         grid = QFormLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(6)
+        self.kind_combo: QComboBox | None = None
+        if show_kind:
+            self.kind_combo = QComboBox(self.card)
+            self.kind_combo.addItem("Rental payment", "rental")
+            self.kind_combo.addItem("Security deposit", "deposit")
+            grid.addRow(_field_label("Payment for", self.card), self.kind_combo)
         self.amount_edit = QLineEdit(self.card)
         self.amount_edit.setText(f"{max(outstanding, ZERO):,.2f}")
         grid.addRow(_field_label("Amount (PHP)", self.card), self.amount_edit)
@@ -300,6 +307,11 @@ class PaymentPanel(_StepBase):
                 "method": self.method_combo.currentText(),
                 "reference_no": self.ref_edit.text().strip(),
                 "note": self.note_edit.text().strip(),
+                "kind": (
+                    self.kind_combo.currentData()
+                    if self.kind_combo is not None
+                    else "rental"
+                ),
             }
         )
 
