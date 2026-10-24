@@ -1,0 +1,77 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_QPA_PLATFORM: offscreen
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Create virtual environment
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff
+        run: .\.venv\Scripts\python.exe -m ruff check app tests
+
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Create virtual environment
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+
+      # GUI modules are imported in a later step only: Qt widgets and worker
+      # pools are not safe to fork, so they must never run under xdist.
+      - name: Non-GUI tests (parallel)
+        timeout-minutes: 20
+        run: >-
+          .\.venv\Scripts\python.exe -m pytest -q -o addopts= -n auto
+          --ignore=tests/test_staff_pages.py
+          --ignore=tests/test_staff_dashboard.py
+          --ignore=tests/test_staff_ui.py
+          --ignore=tests/test_staff_shell.py
+          --ignore=tests/test_staff_login.py
+          --ignore=tests/test_staff_settings.py
+
+      - name: GUI tests (serial, offscreen)
+        timeout-minutes: 20
+        run: >-
+          .\.venv\Scripts\python.exe -m pytest -q -o addopts=
+          tests/test_staff_pages.py
+          tests/test_staff_dashboard.py
+          tests/test_staff_ui.py
+          tests/test_staff_shell.py
+          tests/test_staff_login.py
+          tests/test_staff_settings.py

@@ -25,6 +25,7 @@ gallery.html
 
 # Test/tooling caches
 .pytest_cache/
+.ruff_cache/
 
 # One-time bulk loader for a real database's data. Personal tooling: it
 # stays on the machine that ran it, not in the repo.

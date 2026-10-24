@@ -1,0 +1,12 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+# Start from Ruff's default error rules plus Pyflakes. The broader rule
+# families (I, UP, SIM, ...) still have pre-existing findings across the
+# codebase; enabling them is a separate cleanup, not part of this change.
+select = ["E4", "E7", "E9", "F"]
+# Existing modules re-export names and tests shadow module-level imports with
+# fixture arguments. Those are intentional today; clean them up separately.
+ignore = ["E402", "F401", "F811", "F841"]
