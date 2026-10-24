@@ -13,8 +13,7 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 11, 16.
-- Review pending: Task 4 (implementation committed `fed4784`).
+- Completed and merged: Tasks 1, 2, 3, 4, 11, 16.
 - In progress: Task 7 (receipt boundary), Task 17 (backup secret-leak fix).
 - Not started: Tasks 5, 6, 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
@@ -329,7 +328,7 @@ git commit -m "fix: book future dates on currently rented vehicles"
 
 ### Task 4: Treat deposits as liabilities; add `deposit_applied`
 
-**Status:** 🔧 implementation committed `fed4784`; review pending (free-limit interrupted).
+**Status:** ✅ complete — reviewed and approved; commit `fed4784` (main branch).
 
 This task changes documented behavior. It is deliberately separate from Task 2 so the quote fix can ship independently. It needs explicit product sign-off on the decision at the top.
 
@@ -347,7 +346,7 @@ This task changes documented behavior. It is deliberately separate from Task 2 s
 - `settle_deposit(session, booking) -> Decimal` returns the deposit still held; after successful settlement it is `0`.
 - `amount_paid` and `booking_balance.balance` exclude held deposit rows.
 
-- [ ] **Step 1: Write the failing balance test**
+- [x] **Step 1: Write the failing balance test**
 
 ```python
 def test_a_held_deposit_is_not_rental_payment(...):
@@ -362,7 +361,7 @@ def test_a_held_deposit_is_not_rental_payment(...):
     assert balance.deposit_applied == Decimal("0.00")
 ```
 
-- [ ] **Step 2: Write the failing damage-settlement test**
+- [x] **Step 2: Write the failing damage-settlement test**
 
 ```python
 def test_damage_consumes_deposit_and_reports_zero_held(...):
@@ -373,12 +372,12 @@ def test_damage_consumes_deposit_and_reports_zero_held(...):
     assert balance.balance == Decimal("0.00")
 ```
 
-- [ ] **Step 3: Run both to verify failure**
+- [x] **Step 3: Run both to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_counter_rental.py -q -o addopts=`
 Expected: FAIL; current `amount_paid` includes the deposit and `deposit_held` remains 500.
 
-- [ ] **Step 4: Implement the liability ledger**
+- [x] **Step 4: Implement the liability ledger**
 
 - `amount_paid` sums `rental` and `deposit_applied` paid rows.
 - `deposit_held` = paid deposit rows - refunded deposit rows - applied deposit rows.
@@ -386,20 +385,20 @@ Expected: FAIL; current `amount_paid` includes the deposit and `deposit_held` re
 - `booking_balance` exposes `deposit_applied`.
 - `receipt_rows` adds a `Deposit applied` line when non-zero and shows the correct held/returned figures.
 
-- [ ] **Step 5: Add the migration and migration test**
+- [x] **Step 5: Add the migration and migration test**
 
 Write `scripts/migrate_deposit_applied.py` using the existing `migrate_payment_kind.py` pattern. It confirms the old enum, alters it to include `deposit_applied`, and is idempotent. Add `tests/test_migrate_deposit_applied.py` using the existing migration-test style. Run the migration against a copy of `backup.db` first and take a fresh backup before applying it to the live MySQL database; do not rewrite historical payment rows.
 
-- [ ] **Step 6: Update affected tests**
+- [x] **Step 6: Update affected tests**
 
 Update tests that intentionally asserted the old "absorbed credit" behavior. Do not weaken these invariants: after a clean checkout `deposit_held == 0`; after damage `deposit_applied > 0` and `balance == 0`; after a shortfall `balance > 0`.
 
-- [ ] **Step 7: Run the money suite**
+- [x] **Step 7: Run the money suite**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_counter_rental.py tests/test_booking_service.py tests/test_receipt_service.py tests/test_migrate_deposit_applied.py -q -o addopts=`
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/models/payment.py app/services/payment_service.py app/services/receipt_service.py scripts/migrate_deposit_applied.py tests/test_counter_rental.py tests/test_booking_service.py tests/test_receipt_service.py tests/test_migrate_deposit_applied.py
