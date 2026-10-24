@@ -755,7 +755,7 @@ git push origin final-audit
 - Consumes: `auth_service.sign_in`, `staff_service.ensure_first_admin`, `change_password`, `force_change_password`, `reset_password`, `set_active`.
 - Produces: verified staff/admin login, first-run setup, temporary-password handling, and role gates.
 
-- [ ] **Step 1: Run the staff auth tests**
+- [x] **Step 1: Run the staff auth tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -764,7 +764,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_staff_settings.py -q
 ```
 
-- [ ] **Step 2: Walk first-run setup**
+- [x] **Step 2: Walk first-run setup**
 
 On an empty database:
 - the first-run admin form appears
@@ -772,7 +772,7 @@ On an empty database:
 - a second first-run admin is blocked
 - password policy and email validation are enforced
 
-- [ ] **Step 3: Walk staff login and role gates**
+- [x] **Step 3: Walk staff login and role gates**
 
 Verify:
 - valid staff/admin login
@@ -783,13 +783,13 @@ Verify:
 - sign-out clears the session
 - idle logout works
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S1` and the staff part of `X8`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md
