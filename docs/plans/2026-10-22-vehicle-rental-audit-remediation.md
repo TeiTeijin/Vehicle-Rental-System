@@ -13,9 +13,9 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19.
-- In progress: Task 15 (parallel worktree).
-- Not started: Task 20.
+- Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19.
+- In progress: Task 20 (full regression and release checks).
+- Not started: none.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
 - CarImages API is externally down; treat media/network failures as environmental, not product regressions.
@@ -1076,19 +1076,19 @@ git commit -m "perf: aggregate customer balances and debounce duplicate checks"
 - The worker returns a plain tuple: `(rows, count, reachable, rate_high)` using plain `RentalVehicle`/tuple data, never ORM rows.
 - A generation counter drops stale filter results.
 
-- [ ] **Step 1: Write the failing responsiveness test**
+- [x] **Step 1: Write the failing responsiveness test**
 
 Use a fake context whose `showcase_vehicle_rows` sleeps for 100 ms; call `_apply_filters`; assert the method returns in under 50 ms and the table shows the loading state.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k new_rental -q -o addopts=`
 
-- [ ] **Step 3: Implement the worker**
+- [x] **Step 3: Implement the worker**
 
 Move `_load_page`, `_update_count`, and `_refresh_availability` reads into one worker. Emit a signal to the GUI thread; update sections and filter chips there. Use a generation counter to ignore stale results.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k new_rental -q -o addopts=`
 
