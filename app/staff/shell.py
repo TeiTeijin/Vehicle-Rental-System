@@ -5,6 +5,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -94,7 +95,16 @@ class StaffShell(QMainWindow):
         #: Auto-logout after inactivity (0 = off). Reset on input + navigation.
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
+        #: Coarse timers do not reliably reflect a restart in `remainingTime()`
+        #: on Windows; the deadline is exact, so ask for a precise timer.
+        self._idle_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._idle_timer.timeout.connect(self._on_idle_timeout)
+
+        #: Watching the whole application catches input on any page, not just
+        #: the shell window. Removed again on close so no dead filter remains.
+        self._app = QApplication.instance()
+        if self._app is not None:
+            self._app.installEventFilter(self)
 
         if context.selection.is_demo:
             self._title = "rentwheels  -  DEMO DATA"
@@ -346,6 +356,11 @@ class StaffShell(QMainWindow):
         self.setMinimumSize(*LOGIN_SIZE)
         self.resize(*LOGIN_SIZE)
         toast(self, "Signed out after inactivity.", "warn")
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if self._app is not None:
+            self._app.removeEventFilter(self)
+        super().closeEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         try:

@@ -444,6 +444,32 @@ class TestShellRouting:
     def test_the_timer_is_inert_before_login(self, shell):
         shell._on_refresh_tick()  # must not raise
 
+    def test_input_resets_the_idle_timer(self, shell, monkeypatch):
+        """Typing at the counter is activity: it must push the auto-logout
+        deadline back rather than leave a busy clerk on the clock."""
+        import app.staff.prefs as prefs
+
+        monkeypatch.setattr(
+            prefs,
+            "get",
+            lambda key: 5 if key == "behavior/auto_logout_mins" else prefs.DEFAULTS[key],
+        )
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        sign_in(shell.context, role="admin")
+        shell._on_signed_in(shell.context.user)
+        shell.apply_prefs()
+        assert shell._idle_timer.isActive()
+
+        before = shell._idle_timer.remainingTime()
+        QTest.qWait(100)
+        drained = shell._idle_timer.remainingTime()
+        assert drained < before  # the clock is running
+
+        QTest.keyClick(shell.login_view.password, Qt.Key.Key_A)
+        assert shell._idle_timer.remainingTime() > drained
+
     def test_a_demo_selection_banners_and_says_so_in_the_title(self, qapp, tmp_path):
         path = tmp_path / "demo.db"
         path.write_bytes(b"")
