@@ -1474,6 +1474,26 @@ class TestNewRentalPage:
         assert page.matched == 0
         assert page.count_label.text() == "0 of 6 vehicles"
 
+    def test_a_failed_fleet_load_says_so_instead_of_empty(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from app.staff.pages import new_rental as module
+
+        page = NewRentalPage(shell)
+        page.show()
+        page.refresh()
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("database offline")
+
+        monkeypatch.setattr(module, "showcase_vehicle_rows", _boom)
+        page.search.setText("Honda")
+        _wait_for_new_rental(page)
+
+        assert "Couldn't load the fleet" in page._empty.text()
+        assert page._empty.isVisible() is True
+        assert page.matched == 0
+
     def test_the_page_survives_a_failing_count(self, qapp, shell, branch, monkeypatch):
         from app.staff.pages import new_rental
 

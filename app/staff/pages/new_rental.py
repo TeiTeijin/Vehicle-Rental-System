@@ -69,6 +69,9 @@ VISIBLE_STATUSES: tuple[str, ...] = ("available", "rented", "reserved")
 #: asks about each of its cards; this makes that one resolver run.
 MEDIA_COALESCE_MS = 60
 
+#: The no-results copy, restored whenever a load succeeds again.
+EMPTY_TEXT = "No vehicles match these filters."
+
 
 def popover_position(anchor: QPoint, size: QSize, available: QRect) -> QPoint:
     """Top-left for a popup of `size` opening at `anchor`, kept on-screen.
@@ -243,7 +246,7 @@ class NewRentalPage(StaffPage):
         self._rows_layout.addStretch(1)
         self.body.addWidget(self._rows, 1)
 
-        self._empty = QLabel("No vehicles match these filters.", self._content)
+        self._empty = QLabel(EMPTY_TEXT, self._content)
         self._empty.setObjectName("nrEmpty")
         self._empty.setAlignment(
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
@@ -573,6 +576,7 @@ class NewRentalPage(StaffPage):
 
         self._loading = True
         self.count_label.setText("Loading vehicles…")
+        self._empty.setText(EMPTY_TEXT)
         self._empty.setVisible(False)
         self._rows.setVisible(True)
         worker = _NewRentalLoader(
@@ -607,6 +611,7 @@ class NewRentalPage(StaffPage):
 
         if reset:
             self._offset = 0
+        self._empty.setText(EMPTY_TEXT)
         vehicles = []
         insert_at = self._rows_layout.count() - 1
         for brand in page_brands:
@@ -664,7 +669,10 @@ class NewRentalPage(StaffPage):
         self._done_gen = gen
         message, _, _ = describe(exc)
         self.count_label.setText(f"Count unavailable: {message}")
+        self._matched = 0
+        self._total = 0
         self._exhausted = True
+        self._empty.setText(f"Couldn't load the fleet: {message}")
         self.filter_popover.clear_availability()
         self._sync_empty_state()
 
