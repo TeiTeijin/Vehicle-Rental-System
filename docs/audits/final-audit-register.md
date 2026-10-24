@@ -48,6 +48,138 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 | X8 | Security | Roles/authorization/PII/branch scope | All auth/customer/profile/payment/booking/media/backup paths | `auth_service`, `customer_service`, `profile_service`, `payment_service`, `backup_service` | `USERS`, `BOOKING`, `PAYMENT`, `VEHICLE_MEDIA` | Customer, staff, admin, inactive, flagged | Customer/staff boundary enforced; IDOR blocked; inactive/flagged per policy; passwords hashed; temp passwords not plaintext; licence docs/cache paths safe; backups sanitized; errors do not leak internals; Decimal money | `test_security_hardening.py`, `test_customer_flow_audit.py`, `test_staff_login.py`, `test_staff_pages.py`, `test_backup_live_db.py` | Pending Tasks 5, 8, 9, 17, 20, 21 | Not started | — | — |
 | X9 | Data | Migration/seed/data integrity | `scripts/migrate_*`, `scripts/init_db.py`, `scripts/seed_*` | migration scripts, `app.database`, models | All tables | System | Documented order produces all model tables/columns on fresh and legacy DBs; idempotent; seeds consistent; no data loss | `tests/test_migrate_*.py`, `test_seed_demo_data.py` | Pending Tasks 3, 21 | Not started | — | — |
 
+## Traceability
+
+### Screen-to-flow matrix
+
+| Surface | Module | Flow IDs | Status |
+|---|---|---|---|
+| Customer router/session | `app/ui/main_window.py`, `session.py` | C1–C8, X1, X2, X7 | Active |
+| Customer login | `app/ui/customer_login.py` | C2 | Active |
+| Auth gate | `app/ui/auth_gate_dialog.py` | C3, C8 | Active |
+| Signup | `app/ui/signup.py` | C1 | Active |
+| Forgot/reset password | `app/ui/forgot_password.py` | C3 | Active |
+| Home | `app/ui/home.py` | C4 | Active |
+| Hero | `app/ui/hero.py` | C4 | Legacy (only referenced by unused `app/ui/dashboard.py`) |
+| Vehicles | `app/ui/vehicles.py` | C4 | Active |
+| Vehicle details | `app/ui/vehicle_details.py` | C4, C5 | Active |
+| Vehicle photo | `app/ui/vehicle_photo.py` | C4, X6 | Active |
+| Booking schedule | `app/ui/booking_schedule.py` | C5 | Active |
+| Booking checkout | `app/ui/booking_checkout.py` | C5, X1, X2 | Active |
+| Customer bookings | `app/ui/bookings.py` | C6, S6 | Active |
+| Customer payments | `app/ui/payments.py` | C7, X3 | Active |
+| Customer notifications | `app/ui/notifications.py` | C7, X7 | Active |
+| Customer profile | `app/ui/profile.py` | C8 | Active |
+| Account popup | `app/ui/account_popup.py` | C8 | Active |
+| Customer dashboard | `app/ui/dashboard.py` | — | Legacy/unused (no active importer) |
+| Staff shell/login | `app/staff/shell.py`, `login.py` | S1, S12, X8 | Active |
+| Staff dashboard | `app/staff/pages/dashboard.py` | S11, X4 | Active |
+| New Rental | `app/staff/pages/new_rental.py`, `rental_wizard.py`, `customer_panels.py` | S2, X2, X5 | Active |
+| Bookings | `app/staff/pages/bookings.py`, `booking_panels.py` | S3, S4, S5, S6, X1, X2, X3, X5, X7 | Active |
+| Fleet | `app/staff/pages/fleet.py`, `fleet_panels.py`, `vehicle_cards.py`, `vehicle_details.py` | S7, X6 | Active |
+| Customers | `app/staff/pages/customers.py`, `customer_panels.py` | S9, X3, X5, X8 | Active |
+| Payments | `app/staff/pages/payments.py` | S10, X2, X3, X4 | Active |
+| Inspections | `app/staff/pages/inspections.py` | S4, S5 | Active (covered by S4/S5, no separate flow ID) |
+| Maintenance | `app/staff/pages/maintenance.py`, `maintenance_panels.py` | S8, X4 | Active |
+| Reports | `app/staff/pages/reports.py`, `report_panels.py` | S11, X4 | Active |
+| Settings | `app/staff/pages/settings.py`, `settings_panels.py` | S1, S12, X8 | Active |
+| Staff sidebar | `app/staff/sidebar.py` | S1, S12, X8 | Active |
+| Dashboard screenshots | `app/staff/dashboard_shots.py`, `new_rental_shots.py` | — | Developer tooling, not user-facing |
+| Icon/ink checks | `app/staff/icon_check.py`, `icon_preview.py`, `inkcheck.py` | — | Developer tooling, not user-facing |
+
+### Service-to-flow matrix
+
+| Service module | Flow IDs | Public data-mutating functions |
+|---|---|---|
+| `auth_service` | C1, C2, C3, S1, X8 | `register_customer`, `reset_customer_password` |
+| `profile_service` | C8, S9, X8 | `update_profile` |
+| `staff_service` | S1, S12, X8 | `create_staff`, `ensure_first_admin`, `change_password`, `force_change_password`, `reset_password`, `set_active` |
+| `customer_service` | S2, S9, X3, X5, X8 | `create_customer`, `update_contact`, `update_customer`, `deactivate_customer`, `reactivate_customer`, `set_flag`, `clear_flag`, `add_note`, `store_licence_doc` |
+| `location_service` | C1, C8, S9, X5 | read-only (`resolve`, `province_options`, `municipalities`) |
+| `vehicle_service` | C4, C5, S7, X6 | read-only showcase/search helpers |
+| `fleet_service` | S4, S7, S8, X4, X6 | `set_status`, `mark_rented`, `mark_available`, `mark_maintenance`, `schedule_maintenance`, `complete_maintenance`, `add_vehicle`, `update_vehicle`, `record_mileage`, `retire_vehicle`, `unretire_vehicle`, `set_daily_rate`, `bulk_set_rate`, `bulk_set_status` |
+| `media_service` | C4, S7, X6 | `get_or_fetch_media`, `probe_media` |
+| `vehicle_photos` | C4, S7, X6 | `fetch_photo` (cache write) |
+| `image_cache` | C4, S7, X6, X8 | `store`, `clear` |
+| `api_cache` | C4, X6 | `store`, `clear` |
+| `carimages_client` | C4, X6 | read-only HTTP client |
+| `booking_service` | C5–C7, S2–S6, X1–X5, X7 | `create_booking`, `create_online_booking`, `complete_counter_rental`, `confirm_booking`, `cancel_booking`, `check_in`, `check_out`, `extend_booking`, `apply_penalty` |
+| `branch_service` | C5, S2, S3, X5 | read-only (`validate_window`, `within_hours`, `time_slots`) |
+| `pricing` | C5, S2, S6, X4 | read-only calculator |
+| `counter_service` | S2, X2 | read-only quote (`quote`) |
+| `payment_service` | C5, S2, S5, S6, S10, X2, X3, X4 | `record_payment`, `settle_deposit`, `refund_payment` |
+| `card_validation` | C5, X2 | `collect` (mock charge; no persistence) |
+| `receipt_service` | S2, S5, S10, X3 | `generate_receipt_pdf`, `generate_statement_pdf` |
+| `report_service` | S11, X4 | read-only reporting |
+| `dashboard_service` | S11, X4 | read-only reporting |
+| `export_service` | S11, X4 | `write_csv`, `write_pdf` |
+| `maintenance_service` | S8, X4 | `start_maintenance`, `complete_maintenance`, `cancel_maintenance`, `sync_vehicle_status` |
+| `notification_service` | C7, S3, X7 | read-only derived notifications |
+| `settings_service` | C5, S2, S5, S12, X4 | `set_value`, `set_many` |
+| `backup_service` | S12, X8 | `create_sanitized_sqlite_snapshot` |
+| `errors` | All | shared exception types |
+| `app.database` | All | engine/session factory |
+| `app.config` | All | configuration |
+| `app.domain.*` | C5, S2, S6 | pricing/availability domain rules |
+| `app.staff.context` | S1–S12, X8 | access control/session context |
+| `app.staff.query_metrics` | S11, X4 | query counting |
+
+### Table-to-flow matrix
+
+| Table | Read by | Written by | Invariants |
+|---|---|---|---|
+| `USERS` | C1–C3, C8, S1–S3, S9, S12, X8 | C1, C8, S1, S2, S9, S12 | Unique email/licence; hashed passwords; role/source/active/flag state; last active admin protected |
+| `BRANCH` | C4, C5, S2, S3, X5 | migrations/seeds only | Opening hours/slots used by both apps |
+| `VEHICLE_CATEGORY` | C4, C5, S7 | migrations/seeds | Rate multiplier and deposit class consistent |
+| `VEHICLE` | C4–C6, S2–S8, X4–X6 | S2, S4, S5, S7, S8 | Status transitions legal; retired/maintenance not bookable; plate unique |
+| `VEHICLE_MEDIA` | C4, S7, X6 | media cache | No customer/staff PII; variant keys distinct |
+| `VEHICLE_RATE_LOG` | S7 | S7 | Every rate change recorded |
+| `BOOKING` | C5–C7, S2–S6, S10, S11, X1–X5, X7 | C5, S2–S6 | Status machine; exact totals; branch/pickup/return fields; reference unique |
+| `PAYMENT` | C5, C7, S2, S4–S6, S10, S11, X2–X4 | C5, S2, S4–S6, S10 | Kinds/statuses; deposit liability; refunds do not duplicate revenue; Decimal |
+| `PENALTY` | S5, S10, S11, X4 | S5 | Penalty types and amounts; deposit applied before refund |
+| `INSPECTION_REPORT` | S4, S5 | S4, S5 | Pre/post inspection per booking; mileage/fuel recorded |
+| `MAINTENANCE_RECORD` | S8, S11, X4 | S8 | Legal status transitions; blocking rows sync vehicle status |
+| `CUSTOMER_NOTE` | S9 | S9 | Author/timestamp; notes append-only |
+| `APP_SETTINGS` | C5, S2, S5, S12, X4 | S12 | Typed values; defaults apply; pricing affects quotes |
+| `PSGC_PROVINCES` | C1, C8, S9, X5 | seeds | Reference data |
+| `PSGC_CITIES_MUNICIPALITIES` | C1, C8, S9, X5 | seeds | City belongs to province |
+
+### State-machine table
+
+| Entity | Legal transition | Trigger | Illegal transitions |
+|---|---|---|---|
+| Booking | `pending → confirmed` | `confirm_booking` | Any transition from `completed`/`cancelled` |
+| Booking | `pending → cancelled`, `confirmed → cancelled` | `cancel_booking` (reason stored, deposit settled) | `ongoing/completed/cancelled → cancelled` |
+| Booking | `pending → ongoing`, `confirmed → ongoing` | `check_in` | `ongoing/completed/cancelled → ongoing` |
+| Booking | `ongoing → completed` | `check_out` | `pending/confirmed/completed/cancelled → completed` |
+| Booking | `pending/confirmed/ongoing` + new end date | `extend_booking` (repriced) | Extension of `completed`/`cancelled`; conflicting new window |
+| Payment | row created `pending`/`paid`/`failed` | `record_payment` | Updating a `refunded` row back to paid |
+| Payment | `paid → refunded` | `refund_payment` (reason required) | `pending/failed → refunded`; refund exceeding paid |
+| Deposit | held (`deposit`, `paid`) → applied (`deposit_applied`) → returned (`deposit`, `refunded`) | `settle_deposit` | Treating held/applied deposit as revenue; double refund |
+| Vehicle | `available → maintenance/retired` | `set_status`, `retire_vehicle` | Retiring a rented vehicle without check-in |
+| Vehicle | `rented → available/maintenance` | `mark_available`/`mark_maintenance` | `rented → retired` directly |
+| Vehicle | `maintenance → available/rented/retired` | `sync_vehicle_status`, `set_status` | `retired → rented` |
+| Vehicle | `retired → available` | `unretire_vehicle` | Any transition from `retired` other than unretire |
+| Maintenance | `scheduled → in_progress/completed/cancelled` | start/complete/cancel | `completed/cancelled → anything` |
+| Maintenance | `in_progress → completed/cancelled` | complete/cancel | `scheduled → scheduled` duplicate active row |
+| User | active ↔ inactive | `set_active` | Deactivating the last active admin |
+| User | `must_change_password: true → false` | `change_password`/`force_change_password` | Staff reset for a customer account |
+| User | flag set/cleared with reason/audit fields | `set_flag`/`clear_flag` | Silent flag change without reason |
+
+### Missing-surface review
+
+| Surface | Finding |
+|---|---|
+| `app/ui/dashboard.py` | Legacy/unused page; only `app/ui/hero.py` imports it, and nothing imports `hero.py`. Not audited; no route reaches it. |
+| `app/ui/hero.py` | Legacy/unused; only referenced by `app/ui/dashboard.py`. Not audited. |
+| `app/staff/booking_panels.py` | Active; imported by `app/staff/pages/bookings.py`. Covered by S3–S6. |
+| `app/staff/customer_panels.py` | Active; imported by `pages/customers.py` and `rental_wizard.py`. Covered by S2/S9. |
+| `app/staff/rental_wizard.py` | Active; imported by New Rental and the customer/booking/fleet/maintenance panels. Covered by S2. |
+| `app/staff/pages/report_panels.py` | Active; imported by `pages/reports.py`. Covered by S11. |
+| `app/staff/pages/inspections.py` | Active page without its own flow ID; exercised through S4/S5. |
+| `app/staff/dashboard_shots.py`, `new_rental_shots.py`, `icon_check.py`, `icon_preview.py`, `inkcheck.py` | Developer/screenshot tooling; not user-facing and not audited. |
+| `app/ui/async_load.py`, `theme.py`, `icons.py`; `app/staff/widgets.py`, `tables.py`, `cards.py`, `charts.py`, `filter_popover.py`, `overlay.py`, `brand_rows.py`, `branding.py`, `section_row.py` | Shared support widgets/styles; exercised indirectly by the flow tests. |
+
 ## Findings
 
 | ID | Task | Severity | Flow(s) | Reproduction | Expected | Status | Fix commit | Regression test |
@@ -68,7 +200,10 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 
 | Question | Owner task | Resolution |
 |---|---|---|
-| Is there a staff branch assignment, or is branch scope only pickup/return? | Task 2 / Task 21 | Open |
-| Is no-show represented as `cancelled`, or is it missing? | Task 2 / Task 14 | Open |
-| Are old image-cache keys migrated or invalidated? | Task 2 / Task 22 | Open |
+| Is there a staff branch assignment, or is branch scope only pickup/return? | Task 21 | Open |
+| Is no-show represented as `cancelled`, or is it missing? | Task 14 | Open |
+| Are old image-cache keys migrated or invalidated? | Task 22 | Open |
 | Does `migrate_guarantor_profile` belong in the canonical migration order? | Task 3 | Open |
+| Is `reserved` ever stored, or is it a dead enum value? | Task 15 | Open |
+| Does `fleet_service.mark_rented` bypass `LEGAL_TRANSITIONS` (`available → rented`)? | Task 15 | Open |
+| Should the legacy `app/ui/dashboard.py` / `hero.py` be deleted? | Task 24 (backlog) | Open |

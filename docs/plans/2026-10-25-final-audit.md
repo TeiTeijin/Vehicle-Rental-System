@@ -337,23 +337,23 @@ git push origin final-audit
 - Consumes: the flow IDs and inventory in this plan.
 - Produces: every screen, flow, service, table, and test mapped to a register row.
 
-- [ ] **Step 1: Add the screen-to-flow matrix**
+- [x] **Step 1: Add the screen-to-flow matrix**
 
 For each customer screen and staff page, list which flow IDs it owns. Include transient screens (`details`, `schedule`, `checkout`) and report panels.
 
-- [ ] **Step 2: Add the service-to-flow matrix**
+- [x] **Step 2: Add the service-to-flow matrix**
 
 For each service module, list the flows it serves and the public functions that mutate data.
 
-- [ ] **Step 3: Add the table-to-flow matrix**
+- [x] **Step 3: Add the table-to-flow matrix**
 
 For each table, list which flows read and write it, and which invariants apply.
 
-- [ ] **Step 4: Add the state-machine table**
+- [x] **Step 4: Add the state-machine table**
 
 Record every legal and illegal transition for booking, payment, deposit, vehicle, maintenance, and user status.
 
-- [ ] **Step 5: Add open questions**
+- [x] **Step 5: Add open questions**
 
 Use `Open question` rows with an owner task, not vague `TBD`s. Examples:
 - Is there a staff branch assignment, or is branch scope only pickup/return?
@@ -361,11 +361,11 @@ Use `Open question` rows with an owner task, not vague `TBD`s. Examples:
 - Are old image-cache keys migrated or invalidated?
 - Does `migrate_guarantor_profile` belong in the canonical migration order?
 
-- [ ] **Step 6: Review for missing surfaces**
+- [x] **Step 6: Review for missing surfaces**
 
 Check `app/ui/dashboard.py`, `app/ui/hero.py`, `app/staff/booking_panels.py`, `customer_panels.py`, `rental_wizard.py`, and report panels. Mark each as active, unused/legacy, or needing audit.
 
-- [ ] **Step 7: Commit and push**
+- [x] **Step 7: Commit and push**
 
 ```bash
 git add docs/audits/final-audit-register.md
