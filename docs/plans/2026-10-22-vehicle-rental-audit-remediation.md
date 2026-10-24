@@ -13,8 +13,8 @@
 ## Progress Snapshot (2026-10-24)
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
-- Completed and merged: Tasks 1, 2, 3, 4, 11, 16.
-- In progress: Task 7 (receipt boundary), Task 17 (backup secret-leak fix).
+- Completed and merged: Tasks 1, 2, 3, 4, 7, 11, 16.
+- In progress: Task 17 (backup secret-leak fix).
 - Not started: Tasks 5, 6, 8, 9, 10, 12, 13, 14, 15, 18, 19, 20.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
 - Update this snapshot and the task status lines, commit, and push after each task review/merge.
@@ -626,7 +626,7 @@ git commit -m "fix: collect checkout penalty shortfalls"
 
 ### Task 7: Commit the rental before generating the receipt
 
-**Status:** 🔄 implementation in progress; no commit yet.
+**Status:** ✅ complete — reviewed and approved; commit `7152a4b`, merged as `e18b3b3`.
 
 **Files:**
 - Modify: `app/staff/rental_wizard.py`
@@ -636,7 +636,7 @@ git commit -m "fix: collect checkout penalty shortfalls"
 - `RentalWizard._generate_receipt_safely(booking_id: int) -> tuple[str | None, str | None]` returns `(receipt_path, error_message)` and never raises.
 - `DonePanel(..., receipt_path: str | None, receipt_error: str | None = None)` disables the Print button when the path is `None` and shows a warning that the booking is saved.
 
-- [ ] **Step 1: Write the failing receipt test**
+- [x] **Step 1: Write the failing receipt test**
 
 Monkeypatch `app.staff.rental_wizard.generate_receipt_pdf` to raise `OSError("read-only")`, drive a counter rental through `_on_pay`, and assert:
 
@@ -645,25 +645,25 @@ Monkeypatch `app.staff.rental_wizard.generate_receipt_pdf` to raise `OSError("re
 - `receipt_path is None` and a non-empty receipt error is visible;
 - the Print button is disabled.
 
-- [ ] **Step 2: Run it to verify failure**
+- [x] **Step 2: Run it to verify failure**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k receipt -q -o addopts=`
 Expected: FAIL because receipt generation is inside the transaction and the exception rolls back the booking.
 
-- [ ] **Step 3: Move the receipt out of the transaction**
+- [x] **Step 3: Move the receipt out of the transaction**
 
 Commit the booking, payments, and balance in the existing `with self._context.session()` block. After it exits, call `_generate_receipt_safely(booking_id)` using a fresh `reading()` session. Do not generate the receipt inside the write transaction.
 
-- [ ] **Step 4: Make the Done panel recoverable**
+- [x] **Step 4: Make the Done panel recoverable**
 
 Change `DonePanel` to accept an optional receipt path. When absent, show “Receipt could not be generated” with the error and disable Print. The booking summary and “View in Bookings”/“Done” actions remain available.
 
-- [ ] **Step 5: Run the wizard tests**
+- [x] **Step 5: Run the wizard tests**
 
 Run: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py tests/test_receipt_service.py -q -o addopts=`
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/staff/rental_wizard.py tests/test_staff_pages.py
