@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
+    QLabel,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -237,6 +238,9 @@ class CustomersPage(StaffPage):
             PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
         )
         data_layout.setSpacing(0)
+        self.count_caption = QLabel("", self)
+        self.count_caption.setObjectName("pageSubtitle")
+        data_layout.addWidget(self.count_caption)
         self.table = LoadStateTable(
             [
                 Column("Name", ALIGN_LEFT),
@@ -370,6 +374,7 @@ class CustomersPage(StaffPage):
         self.table._sync_stack()
         self._done_gen = gen
         self._hide_skeleton()
+        self.count_caption.setText(f"Showing {len(rows)} customers.")
         self._refresh_actions()
 
     def _on_rows_failed(self, gen: int, exc: BaseException) -> None:

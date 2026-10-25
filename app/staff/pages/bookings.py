@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QFrame,
+    QLabel,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -25,7 +26,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.models import Booking
 from app.services import booking_service, payment_service
 from app.services.errors import ServiceError
-from app.staff import theme
+from app.staff import prefs, theme
 from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
@@ -121,7 +122,7 @@ def _booking_rows(context, filtr: BookingFilter):
     today = date.today()
     try:
         from app.staff import prefs as _prefs
-        cap = _prefs.rows_limit(500)
+        cap = _prefs.rows_limit(100)
     except Exception:
         cap = 500
     with context.reading() as session:
@@ -247,6 +248,9 @@ class BookingsPage(StaffPage):
             PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
         )
         data_layout.setSpacing(0)
+        self.count_caption = QLabel("", self)
+        self.count_caption.setObjectName("pageSubtitle")
+        data_layout.addWidget(self.count_caption)
         self.table = LoadStateTable(
             [
                 Column("Ref", ALIGN_RIGHT),
@@ -387,6 +391,10 @@ class BookingsPage(StaffPage):
         self.table._sync_stack()
         self._done_gen = gen
         self._hide_skeleton()
+        limit = prefs.rows_limit(100)
+        self.count_caption.setText(
+            f"Latest {limit} bookings (showing {len(rows)})."
+        )
         if self._pending_focus is not None:
             self.focus_booking(self._pending_focus)
             self._pending_focus = None

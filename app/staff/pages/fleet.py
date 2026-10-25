@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
+    QLabel,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -206,6 +207,9 @@ class FleetPage(StaffPage):
             PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
         )
         data_layout.setSpacing(0)
+        self.count_caption = QLabel("", self)
+        self.count_caption.setObjectName("pageSubtitle")
+        data_layout.addWidget(self.count_caption)
         self.table = LoadStateTable(
             [
                 Column("Plate", ALIGN_LEFT),
@@ -341,6 +345,7 @@ class FleetPage(StaffPage):
         self.table._sync_stack()
         self._done_gen = gen
         self._hide_skeleton()
+        self.count_caption.setText(f"Showing {len(rows)} vehicles.")
         if self._pending_focus is not None:
             self.focus_plate(self._pending_focus)
             self._pending_focus = None

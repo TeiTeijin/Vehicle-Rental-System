@@ -2066,6 +2066,14 @@ def test_the_media_resolver_can_be_limited_to_one_page(qapp, branch, monkeypatch
 
 
 class TestFleetPage:
+    def test_fleet_caption_names_visible_count(self, shell, branch):
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        caption = page.count_caption.text().lower()
+        assert "showing" in caption
+        assert "7" in caption
+
     def test_fleet_page_load_is_not_n_plus_one(self, branch):
         from sqlalchemy import event
 
@@ -2627,6 +2635,14 @@ class TestFleetPage:
 
 
 class TestCustomersPage:
+    def test_customer_caption_names_visible_count(self, shell, branch):
+        page = CustomersPage(shell)
+        page.refresh()
+        _wait_for_customers(page)
+        caption = page.count_caption.text().lower()
+        assert "showing" in caption
+        assert "customers" in caption
+
     def _rows(self, shell, branch):
         from app.staff.pages.customers import CustomersPage
 
@@ -4454,6 +4470,16 @@ class TestBookingsPageActions:
                 page.table.table.selectRow(row)
                 return
         raise AssertionError(f"{booking_ref} not in the table")
+
+    def test_booking_caption_names_latest_limit(self, shell, branch):
+        from app.staff import prefs
+
+        page = BookingsPage(shell)
+        page.refresh()
+        _wait_for_bookings(page)
+        caption = page.count_caption.text().lower()
+        assert "latest" in caption
+        assert str(prefs.rows_limit(100)) in caption
 
     def test_booking_page_load_is_not_n_plus_one(self, branch):
         from sqlalchemy import event

@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **4/11 tasks complete**.
+- Performance work: **5/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -365,7 +365,7 @@ git push origin staff-audit-remediation
 
 ---
 
-## Task 5: Make caps explicit across Bookings, Fleet, and Customers
+## Task 5: Make Bookings cap and Fleet/Customer counts explicit
 
 **Files:**
 - Modify: `app/staff/pages/bookings.py`
@@ -375,28 +375,28 @@ git push origin staff-audit-remediation
 
 **Interfaces:**
 - Consumes: `prefs.rows_limit`, existing table headings.
-- Produces: a visible “Latest N” / “Showing N of M” caption for every capped list; no silent truncation.
+- Produces: a visible “Latest N bookings” caption, plus “Showing N vehicles/customers” counts. Fleet and Customers are not capped here because their Python filters must not be moved after a cap; Task 6 moves Customers filtering into SQL and caps it.
 
-- [ ] **Step 1: Write failing caption tests**
+- [x] **Step 1: Write failing caption tests**
 
-Add tests that set `prefs.rows_limit` low, create more rows than the limit, refresh the page, and assert the caption contains the configured number and the word “Latest” or “Showing”.
+Add tests that refresh Bookings, Fleet, and Customers and assert their captions name the configured limit or the visible row count.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "latest or capped or showing" -v
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "caption" -v
 ```
 
 Expected: FAIL because the pages currently cap silently or not at all.
 
-- [ ] **Step 3: Add the captions and caps**
+- [x] **Step 3: Add the captions and caps**
 
-- Bookings: cap the SQL query at `prefs.rows_limit(100)` and add “Latest N bookings”.
-- Fleet: cap at `prefs.rows_limit(100)` and add “Showing latest N vehicles”.
-- Customers: cap at `prefs.rows_limit(100)` and add “Latest N customers”.
-- Keep the existing filters; do not move filtering after the cap.
+- Bookings: cap the SQL query at `prefs.rows_limit(100)` and add “Latest N bookings (showing M)”.
+- Fleet: add “Showing N vehicles” and do not cap until its filters are SQL-side.
+- Customers: add “Showing N customers” and do not cap until Task 6 moves its filters into SQL.
+- Keep the existing filters; do not move filtering after a cap.
 
-- [ ] **Step 4: Run the page tests**
+- [x] **Step 4: Run the page tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "booking or fleet or customer" -v
@@ -404,7 +404,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; all existing row expectations remain true for the small test branch.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/staff/pages/bookings.py app/staff/pages/fleet.py app/staff/pages/customers.py tests/test_staff_pages.py
@@ -722,7 +722,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 2: Fleet batch loading
 - [x] Task 3: Payments aggregate + cap
 - [x] Task 4: Outstanding aggregate + cap
-- [ ] Task 5: Explicit caps
+- [x] Task 5: Explicit caps
 - [ ] Task 6: Customers SQL filters + cap
 - [ ] Task 7: Dashboard async
 - [ ] Task 8: Reports batched
