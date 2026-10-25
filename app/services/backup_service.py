@@ -18,6 +18,8 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from app.utils.file_security import PRIVATE_FILE_MODE, restrict_to_owner
+
 #: Columns that are credentials, not data. CarImages signatures are short
 #: lived and their URLs carry `api_key=`, so a copied URL is a leaked key
 #: that also expires before a restore test can use it.
@@ -26,7 +28,7 @@ SANITIZED_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 #: Snapshots still contain password hashes: owner-only, always.
-SNAPSHOT_MODE = 0o600
+SNAPSHOT_MODE = PRIVATE_FILE_MODE
 
 
 class SnapshotError(RuntimeError):
@@ -113,9 +115,11 @@ def create_sanitized_sqlite_snapshot(
             SNAPSHOT_MODE,
         )
         os.close(fd)
+        # Apply the real platform control before any bytes are copied. On
+        # Windows `os.open(..., 0o600)` above only sets the read-only bit.
+        restrict_to_owner(destination)
         with source.open("rb") as src, destination.open("wb") as dst:
             shutil.copyfileobj(src, dst)
-        os.chmod(destination, SNAPSHOT_MODE)
         sanitize_sqlite_copy(destination)
     except BaseException:
         if destination.is_file():

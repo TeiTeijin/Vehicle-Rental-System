@@ -9,6 +9,7 @@ renters resolve to their existing row instead of piling up duplicates.
 from __future__ import annotations
 
 import re
+import secrets
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -21,10 +22,14 @@ from app.models import Users
 from app.services.errors import ConflictError, ValidationError
 from app.utils.security import hash_password
 
-#: Fixed password set on counter-created accounts. The counter never logs
-#: customers in (it verifies the physical licence); the customer uses this
-#: once in the customer app and changes it there.
-STORE_TEMP_PASSWORD = "rentwheels-temp"
+#: Counter-created accounts must not share a credential. Each gets its own
+#: random secret, returned on a transient ``temporary_password`` attribute so
+#: the clerk can hand it to the customer; only the bcrypt hash is stored.
+TEMP_PASSWORD_BYTES = 12
+
+
+def _new_temporary_password() -> str:
+    return secrets.token_urlsafe(TEMP_PASSWORD_BYTES)
 
 #: Minimum legal renting age. Tunable in one place; eligibility enforces it.
 MIN_RENTING_AGE = 21
@@ -165,7 +170,11 @@ def create_customer(
     source: str | None = None,
 ) -> Users:
     """Counter quick-add. Raises friendly errors; the DB unique constraints
-    on email/licence are the final double-create backstop."""
+    on email/licence are the final double-create backstop.
+
+    The returned row carries ``temporary_password`` as a transient attribute
+    (never a column) so the clerk can hand the unique secret to the customer.
+    """
     name = (full_name or "").strip()
     mail = (email or "").strip().lower()
     licence = (license_number or "").strip()
@@ -206,11 +215,12 @@ def create_customer(
             "That email is already registered to another customer."
         )
 
+    temporary_password = _new_temporary_password()
     customer = Users(
         full_name=name,
         email=mail,
         phone=(phone or "").strip() or None,
-        password_hash=hash_password(STORE_TEMP_PASSWORD),
+        password_hash=hash_password(temporary_password),
         address=address.strip(),
         license_number=licence,
         license_expiry=license_expiry,
@@ -230,6 +240,9 @@ def create_customer(
             "That licence or email was just registered: search for the "
             "customer instead of creating a duplicate."
         ) from exc
+    # Transient hand-off only: this value is never mapped to a column and is
+    # gone as soon as the detached row is garbage-collected.
+    customer.temporary_password = temporary_password
     return customer
 
 

@@ -21,7 +21,6 @@ shared, rotate the CarImages key.
 from __future__ import annotations
 
 import argparse
-import os
 import time
 from pathlib import Path
 
@@ -35,6 +34,7 @@ from app.services.backup_service import (
     UnsafeSnapshotPath,
     sanitize_row,
 )
+from app.utils.file_security import restrict_to_owner
 
 #: Rows per statement, matching the bulk seeder: round trips dominate.
 BATCH = 2000
@@ -107,11 +107,10 @@ def copy_database(source_url: str, out_path: Path) -> dict[str, int]:
     if out_path.exists():
         out_path.unlink()
     # Snapshot still holds password hashes: create it private, not at the
-    # process umask, even before the first row lands. On POSIX this is a real
-    # 0600; on Windows Python only toggles the read-only bit, which is the
-    # closest equivalent the platform offers.
+    # process umask, even before the first row lands. On Windows this must be
+    # an ACL change; `chmod` alone only toggles the read-only attribute.
     out_path.touch(mode=SNAPSHOT_MODE)
-    os.chmod(out_path, SNAPSHOT_MODE)
+    restrict_to_owner(out_path)
     target = create_engine(f"sqlite:///{out_path}")
     _fast_sqlite(target)
     metadata.create_all(target)

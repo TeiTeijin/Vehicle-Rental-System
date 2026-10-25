@@ -681,13 +681,22 @@ class CustomersPage(StaffPage):
                         else:
                             customer.licence_back_path = path
                 name = customer.full_name
+                temporary_password = getattr(
+                    customer, "temporary_password", ""
+                )
         except Exception as exc:  # noqa: BLE001
             message, _field, _kind = describe(exc)
             toast(self, message, "error")
             return
         self._hide_overlay()
         self._request_load(full=False)
-        toast(self, f"{name} added.")
+        message = f"{name} added."
+        if temporary_password:
+            message += (
+                f" Temporary password: {temporary_password}. "
+                "Give it to the customer."
+            )
+        toast(self, message)
 
     def open_edit(self) -> bool:
         from app.staff.customer_panels import CustomerFormPanel

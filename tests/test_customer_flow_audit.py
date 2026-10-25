@@ -11,6 +11,7 @@ from app.services import (
     auth_service,
     booking_service,
     fleet_service,
+    notification_service,
     payment_service,
     profile_service,
 )
@@ -115,6 +116,64 @@ def test_signed_in_customer_sees_the_booking_receipt_and_profile_counts(
     assert profile.active_booking_count == 1
     assert profile.payment_count == 1
     assert profile.status_label == "Active Renter"
+
+
+def test_one_customer_never_sees_another_customers_records(
+    session, customer_factory, vehicle, second_vehicle, branch
+):
+    """Every customer-scoped read must be keyed by the signed-in identity.
+
+    This is the service-level IDOR guard behind the Bookings, Payments,
+    Notifications and Profile screens.
+    """
+    ana = customer_factory(
+        full_name="Ana Santos", email="ana@example.com", phone="09170000001"
+    )
+    ben = customer_factory(
+        full_name="Ben Cruz", email="ben@example.com", phone="09170000002"
+    )
+    ana_booking = _book(
+        session,
+        ana,
+        vehicle,
+        branch,
+        payment_method="gcash",
+        payment_reference="AUDIT-ANA-1",
+    )
+    ben_booking = _book(
+        session,
+        ben,
+        second_vehicle,
+        branch,
+        payment_method="gcash",
+        payment_reference="AUDIT-BEN-1",
+    )
+
+    assert [b.booking_id for b in booking_service.bookings_for(session, ana)] == [
+        ana_booking.booking_id
+    ]
+    assert [b.booking_id for b in booking_service.bookings_for(session, ben)] == [
+        ben_booking.booking_id
+    ]
+
+    ana_payments = payment_service.payments_for_user(session, ana.user_id)
+    ben_payments = payment_service.payments_for_user(session, ben.user_id)
+    assert [p.booking_id for p in ana_payments] == [ana_booking.booking_id]
+    assert [p.booking_id for p in ben_payments] == [ben_booking.booking_id]
+
+    ana_notes = notification_service.notifications_for(session, ana.user_id)
+    ben_notes = notification_service.notifications_for(session, ben.user_id)
+    assert ana_notes and ben_notes
+    assert {n.booking_id for n in ana_notes} == {ana_booking.booking_id}
+    assert {n.booking_id for n in ben_notes} == {ben_booking.booking_id}
+
+    ana_profile = profile_service.profile_for(session, ana.user_id)
+    ben_profile = profile_service.profile_for(session, ben.user_id)
+    assert ana_profile is not None and ben_profile is not None
+    assert ana_profile.user_id == ana.user_id
+    assert ben_profile.user_id == ben.user_id
+    assert ana_profile.booking_count == ben_profile.booking_count == 1
+    assert ana_profile.payment_count == ben_profile.payment_count == 1
 
 
 def test_online_booking_refuses_a_deactivated_customer(

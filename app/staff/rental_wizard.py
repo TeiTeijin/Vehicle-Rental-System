@@ -516,6 +516,9 @@ class LicencePanel(_StepBase):
                     raise ValidationError("; ".join(verdict["reasons"]))
                 picked = customer.user_id
                 name = customer.full_name
+                temporary_password = getattr(
+                    customer, "temporary_password", ""
+                )
         except Exception as exc:  # noqa: BLE001 - inline, nothing committed
             self._fail(_friendly(exc))
             return
@@ -523,6 +526,14 @@ class LicencePanel(_StepBase):
         self._form.setVisible(False)
         box = make_status_box(f"{name} · first rental", theme.OK, self.card)
         self.result_host.addWidget(box)
+        if temporary_password:
+            self.result_host.addWidget(
+                Caption(
+                    f"Temporary password: {temporary_password} — "
+                    "give it to the customer",
+                    parent=self.card,
+                )
+            )
         if values.get("front_src") or values.get("back_src"):
             try:
                 with self._context.session() as session:

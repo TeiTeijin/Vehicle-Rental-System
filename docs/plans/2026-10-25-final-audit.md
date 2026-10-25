@@ -1447,11 +1447,11 @@ git push origin final-audit
 - Consumes: the role matrix, customer/staff data access, branch scope, PII, password flows, image cache.
 - Produces: verified authorization and data-integrity boundaries.
 
-- [ ] **Step 1: Build the permission matrix**
+- [x] **Step 1: Build the permission matrix**
 
 For every page/service action, record: customer, staff, admin, inactive, flagged. Include branch scope and ownership.
 
-- [ ] **Step 2: Test IDOR and cross-customer isolation**
+- [x] **Step 2: Test IDOR and cross-customer isolation**
 
 Create two customers and two staff accounts. Verify:
 - customer cannot read another customer's bookings/payments/notifications/profile
@@ -1460,7 +1460,7 @@ Create two customers and two staff accounts. Verify:
 - inactive/flagged accounts are handled per policy
 - direct object IDs are checked against ownership/role
 
-- [ ] **Step 3: Test PII, secrets, and path safety**
+- [x] **Step 3: Test PII, secrets, and path safety**
 
 Verify:
 - passwords are hashed, never logged/displayed
@@ -1470,17 +1470,17 @@ Verify:
 - backup snapshots are sanitized
 - error messages do not leak credentials or internals
 
-- [ ] **Step 4: Test state/data integrity**
+- [x] **Step 4: Test state/data integrity**
 
 Verify illegal booking/payment/vehicle/maintenance transitions are rejected. Verify no UI bypasses a service or writes directly to the DB. Verify all money is `Decimal`.
 
-- [ ] **Step 5: Record evidence and findings**
+- [x] **Step 5: Record evidence and findings**
 
 Mark `X8` and update `X3`/`X5`/`X6` where relevant. Assign severity.
 
-- [ ] **Step 6: Fix blocking findings with TDD**
+- [x] **Step 6: Fix blocking findings with TDD**
 
-- [ ] **Step 7: Commit and push**
+- [x] **Step 7: Commit and push**
 
 ```bash
 git add app tests docs/audits/final-audit-register.md

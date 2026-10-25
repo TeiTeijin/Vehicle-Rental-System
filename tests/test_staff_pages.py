@@ -3004,6 +3004,43 @@ class TestCustomersPage:
         }
         assert "New Person" in names
 
+    def test_adding_a_customer_shows_the_temporary_password(
+        self, shell, branch, monkeypatch
+    ):
+        from app.utils.security import verify_password
+
+        import app.staff.pages.customers as module
+
+        messages = []
+        monkeypatch.setattr(
+            module, "toast", lambda *a, **k: messages.append(a[1:])
+        )
+        page = CustomersPage(shell)
+        page.refresh()
+        _wait_for_customers(page)
+        assert page.open_add() is True
+        panel = page._customer_overlay.scroll.widget()
+        panel.name_edit.setText("New Person")
+        panel.email_edit.setText("new.person@example.com")
+        panel.phone_edit.setText("09170002222")
+        panel.address_edit.setText("2 Test Street")
+        panel.licence_edit.setText("NEW-8888")
+        panel._on_go()
+        _wait_for_customers(page)
+
+        added = [
+            message[0]
+            for message in messages
+            if "Temporary password:" in message[0]
+        ]
+        assert added
+        password = added[-1].split("Temporary password: ", 1)[1].split(".", 1)[0]
+        with shell.context.session() as session:
+            row = session.query(Users).filter_by(
+                email="new.person@example.com"
+            ).one()
+            assert verify_password(password, row.password_hash) is True
+
     def test_deactivate_then_reactivate(self, shell, branch, monkeypatch):
         import app.staff.pages.customers as module
 

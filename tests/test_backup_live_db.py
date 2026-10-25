@@ -4,6 +4,7 @@ failed run must never leave something that looks like a backup."""
 import os
 import sqlite3
 import stat
+import subprocess
 from datetime import date, datetime
 
 import pytest
@@ -18,6 +19,38 @@ from app.services.backup_service import (
     create_sanitized_sqlite_snapshot,
 )
 from scripts.backup_live_db import copy_database
+
+
+def _shared_dir(tmp_path):
+    """A folder whose new files inherit a read ACE for the local Users group."""
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    if os.name == "nt":
+        subprocess.run(
+            [
+                "icacls",
+                str(folder),
+                "/grant",
+                "*S-1-5-32-545:(OI)(CI)R",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    return folder
+
+
+def _assert_owner_only(path) -> None:
+    """POSIX mode bits are the control on Unix; on Windows it is the ACL."""
+    if os.name == "nt":
+        acl = subprocess.run(
+            ["icacls", str(path)], capture_output=True, text=True, check=True
+        ).stdout
+        assert os.environ["USERNAME"] in acl
+        assert "BUILTIN\\Users" not in acl
+        assert "Everyone" not in acl
+    else:
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def _seed_source(path) -> None:
@@ -190,15 +223,14 @@ def test_the_settings_backup_helper_sanitizes_only_the_copy(tmp_path):
     source = tmp_path / "settings-source.db"
     _minimal_media_db(source)
     before = source.read_bytes()
-    out = tmp_path / "settings-backup.db"
+    out = _shared_dir(tmp_path) / "settings-backup.db"
 
     create_sanitized_sqlite_snapshot(source, out)
 
     assert b"api_key=" not in out.read_bytes()
     assert b"secret" not in out.read_bytes()
     assert source.read_bytes() == before
-    if os.name != "nt":
-        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    _assert_owner_only(out)
 
     connection = sqlite3.connect(out)
     try:
@@ -227,12 +259,11 @@ def test_an_unsanitizable_snapshot_is_deleted(tmp_path):
 def test_a_snapshot_is_owner_only(tmp_path):
     source = tmp_path / "source.db"
     _seed_source(source)
-    out = tmp_path / "copy.db"
+    out = _shared_dir(tmp_path) / "copy.db"
 
     copy_database(f"sqlite:///{source}", out)
 
-    if os.name != "nt":
-        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    _assert_owner_only(out)
 
 
 def test_a_snapshot_refuses_to_overwrite_its_source(tmp_path):

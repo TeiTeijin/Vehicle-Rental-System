@@ -16,11 +16,21 @@ used to change the target's mode. Directories are left alone.
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
+import sys
 from pathlib import Path
 
+#: The documented invocation is `python scripts/secure_local_files.py`, which
+#: puts `scripts/` (not the repo root) on sys.path. Make the app package
+#: importable before the shared helper import below.
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
+if str(DEFAULT_ROOT) not in sys.path:
+    sys.path.insert(0, str(DEFAULT_ROOT))
+
+from app.utils.file_security import (  # noqa: E402
+    PRIVATE_FILE_MODE,
+    restrict_to_owner,
+)
+
 
 #: Local files that must never be group/world readable.
 SECRET_FILES = (
@@ -32,36 +42,6 @@ SECRET_FILES = (
     # Generated with the signed CarImages URL interpolated in (see .gitignore).
     "gallery.html",
 )
-
-PRIVATE_FILE_MODE = 0o600
-
-
-def _restrict_windows_acl(path: Path) -> None:
-    """Drop inherited ACEs and leave only the current user with full control.
-
-    Windows does not implement POSIX mode bits; ``os.chmod(0o600)`` only
-    toggles the read-only attribute. The ACL is the meaningful control there,
-    and ``icacls`` is present on every supported Windows install.
-    """
-    user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
-    if not user:
-        raise OSError("cannot determine the current Windows user")
-    completed = subprocess.run(
-        [
-            "icacls",
-            str(path),
-            "/inheritance:r",
-            "/grant:r",
-            f"{user}:F",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
-        raise OSError(detail or f"icacls failed with {completed.returncode}")
-
 
 def secure(
     root: str | Path, names: tuple[str, ...] = SECRET_FILES
@@ -86,10 +66,7 @@ def secure(
             results.append((name, "skipped-not-a-file", path))
             continue
         try:
-            if os.name == "nt":
-                _restrict_windows_acl(path)
-            else:
-                os.chmod(path, PRIVATE_FILE_MODE)
+            restrict_to_owner(path)
         except OSError as exc:
             results.append((name, f"error: {exc}", path))
             continue

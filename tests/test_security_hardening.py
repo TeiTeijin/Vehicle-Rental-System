@@ -23,7 +23,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from app.services import customer_service, image_cache  # noqa: E402
+from app.services import customer_service, image_cache, staff_service  # noqa: E402
 from app.services.errors import ValidationError  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -204,6 +204,57 @@ class TestFieldLengths:
             license_expiry=date(2030, 1, 1),
         )
         assert len(created.license_number) == limit
+
+
+class TestCredentialStorage:
+    def test_counter_created_customers_get_unique_random_temporary_passwords(
+        self, session
+    ):
+        from app.utils.security import verify_password
+
+        first = customer_service.create_customer(
+            session,
+            full_name="First Tester",
+            email="first.credential@example.com",
+            phone="09171234567",
+            address="1 Test Street",
+            license_number="CRED-001",
+            license_expiry=date(2030, 1, 1),
+        )
+        second = customer_service.create_customer(
+            session,
+            full_name="Second Tester",
+            email="second.credential@example.com",
+            phone="09171234568",
+            address="2 Test Street",
+            license_number="CRED-002",
+            license_expiry=date(2030, 1, 1),
+        )
+
+        assert first.temporary_password != second.temporary_password
+        assert len(first.temporary_password) >= 12
+        assert first.password_hash != first.temporary_password
+        assert first.temporary_password not in first.password_hash
+        assert first.password_hash.startswith("$2")
+        assert verify_password(first.temporary_password, first.password_hash) is True
+        assert verify_password(second.temporary_password, second.password_hash) is True
+
+    def test_staff_temporary_password_is_hashed_and_requires_a_change(self, session):
+        from app.utils.security import verify_password
+
+        password = "Temporary-1!"
+        created = staff_service.create_staff(
+            session,
+            full_name="New Clerk",
+            email="new.clerk@example.com",
+            role="staff",
+            temp_password=password,
+        )
+
+        assert created.password_hash != password
+        assert password not in created.password_hash
+        assert verify_password(password, created.password_hash) is True
+        assert created.must_change_password is True
 
 
 class TestSecureLocalFiles:
