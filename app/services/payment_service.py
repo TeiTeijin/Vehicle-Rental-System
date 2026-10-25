@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Booking, Payment
+from app.models import Booking, Payment, Users, Vehicle
 from app.services.errors import StateError, ValidationError
 from app.utils.money import ZERO, money, sum_money
 
@@ -311,6 +311,7 @@ def list_payments(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     limit: int | None = None,
+    search: str = "",
 ) -> list[Payment]:
     stmt = select(Payment).options(
         joinedload(Payment.booking).joinedload(Booking.vehicle),
@@ -329,6 +330,29 @@ def list_payments(
         stmt = stmt.where(Payment.created_at >= from_date)
     if to_date:
         stmt = stmt.where(Payment.created_at <= to_date)
+    needle = search.strip().lower().lstrip("#")
+    if needle:
+        pattern = f"%{needle}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(Payment.reference_no).like(pattern),
+                cast(Payment.booking_id, String).like(pattern),
+                Payment.booking.has(
+                    Booking.user.has(
+                        func.lower(Users.full_name).like(pattern)
+                    )
+                ),
+                Payment.booking.has(
+                    Booking.vehicle.has(
+                        or_(
+                            func.lower(Vehicle.plate_number).like(pattern),
+                            func.lower(Vehicle.make).like(pattern),
+                            func.lower(Vehicle.model).like(pattern),
+                        )
+                    )
+                ),
+            )
+        )
     stmt = stmt.order_by(Payment.created_at.desc())
     if limit is not None:
         stmt = stmt.limit(limit)

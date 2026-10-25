@@ -3075,6 +3075,44 @@ class TestPaymentsPage:
         assert queries.count == 1
         assert "sum(" in queries.statements[0].lower()
 
+    def test_payment_search_finds_rows_outside_the_cap(self, branch):
+        from app.staff import prefs
+        from app.staff.pages.payments import _payment_rows
+
+        built, context = branch
+        limit = prefs.rows_limit(100)
+        with context.session() as session:
+            for index in range(limit + 20):
+                session.add(
+                    Payment(
+                        booking_id=built.overdue.booking_id,
+                        amount=Decimal("1.00"),
+                        method="cash",
+                        kind="rental",
+                        status="paid",
+                        paid_at=datetime.combine(TODAY, datetime.min.time()),
+                        recorded_by=built.counter.user_id,
+                        reference_no=f"CAP-{index:03d}",
+                        created_at=datetime(2026, 10, 25, 12, index % 60),
+                    )
+                )
+            session.add(
+                Payment(
+                    booking_id=built.overdue.booking_id,
+                    amount=Decimal("1.00"),
+                    method="cash",
+                    kind="rental",
+                    status="paid",
+                    paid_at=datetime(2020, 1, 1, 9, 0),
+                    recorded_by=built.counter.user_id,
+                    reference_no="ZULU-TARGET",
+                    created_at=datetime(2020, 1, 1, 9, 0),
+                )
+            )
+
+        rows = _payment_rows(context, search="ZULU-TARGET")
+        assert [row[8] for row in rows] == ["ZULU-TARGET"]
+
     def test_outstanding_page_load_is_not_n_plus_one(self, branch):
         from app.staff import prefs
         from app.staff.pages.payments import _outstanding_rows

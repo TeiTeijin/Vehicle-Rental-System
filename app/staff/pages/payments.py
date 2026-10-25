@@ -57,34 +57,21 @@ SCOPE_FILTERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _matches(needle: str, *haystacks) -> bool:
-    """Case-insensitive substring match over the given fields."""
-    query = needle.strip().lower()
-    if not query:
-        return True
-    return any(query in (hay or "").lower() for hay in haystacks)
-
-
 def _payment_rows(context, method=None, kind=None, status=None, search: str = ""):
     limit = prefs.rows_limit(100)
     with context.reading() as session:
         rows = []
         for payment in payment_service.list_payments(
-            session, method=method, kind=kind, status=status, limit=limit
+            session,
+            method=method,
+            kind=kind,
+            status=status,
+            limit=limit,
+            search=search,
         ):
             booking = payment.booking
             customer = booking.user if booking is not None else None
             vehicle = booking.vehicle if booking is not None else None
-            if not _matches(
-                search,
-                f"#{booking.booking_id}" if booking is not None else "",
-                customer.full_name if customer is not None else "",
-                vehicle.plate_number if vehicle is not None else "",
-                vehicle.make if vehicle is not None else "",
-                vehicle.model if vehicle is not None else "",
-                payment.reference_no or "",
-            ):
-                continue
             recorded_by = payment.recorder
             rows.append(
                 (
