@@ -49,7 +49,7 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Critical | 0 | 0 | 0 | 0 |
 | High | 2 | 4 | 0 | 0 |
 | Medium | 1 | 3 | 0 | 0 |
-| Low | 1 | 1 | 0 | 0 |
+| Low | 2 | 1 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
 
 Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010). Task 14 found and fixed a High extension defect: online return times were not moved and same-day time conflicts were missed (F-012).

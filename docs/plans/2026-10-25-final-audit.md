@@ -1105,7 +1105,7 @@ git push origin final-audit
 - Consumes: `fleet_service.add_vehicle`, `update_vehicle`, `retire_vehicle`, `unretire_vehicle`, `set_daily_rate`, `bulk_set_rate`, `bulk_set_status`, `vehicle_stats`.
 - Produces: verified fleet CRUD, status, rate history, photos, and stats.
 
-- [ ] **Step 1: Run the fleet tests**
+- [x] **Step 1: Run the fleet tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1114,7 +1114,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_security_hardening.py -q
 ```
 
-- [ ] **Step 2: Walk fleet CRUD**
+- [x] **Step 2: Walk fleet CRUD**
 
 Verify:
 - add vehicle with category, plate, rate, specs, paperwork
@@ -1125,7 +1125,7 @@ Verify:
 - bulk rate/status changes preview and apply correctly
 - rate history rows are written
 
-- [ ] **Step 3: Verify photos and stats**
+- [x] **Step 3: Verify photos and stats**
 
 Verify:
 - image cache keys are safe and variant-aware
@@ -1133,13 +1133,13 @@ Verify:
 - missing CarImages media degrades gracefully
 - vehicle stats (rented days, maintenance days, revenue) match report/service values
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S7`, `X6`, and the fleet part of `X4`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md
