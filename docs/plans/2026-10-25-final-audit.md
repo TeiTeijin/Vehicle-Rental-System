@@ -1048,7 +1048,7 @@ git push origin final-audit
 - Consumes: pending/confirmed/ongoing bookings and payment state.
 - Produces: verified cancellation, refund, extension, availability, and customer/staff visibility.
 
-- [ ] **Step 1: Run the cancellation/extension tests**
+- [x] **Step 1: Run the cancellation/extension tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1057,7 +1057,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_customer_flow_audit.py -q
 ```
 
-- [ ] **Step 2: Walk cancellation**
+- [x] **Step 2: Walk cancellation**
 
 Verify:
 - only pending/confirmed bookings cancel
@@ -1067,7 +1067,7 @@ Verify:
 - customer and staff see `cancelled`
 - reports exclude cancelled bookings from revenue/usage
 
-- [ ] **Step 3: Walk extension**
+- [x] **Step 3: Walk extension**
 
 Verify:
 - pending/confirmed/ongoing bookings can extend
@@ -1076,13 +1076,13 @@ Verify:
 - payment/deposit state remains coherent
 - customer and staff see the new dates/total
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S6` and the extension/cancellation parts of `X2` and `X5`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/ui app/services tests docs/audits/final-audit-register.md

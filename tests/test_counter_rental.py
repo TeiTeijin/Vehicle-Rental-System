@@ -7,7 +7,7 @@ deposit settlement, same-day bookings, and the licence-first customer lookup.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -607,3 +607,46 @@ class TestExtendBooking:
             booking_service.extend_booking(
                 session, first_booking, TODAY + timedelta(days=5)
             )
+
+    def test_extend_moves_the_online_return_time(
+        self, session, customer, vehicle
+    ):
+        start = TODAY
+        end = TODAY + timedelta(days=2)
+        booking = booking_service.create_booking(
+            session, customer, vehicle, start, end
+        )
+        booking.pickup_dt = datetime.combine(start, time(10, 0))
+        booking.return_dt = datetime.combine(end, time(10, 0))
+        session.flush()
+
+        new_end = end + timedelta(days=2)
+        booking_service.extend_booking(session, booking, new_end)
+
+        assert booking.end_date == new_end
+        assert booking.return_dt == datetime.combine(new_end, time(10, 0))
+
+    def test_extend_detects_a_same_day_time_clash(
+        self, session, customer_factory, vehicle
+    ):
+        first = customer_factory()
+        second = customer_factory()
+        start = TODAY
+        end = TODAY + timedelta(days=2)
+        booking = booking_service.create_booking(
+            session, first, vehicle, start, end
+        )
+        booking.pickup_dt = datetime.combine(start, time(10, 0))
+        booking.return_dt = datetime.combine(end, time(10, 0))
+        session.flush()
+
+        new_end = end + timedelta(days=2)
+        other = booking_service.create_booking(
+            session, second, vehicle, new_end, new_end + timedelta(days=2)
+        )
+        other.pickup_dt = datetime.combine(new_end, time(8, 0))
+        other.return_dt = datetime.combine(new_end + timedelta(days=2), time(10, 0))
+        session.flush()
+
+        with pytest.raises(ConflictError, match="already booked"):
+            booking_service.extend_booking(session, booking, new_end)

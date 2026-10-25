@@ -47,12 +47,12 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Severity | Open | Fixed | Deferred | Waived |
 |---|---|---|---|---|
 | Critical | 0 | 0 | 0 | 0 |
-| High | 2 | 3 | 0 | 0 |
+| High | 2 | 4 | 0 | 0 |
 | Medium | 1 | 3 | 0 | 0 |
 | Low | 1 | 1 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
 
-Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010).
+Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010). Task 14 found and fixed a High extension defect: online return times were not moved and same-day time conflicts were missed (F-012).
 
 Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 
@@ -64,6 +64,7 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 - **F-008 / F-009 (Task 11, Medium):** staff can search online bookings by the customer-facing reference, and the details panel shows the reference, pickup/return times, and branch names. Regression tests: `test_search_matches_the_customer_facing_reference`, `test_details_panel_shows_reference_branches_and_times`.
 - **F-010 (Task 12, High):** check-in now re-checks active status, licence number and expiry (through the return date), flag overrides, and refuses retired or workshop vehicles. Regression tests: the six `TestCheckIn::test_refuses_*` / `test_a_flagged_customer_needs_an_override_note` cases in `tests/test_booking_service.py`.
 - **F-011 (Task 13, Low):** deposit refunds keep the original tender instead of always recording cash. Regression test: `test_deposit_refund_keeps_the_original_tender`.
+- **F-012 (Task 14, High):** extensions now move an online booking's return time and check the added window as datetimes, so a same-day booking cannot be double-booked. Regression tests: `test_extend_moves_the_online_return_time`, `test_extend_detects_a_same_day_time_clash`.
 
 ## Deferred and waived items
 

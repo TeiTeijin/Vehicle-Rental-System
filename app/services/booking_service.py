@@ -88,15 +88,22 @@ def extension_quote(
             field="new_end_date",
         )
     vehicle = booking.vehicle
-    others = [
-        row
-        for row in active_bookings(session, vehicle)
-        if row.booking_id != booking.booking_id
-    ]
-    if AvailabilityChecker.find_conflict(booking.end_date, new_end_date, others):
+    _current_start, current_end = booking_window(booking)
+    if booking.return_dt is not None:
+        new_return = datetime.combine(new_end_date, booking.return_dt.time())
+    else:
+        new_return = datetime.combine(new_end_date, time.min)
+    clash = find_conflict_window(
+        session,
+        vehicle,
+        current_end,
+        new_return,
+        exclude_booking_id=booking.booking_id,
+    )
+    if clash is not None:
         raise ConflictError(
             f"{vehicle.make} {vehicle.model} is already booked inside "
-            f"{booking.end_date:%d %b} to {new_end_date:%d %b %Y}."
+            f"{current_end:%d %b %H:%M} to {new_return:%d %b %Y %H:%M}."
         )
     workshop = fleet_service.maintenance_conflict(
         session, vehicle, booking.end_date, new_end_date
@@ -131,6 +138,8 @@ def extend_booking(
     """
     old_total, new_total = extension_quote(session, booking, new_end_date)
     booking.end_date = new_end_date
+    if booking.return_dt is not None:
+        booking.return_dt = datetime.combine(new_end_date, booking.return_dt.time())
     booking.total_cost = new_total
     session.flush()
     return booking, old_total, new_total
