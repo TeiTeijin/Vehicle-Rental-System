@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **7/11 tasks complete**.
+- Performance work: **8/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -513,11 +513,11 @@ git push origin staff-audit-remediation
 - Consumes: `utilization_report`, `receivables_report`, `bookings_report`.
 - Produces: utilization and receivables reports with bounded query counts; large report tables capped or paginated with a visible count.
 
-- [ ] **Step 1: Write failing query-count tests**
+- [x] **Step 1: Write failing query-count tests**
 
 For a 20-vehicle fixture, assert `utilization_report` uses at most 10 SQL statements. For a receivables fixture, assert `receivables_report` uses at most 5 SQL statements and that the returned rows still match the existing balances.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_report_service.py -k "query_count or utilization or receivables" -v
@@ -525,11 +525,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_report_service.p
 
 Expected: FAIL; utilization currently calls `vehicle_stats` and `period_cost` per vehicle.
 
-- [ ] **Step 3: Replace per-vehicle loops with grouped queries**
+- [x] **Step 3: Replace per-vehicle loops with grouped queries**
 
-Compute rented days, maintenance days, revenue, and shop cost in grouped queries keyed by vehicle ID, then join the maps in memory. Keep the existing sorting and display labels. Cap the receivables/bookings report rows with an explicit “showing N of M” caption.
+Compute rented days, maintenance days, revenue, and shop cost in grouped queries keyed by vehicle ID, then join the maps in memory. Keep the existing sorting and display labels. Keep service-level bookings/receivables rows complete; the existing 501-row regression test forbids silent truncation.
 
-- [ ] **Step 4: Run the report tests**
+- [x] **Step 4: Run the report tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_report_service.py tests/test_staff_pages.py -k "report" -v
@@ -537,10 +537,10 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_report_service.p
 
 Expected: PASS; report totals and ordering are unchanged.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
-git add plan.md app/services/report_service.py app/staff/pages/report_panels.py tests/test_report_service.py
+git add plan.md app/services/fleet_service.py app/services/report_service.py tests/test_report_service.py
 git commit -m "perf: batch report queries"
 git push origin staff-audit-remediation
 ```
@@ -725,7 +725,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 5: Explicit caps
 - [x] Task 6: Customers SQL filters + cap
 - [x] Task 7: Dashboard async
-- [ ] Task 8: Reports batched
+- [x] Task 8: Reports batched
 - [ ] Task 9: Composite indexes
 - [ ] Task 10: Query guardrails
 - [ ] Task 11: Live re-measurement

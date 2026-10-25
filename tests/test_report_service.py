@@ -159,6 +159,34 @@ class TestBookingsReport:
 
 
 class TestUtilizationReport:
+    def test_utilization_report_query_count_is_bounded(
+        self, session, customer, vehicle, car_category, vehicle_factory
+    ):
+        from sqlalchemy import event
+
+        for index in range(20):
+            vehicle_factory(
+                car_category,
+                plate_number=f"LOAD-{index:03d}",
+            )
+        queries = []
+
+        def before_cursor_execute(
+            _conn, _cursor, statement, _params, _context, _many
+        ):
+            queries.append(statement)
+
+        engine = session.get_bind()
+        event.listen(engine, "before_cursor_execute", before_cursor_execute)
+        try:
+            rows = report_service.utilization_report(session, D10, D20)
+        finally:
+            event.remove(
+                engine, "before_cursor_execute", before_cursor_execute
+            )
+        assert len(rows) >= 20
+        assert len(queries) <= 10, f"{len(queries)} queries for utilization"
+
     def test_most_used_ranks_first(self, session, customer, vehicle,
                                    car_category, vehicle_factory):
         second = vehicle_factory(car_category, make="Honda", model="Civic",

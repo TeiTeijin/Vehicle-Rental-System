@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
@@ -566,47 +567,15 @@ def _clip_half_open(
     return clipped if clipped[0] < clipped[1] else None
 
 
-def vehicle_stats(
-    session: Session,
+def _stats_from_data(
     vehicle: Vehicle,
-    window_days: int = 30,
-    *,
-    from_date: date | None = None,
-    to_date: date | None = None,
+    bookings,
+    records,
+    win_start: date,
+    win_end: date,
+    window_days: int,
+    anchor: date,
 ) -> dict:
-    """Times rented, revenue, and utilization over a trailing window.
-
-    Utilization = rented days ÷ days available, where available excludes
-    maintenance and retired days. Rental occupancy is half-open (a returned
-    vehicle frees its return day), clipped to the window so a booking that
-    began earlier is not over-counted.
-
-    Pass `from_date`/`to_date` for an explicit period (the Reports suite
-    does); otherwise the trailing `window_days` ending today is used.
-    Open-ended ranges stop at the earlier of today and the window end.
-    """
-    from app.models import Booking
-    from app.services import payment_service
-
-    today = date.today()
-    if from_date is not None and to_date is not None:
-        if to_date < from_date:
-            raise ValidationError("The report cannot end before it starts.")
-        win_start, win_end = from_date, to_date
-        window_days = (to_date - from_date).days + 1
-    else:
-        win_start = today - timedelta(days=window_days - 1)
-        win_end = today
-    anchor = min(today, win_end)
-
-    bookings = (
-        session.query(Booking)
-        .filter(
-            Booking.vehicle_id == vehicle.vehicle_id,
-            Booking.status.in_(RENTED_DAY_STATUSES),
-        )
-        .all()
-    )
     rented_ranges = []
     times_rented = 0
     revenue = money(0)
@@ -622,7 +591,7 @@ def vehicle_stats(
     rented_days = _half_open_union_days(rented_ranges)
 
     shop_ranges = []
-    for record in vehicle.maintenance_records:
+    for record in records:
         if record.status not in BLOCKING_MAINTENANCE_STATUSES:
             continue
         # An unfinished job has no end date yet: it blocks from its start on.
@@ -644,9 +613,9 @@ def vehicle_stats(
 
     maintenance_cost = sum(
         (
-            money(r.cost, field="cost")
-            for r in vehicle.maintenance_records
-            if r.cost is not None
+            money(record.cost, field="cost")
+            for record in records
+            if record.cost is not None
         ),
         money(0),
     )
@@ -660,6 +629,112 @@ def vehicle_stats(
         "available_days": available_days,
         "utilization": utilization,
         "maintenance_cost": maintenance_cost,
+    }
+
+
+def vehicle_stats(
+    session: Session,
+    vehicle: Vehicle,
+    window_days: int = 30,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> dict:
+    """Times rented, revenue, and utilization over a trailing window.
+
+    Utilization = rented days ÷ days available, where available excludes
+    maintenance and retired days. Rental occupancy is half-open (a returned
+    vehicle frees its return day), clipped to the window so a booking that
+    began earlier is not over-counted.
+
+    Pass `from_date`/`to_date` for an explicit period (the Reports suite
+    does); otherwise the trailing `window_days` ending today is used.
+    Open-ended ranges stop at the earlier of today and the window end.
+    """
+    from app.models import Booking
+
+    today = date.today()
+    if from_date is not None and to_date is not None:
+        if to_date < from_date:
+            raise ValidationError("The report cannot end before it starts.")
+        win_start, win_end = from_date, to_date
+        window_days = (to_date - from_date).days + 1
+    else:
+        win_start = today - timedelta(days=window_days - 1)
+        win_end = today
+    anchor = min(today, win_end)
+
+    bookings = (
+        session.query(Booking)
+        .filter(
+            Booking.vehicle_id == vehicle.vehicle_id,
+            Booking.status.in_(RENTED_DAY_STATUSES),
+        )
+        .all()
+    )
+    return _stats_from_data(
+        vehicle,
+        bookings,
+        vehicle.maintenance_records,
+        win_start,
+        win_end,
+        window_days,
+        anchor,
+    )
+
+
+def vehicle_stats_batch(
+    session: Session,
+    vehicles: list[Vehicle],
+    *,
+    from_date: date,
+    to_date: date,
+) -> dict[int, dict]:
+    """Vehicle stats for a report page in two grouped reads.
+
+    The report previously called `vehicle_stats` once per vehicle, costing
+    two queries each. The arithmetic is shared with `vehicle_stats` through
+    `_stats_from_data`.
+    """
+    from app.models import Booking
+
+    if to_date < from_date:
+        raise ValidationError("The report cannot end before it starts.")
+    win_start, win_end = from_date, to_date
+    window_days = (to_date - from_date).days + 1
+    anchor = min(date.today(), win_end)
+    vehicle_ids = [vehicle.vehicle_id for vehicle in vehicles]
+    if not vehicle_ids:
+        return {}
+
+    bookings_by_vehicle = defaultdict(list)
+    for booking in session.execute(
+        select(Booking).where(
+            Booking.vehicle_id.in_(vehicle_ids),
+            Booking.status.in_(RENTED_DAY_STATUSES),
+        )
+    ).scalars():
+        bookings_by_vehicle[booking.vehicle_id].append(booking)
+
+    records_by_vehicle = defaultdict(list)
+    for record in session.execute(
+        select(Maintenance_Record).where(
+            Maintenance_Record.vehicle_id.in_(vehicle_ids)
+        )
+    ).scalars():
+        records_by_vehicle[record.vehicle_id].append(record)
+
+    return {
+        vehicle.vehicle_id: _stats_from_data(
+            vehicle,
+            bookings_by_vehicle[vehicle.vehicle_id],
+            records_by_vehicle[vehicle.vehicle_id],
+            win_start,
+            win_end,
+            window_days,
+            anchor,
+        )
+        for vehicle in vehicles
     }
 
 

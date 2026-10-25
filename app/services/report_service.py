@@ -573,15 +573,34 @@ def utilization_report(
     """Per vehicle, most used first; never-available vehicles sink."""
     if to_date < from_date:
         raise ValueError("The report cannot end before it starts.")
-    from app.services import fleet_service, maintenance_service
+    from app.services import fleet_service
 
     vehicles = fleet_service.list_vehicles(session, category_name=category)
+    if not vehicles:
+        return ()
+    stats_by_vehicle = fleet_service.vehicle_stats_batch(
+        session, vehicles, from_date=from_date, to_date=to_date
+    )
     takings = revenue_by_vehicle(session, from_date, to_date)
+    vehicle_ids = [vehicle.vehicle_id for vehicle in vehicles]
+    shop_costs = dict(
+        session.execute(
+            select(
+                Maintenance_Record.vehicle_id,
+                func.coalesce(func.sum(Maintenance_Record.cost), 0),
+            )
+            .where(
+                Maintenance_Record.vehicle_id.in_(vehicle_ids),
+                Maintenance_Record.status == "completed",
+                Maintenance_Record.start_date >= from_date,
+                Maintenance_Record.start_date <= to_date,
+            )
+            .group_by(Maintenance_Record.vehicle_id)
+        ).all()
+    )
     rows = []
     for vehicle in vehicles:
-        stats = fleet_service.vehicle_stats(
-            session, vehicle, from_date=from_date, to_date=to_date
-        )
+        stats = stats_by_vehicle[vehicle.vehicle_id]
         rows.append(
             UtilizationRow(
                 vehicle_id=vehicle.vehicle_id,
@@ -596,8 +615,9 @@ def utilization_report(
                 available_days=stats["available_days"],
                 utilization=stats["utilization"],
                 revenue=takings.get(vehicle.vehicle_id, ZERO),
-                shop_cost=maintenance_service.period_cost(
-                    session, vehicle.vehicle_id, from_date, to_date
+                shop_cost=money(
+                    shop_costs.get(vehicle.vehicle_id, 0),
+                    field="maintenance_cost",
                 ),
             )
         )
