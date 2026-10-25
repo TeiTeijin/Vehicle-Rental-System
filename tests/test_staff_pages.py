@@ -4223,6 +4223,31 @@ class TestReportsPage:
                 n.startswith(f"report_{key}") and n.endswith(".pdf") for n in names
             ), key
 
+    def test_utilization_panel_reuses_a_recent_report(
+        self, shell, branch, monkeypatch
+    ):
+        from app.staff.pages import report_panels as panels
+
+        _built, _context = branch
+        calls = []
+        real = panels.report_service.utilization_report
+
+        def spy(*args, **kwargs):
+            calls.append(1)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(
+            panels.report_service, "utilization_report", spy
+        )
+        page = ReportsPage(shell)
+        panel = page._panels["utilization"]
+        panel.set_range(TODAY - timedelta(days=7), TODAY)
+        panel.snapshot_filters()
+        first = panel.fetch_report()
+        second = panel.fetch_report()
+        assert first == second
+        assert len(calls) == 1
+
     def test_utilization_ranks_the_fleet(self, shell, branch):
         page = ReportsPage(shell)
         page.refresh()

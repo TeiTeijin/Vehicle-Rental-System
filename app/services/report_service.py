@@ -575,7 +575,9 @@ def utilization_report(
         raise ValueError("The report cannot end before it starts.")
     from app.services import fleet_service
 
-    vehicles = fleet_service.list_vehicles(session, category_name=category)
+    vehicles = fleet_service.list_vehicles(
+        session, category_name=category, with_maintenance=False
+    )
     if not vehicles:
         return ()
     stats_by_vehicle = fleet_service.vehicle_stats_batch(

@@ -187,6 +187,15 @@ class TestBulkStatus:
 
 
 class TestStats:
+    def test_list_vehicles_can_skip_maintenance_records(self, ctx):
+        context, _car_id = ctx
+        with context.reading() as session:
+            vehicles = fleet_service.list_vehicles(
+                session, with_maintenance=False
+            )
+            assert vehicles
+            assert "maintenance_records" not in vehicles[0].__dict__
+
     def test_utilization_math(self, ctx):
         context, car_id = ctx
         today = date.today()

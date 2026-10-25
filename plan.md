@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **11/11 tasks complete**; follow-ups **1/3**.
+- Performance work: **11/11 tasks complete**; follow-ups **2/3**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Live indexes: all seven composite indexes were applied to MySQL and verified on 2026-10-25.
 - Follow-up correctness fix: payment search now runs in SQL before the 100-row cap (`90c2071`).
@@ -736,15 +736,12 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 | Dashboard collect | 5 q / 1.2s synchronous | **5 q / 2.64s, background** | non-blocking, ~1s | Non-blocking passes; time misses |
 | Inspections, latest 100 | 1 q / ~0.5s | **1 q / 1.48s** | unchanged | Environmental latency |
 | Maintenance, latest 100 | 1 q / ~0.5s | **1 q / 1.61s** | unchanged | Environmental latency |
-| Utilization, all 1,012 vehicles | 41 q / 4.77s for 20 vehicles | **5 q / 27.95s** | bounded queries | Queries pass; full-fleet time misses |
+| Utilization, all 1,012 vehicles | 41 q / 4.77s for 20 vehicles | **5 q / 2.20s** first load; repeat cached | bounded queries | Pass (Task 13) |
 
 ### What still needs work
 
 - **Customers:** resolved in Task 12 — two queries, 0.79s live.
-- **Utilization (27.95s for all 1,012):** the query count is fixed, but the
-  full-fleet report materializes every vehicle and every booking. Add a visible
-  “top N”/page limit, or compute the report only for a selected category/date
-  range. This is the largest remaining wall-clock cost.
+- **Utilization:** resolved in Task 13 — 5 queries, 2.20s first load, repeat opens cached for 60s.
 - **Dashboard (2.64s):** it is off the GUI thread now, so it does not freeze the
   app, but the figure collection is still a five-query remote round trip. Cache
   or precompute the daily aggregates if it remains slow on the live link.
@@ -808,12 +805,12 @@ git push origin staff-audit-remediation
 - `UtilizationPanel.fetch_report()` caches its tuple for 60 seconds keyed by `(from_date, to_date, category)`.
 - `utilization_report()` asks for vehicles without maintenance records; `vehicle_stats_batch()` loads them once for the stats.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 1. In `tests/test_fleet_management.py`, assert `list_vehicles(session, with_maintenance=False)` succeeds and leaves `maintenance_records` unloaded.
 2. In `tests/test_staff_pages.py`, monkeypatch `report_service.utilization_report` and assert two immediate `UtilizationPanel.fetch_report()` calls with the same range/category call the service once.
 
-- [ ] **Step 2: Run them and verify they fail**
+- [x] **Step 2: Run them and verify they fail**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_fleet_management.py tests/test_staff_pages.py -k "skip_maintenance or utilization_panel_reuses" -v
@@ -821,11 +818,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_fleet_management
 
 Expected: FAIL because the flag and cache do not exist.
 
-- [ ] **Step 3: Implement the load and cache**
+- [x] **Step 3: Implement the load and cache**
 
 Add `with_maintenance` to `list_vehicles` and pass `False` from `utilization_report`. Add the 60-second cache to `UtilizationPanel.fetch_report`, keyed by the range and selected category. Do not cache export data; exports must always read fresh rows.
 
-- [ ] **Step 4: Run the report and fleet tests**
+- [x] **Step 4: Run the report and fleet tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_fleet_management.py tests/test_report_service.py tests/test_staff_pages.py -k "utilization or fleet" -q
@@ -833,7 +830,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_fleet_management
 
 Expected: PASS; utilization math and report ordering are unchanged.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/services/fleet_service.py app/services/report_service.py app/staff/pages/report_panels.py tests/test_fleet_management.py tests/test_staff_pages.py
@@ -901,7 +898,7 @@ git push origin staff-audit-remediation
 - [x] Task 10: Query guardrails
 - [x] Task 11: Live re-measurement
 - [x] Task 12: Customers two-query page
-- [ ] Task 13: Utilization load and cache
+- [x] Task 13: Utilization load and cache
 - [ ] Task 14: Dashboard three-query collection
 
 ## Resume Instructions for Another Device

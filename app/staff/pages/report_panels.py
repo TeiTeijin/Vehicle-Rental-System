@@ -14,6 +14,7 @@ it helps), and table. Shared contract used by `ReportsPage`:
 """
 from __future__ import annotations
 
+import time
 from datetime import date
 
 from PySide6.QtWidgets import (
@@ -39,6 +40,9 @@ CHANNEL_FILTERS: tuple[tuple[str, str | None], ...] = (
 )
 
 GRANULARITIES: tuple[str, ...] = ("Day", "Week", "Month")
+
+#: Reuse an identical utilization report for this long. Exports bypass it.
+UTILIZATION_CACHE_SECONDS = 60
 
 
 class _PanelBase(QWidget):
@@ -317,6 +321,9 @@ class UtilizationPanel(_PanelBase):
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
         self._category: str | None = None
+        self._cache_key = None
+        self._cache_rows = None
+        self._cache_at = 0.0
         filters = QHBoxLayout()
         filters.setContentsMargins(0, 0, 0, 0)
         filters.setSpacing(8)
@@ -355,10 +362,21 @@ class UtilizationPanel(_PanelBase):
         self._category = None if index == 0 else self.category_combo.currentText()
 
     def fetch_report(self):
+        key = (self._from, self._to, self._category)
+        now = time.monotonic()
+        if (
+            key == self._cache_key
+            and now - self._cache_at < UTILIZATION_CACHE_SECONDS
+        ):
+            return self._cache_rows
         with self._context.reading() as session:
-            return report_service.utilization_report(
+            rows = report_service.utilization_report(
                 session, self._from, self._to, category=self._category
             )
+        self._cache_key = key
+        self._cache_rows = rows
+        self._cache_at = now
+        return rows
 
     @staticmethod
     def _use_text(row) -> str:

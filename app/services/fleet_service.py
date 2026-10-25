@@ -749,12 +749,15 @@ def list_vehicles(
     statuses: tuple[str, ...] | None = None,
     category_name: str | None = None,
     search: str | None = None,
+    with_maintenance: bool = True,
 ) -> list[Vehicle]:
     stmt = (
         select(Vehicle)
         .join(Vehicle_Category, Vehicle.category_id == Vehicle_Category.category_id)
-        .options(joinedload(Vehicle.category), joinedload(Vehicle.maintenance_records))
+        .options(joinedload(Vehicle.category))
     )
+    if with_maintenance:
+        stmt = stmt.options(joinedload(Vehicle.maintenance_records))
     if statuses:
         stmt = stmt.where(Vehicle.status.in_(statuses))
     if category_name:
