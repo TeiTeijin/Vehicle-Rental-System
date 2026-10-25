@@ -2934,6 +2934,41 @@ class TestCustomersPage:
         finally:
             panel.deleteLater()
 
+    def test_edit_form_keeps_a_missing_birthdate_empty(self, qapp, branch):
+        from app.staff.customer_panels import CustomerFormPanel
+
+        built, context = branch
+        with context.session() as session:
+            session.get(Users, built.customer.user_id).birthdate = None
+
+        panel = CustomerFormPanel(context, built.customer.user_id)
+        captured = []
+        panel.submitted.connect(captured.append)
+        try:
+            panel._on_go()
+            assert captured, panel._error.text()
+            assert captured[0]["birthdate"] is None
+        finally:
+            panel.deleteLater()
+
+    def test_new_customer_form_does_not_invent_a_birthdate(self, qapp, branch):
+        from app.staff.customer_panels import CustomerFormPanel
+
+        _built, context = branch
+        panel = CustomerFormPanel(context)
+        captured = []
+        panel.submitted.connect(captured.append)
+        try:
+            panel.name_edit.setText("New Person")
+            panel.email_edit.setText("new@example.com")
+            panel.address_edit.setText("2 Test Street")
+            panel.licence_edit.setText("LICNEW001")
+            panel._on_go()
+            assert captured, panel._error.text()
+            assert captured[0]["birthdate"] is None
+        finally:
+            panel.deleteLater()
+
     def test_writes_need_a_selection_first(self, shell, branch, monkeypatch):
         import app.staff.pages.customers as module
 

@@ -1215,7 +1215,7 @@ git push origin final-audit
 - Consumes: customer search/create/edit, flags, notes, licence docs, balances, open bookings, eligibility.
 - Produces: verified staff customer view and customer-data handoff.
 
-- [ ] **Step 1: Run the customer-management tests**
+- [x] **Step 1: Run the customer-management tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1225,7 +1225,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_staff_pages.py -q
 ```
 
-- [ ] **Step 2: Walk customer management**
+- [x] **Step 2: Walk customer management**
 
 Verify:
 - search by name/phone/email/licence
@@ -1239,7 +1239,7 @@ Verify:
 - balance/open-booking aggregates match payments/bookings
 - online customer data appears correctly to staff
 
-- [ ] **Step 3: Verify customer/staff data agreement**
+- [x] **Step 3: Verify customer/staff data agreement**
 
 For one online customer, compare:
 - profile fields
@@ -1250,13 +1250,13 @@ For one online customer, compare:
 
 between customer profile, staff Customers, and services.
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S9`, `X3`, and the customer-data part of `X5`/`X8`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md

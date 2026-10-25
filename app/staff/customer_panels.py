@@ -122,7 +122,9 @@ class CustomerFormPanel(_StepBase):
         self.birth_edit = QDateEdit(self.card)
         self.birth_edit.setCalendarPopup(True)
         self.birth_edit.setDisplayFormat("dd MMM yyyy")
-        self.birth_edit.setDate(QDate(2000, 1, 1))
+        self.birth_edit.setMinimumDate(QDate(1900, 1, 1))
+        self.birth_edit.setSpecialValueText("Not on file")
+        self.birth_edit.setDate(self.birth_edit.minimumDate())
         self.birth_edit.setMaximumDate(QDate.currentDate())
         grid.addRow(_field_label("Birthdate", self.card), self.birth_edit)
         self.emergency_edit = QLineEdit(self.card)
@@ -199,6 +201,8 @@ class CustomerFormPanel(_StepBase):
         if snap["birthdate"] is not None:
             birth = snap["birthdate"]
             self.birth_edit.setDate(QDate(birth.year, birth.month, birth.day))
+        else:
+            self.birth_edit.setDate(self.birth_edit.minimumDate())
         self.emergency_edit.setText(snap["emergency_contact"] or "")
         self.licence_edit.setText(snap["license_number"] or "")
         if snap["license_expiry"] is not None:
@@ -260,17 +264,25 @@ class CustomerFormPanel(_StepBase):
         if not self.licence_edit.text().strip():
             self._fail("No licence, no rental: the licence number is required.")
             return
-        if self.birth_edit.date().toPython() > date.today():
+        if (
+            self.birth_edit.date() != self.birth_edit.minimumDate()
+            and self.birth_edit.date().toPython() > date.today()
+        ):
             self._fail("Birthdate cannot be in the future.")
             return
         self._error.setVisible(False)
+        birthdate = (
+            None
+            if self.birth_edit.date() == self.birth_edit.minimumDate()
+            else self.birth_edit.date().toPython()
+        )
         self.submitted.emit(
             {
                 "full_name": self.name_edit.text().strip(),
                 "email": self.email_edit.text().strip(),
                 "phone": self.phone_edit.text().strip() or None,
                 "address": self.address_edit.text().strip(),
-                "birthdate": self.birth_edit.date().toPython(),
+                "birthdate": birthdate,
                 "emergency_contact": self.emergency_edit.text().strip() or None,
                 "license_number": self.licence_edit.text().strip(),
                 "license_expiry": self.expiry_edit.date().toPython(),

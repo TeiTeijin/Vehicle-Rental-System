@@ -47,12 +47,12 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Severity | Open | Fixed | Deferred | Waived |
 |---|---|---|---|---|
 | Critical | 0 | 0 | 0 | 0 |
-| High | 2 | 4 | 0 | 0 |
+| High | 2 | 5 | 0 | 0 |
 | Medium | 1 | 4 | 0 | 0 |
 | Low | 2 | 2 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
 
-Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010). Task 14 found and fixed a High extension defect: online return times were not moved and same-day time conflicts were missed (F-012). Task 16 found and fixed a Medium open-ended-workshop crash (F-015) and a Low odometer-integrity gap (F-014).
+Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010). Task 14 found and fixed a High extension defect: online return times were not moved and same-day time conflicts were missed (F-012). Task 16 found and fixed a Medium open-ended-workshop crash (F-015) and a Low odometer-integrity gap (F-014). Task 17 found and fixed a High customer-data defect: the staff edit form invented a 2000-01-01 birthdate for customers with none, bypassing the missing-DOB eligibility block (F-016).
 
 Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 
@@ -67,6 +67,7 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 - **F-012 (Task 14, High):** extensions now move an online booking's return time and check the added window as datetimes, so a same-day booking cannot be double-booked. Regression tests: `test_extend_moves_the_online_return_time`, `test_extend_detects_a_same_day_time_clash`.
 - **F-014 (Task 16, Low):** maintenance now refuses a current/future odometer below the vehicle's mileage and a completion reading below the job's start reading; historical backfill is still allowed. Regression tests: the four `TestOdometer` cases in `tests/test_maintenance_service.py`.
 - **F-015 (Task 16, Medium):** open-ended workshop jobs now produce a clean conflict message ("from <date>") instead of a `TypeError` when booking, quoting, or extending. Regression tests: `test_booking_reports_the_open_ended_window`, `test_extension_reports_the_open_ended_window`.
+- **F-016 (Task 17, High):** the staff customer form now represents a missing birthdate as "Not on file" and submits `None`, so editing another field cannot invent 2000-01-01 or bypass the missing-DOB eligibility block. Regression tests: `test_edit_form_keeps_a_missing_birthdate_empty`, `test_new_customer_form_does_not_invent_a_birthdate`.
 
 ## Deferred and waived items
 
