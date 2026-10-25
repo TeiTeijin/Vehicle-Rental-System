@@ -15,11 +15,12 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **11/11 tasks complete**.
+- Performance work: **11/11 tasks complete**; follow-ups **0/3**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Live indexes: all seven composite indexes were applied to MySQL and verified on 2026-10-25.
 - Follow-up correctness fix: payment search now runs in SQL before the 100-row cap (`90c2071`).
 - Final Linux suite: exit 0, one skip, run on `90c2071` after the payment-search fix.
+- Follow-up tasks: Task 12 customers, Task 13 utilization, Task 14 dashboard.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
 
@@ -753,6 +754,142 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 - Inspections/Maintenance are single-query pages; their ~1.5s is the remote
   round trip, not N+1.
 
+## Task 12: Collapse the Customers page to two queries
+
+**Files:**
+- Modify: `app/staff/pages/customers.py`
+- Test: `tests/test_staff_pages.py`
+
+**Interfaces:**
+- Consumes: `_customer_rows`, `CustomerFilter`, `customer_service.BALANCE_STATUSES`, `customer_service.OPEN_STATUSES`.
+- Produces: the same customer row tuple with the balance and rental count selected as correlated expressions in the page query. The settings lookup plus the page query are the only two statements.
+
+- [ ] **Step 1: Tighten the query-count test**
+
+In `test_customer_page_load_is_not_n_plus_one`, change the assertion from `< 20` to `<= 2` and include the count in the failure message.
+
+- [ ] **Step 2: Run it and verify it fails**
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "customer_page_load_is_not_n_plus_one" -v
+```
+
+Expected: FAIL with seven queries.
+
+- [ ] **Step 3: Select the metrics with the page query**
+
+Build `balance_expr` from the existing rental, penalty, and paid subqueries and add a correlated `COUNT(BOOKING)` scalar subquery. Select `Users`, the balance, and the rental count in one statement; use those values in the row loop. Keep `has_active` and `has_balance` as SQL filters and remove the per-page calls to `outstanding_by_customer` and `open_bookings_by_customer` from this loader. Those service functions remain for other callers.
+
+- [ ] **Step 4: Run the customer tests**
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "customer" -q
+```
+
+Expected: PASS; balances, rental counts, licence filters, and search outside the cap all still match.
+
+- [ ] **Step 5: Update the plan, commit, and push**
+
+```bash
+git add plan.md app/staff/pages/customers.py tests/test_staff_pages.py
+git commit -m "perf: collapse customer page queries"
+git push origin staff-audit-remediation
+```
+
+---
+
+## Task 13: Reduce utilization data transfer and cache repeat loads
+
+**Files:**
+- Modify: `app/services/fleet_service.py`
+- Modify: `app/services/report_service.py`
+- Modify: `app/staff/pages/report_panels.py`
+- Test: `tests/test_fleet_management.py`, `tests/test_staff_pages.py`
+
+**Interfaces:**
+- `list_vehicles(..., with_maintenance: bool = True)` skips the maintenance eager-load when false.
+- `UtilizationPanel.fetch_report()` caches its tuple for 60 seconds keyed by `(from_date, to_date, category)`.
+- `utilization_report()` asks for vehicles without maintenance records; `vehicle_stats_batch()` loads them once for the stats.
+
+- [ ] **Step 1: Write the failing tests**
+
+1. In `tests/test_fleet_management.py`, assert `list_vehicles(session, with_maintenance=False)` succeeds and leaves `maintenance_records` unloaded.
+2. In `tests/test_staff_pages.py`, monkeypatch `report_service.utilization_report` and assert two immediate `UtilizationPanel.fetch_report()` calls with the same range/category call the service once.
+
+- [ ] **Step 2: Run them and verify they fail**
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_fleet_management.py tests/test_staff_pages.py -k "skip_maintenance or utilization_panel_reuses" -v
+```
+
+Expected: FAIL because the flag and cache do not exist.
+
+- [ ] **Step 3: Implement the load and cache**
+
+Add `with_maintenance` to `list_vehicles` and pass `False` from `utilization_report`. Add the 60-second cache to `UtilizationPanel.fetch_report`, keyed by the range and selected category. Do not cache export data; exports must always read fresh rows.
+
+- [ ] **Step 4: Run the report and fleet tests**
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_fleet_management.py tests/test_report_service.py tests/test_staff_pages.py -k "utilization or fleet" -q
+```
+
+Expected: PASS; utilization math and report ordering are unchanged.
+
+- [ ] **Step 5: Update the plan, commit, and push**
+
+```bash
+git add plan.md app/services/fleet_service.py app/services/report_service.py app/staff/pages/report_panels.py tests/test_fleet_management.py tests/test_staff_pages.py
+git commit -m "perf: reduce utilization report load"
+git push origin staff-audit-remediation
+```
+
+---
+
+## Task 14: Collapse dashboard collection to three queries
+
+**Files:**
+- Modify: `app/services/dashboard_service.py`
+- Test: `tests/test_staff_dashboard.py`
+
+**Interfaces:**
+- Adds `revenue_and_months(session, today)` and `orders_and_days(session, today, weeks)`.
+- `collect()` uses the combined functions plus `recent_transactions()`, reducing five statements to three while preserving `DashboardFigures`.
+
+- [ ] **Step 1: Write the failing query-count test**
+
+Add `test_collect_uses_at_most_three_queries` in `tests/test_staff_dashboard.py`. Use `count_queries` around `dashboard_service.collect(session)` and assert `queries.count <= 3`.
+
+- [ ] **Step 2: Run it and verify it fails**
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py -k "collect_uses_at_most_three" -v
+```
+
+Expected: FAIL with five queries.
+
+- [ ] **Step 3: Combine the aggregates**
+
+Build `revenue_and_months` from one payment-grouped-by-day query over the year-to-date, and `orders_and_days` from one booking-grouped-by-day-and-channel query over the heatmap window. Keep the existing standalone functions for direct callers. Update `collect()` to use the combined results, and update the dashboard refresh spy test to watch the new functions.
+
+- [ ] **Step 4: Run the dashboard tests**
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py tests/test_staff_pages.py -k "DashboardPage or dashboard" -q
+```
+
+Expected: PASS; figures match the existing service functions and the refresh still reaches every card.
+
+- [ ] **Step 5: Update the plan, commit, and push**
+
+```bash
+git add plan.md app/services/dashboard_service.py tests/test_staff_dashboard.py
+git commit -m "perf: collapse dashboard queries"
+git push origin staff-audit-remediation
+```
+
+---
+
 ## Completion Checklist
 
 - [x] Task 1: Bookings eager loading
@@ -766,6 +903,9 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 - [x] Task 9: Composite indexes
 - [x] Task 10: Query guardrails
 - [x] Task 11: Live re-measurement
+- [ ] Task 12: Customers two-query page
+- [ ] Task 13: Utilization load and cache
+- [ ] Task 14: Dashboard three-query collection
 
 ## Resume Instructions for Another Device
 
