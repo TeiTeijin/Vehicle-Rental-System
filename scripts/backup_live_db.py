@@ -26,33 +26,37 @@ import time
 from pathlib import Path
 
 from sqlalchemy import MetaData, create_engine, event, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.config import BASE_DIR, DATABASE_URL
+from app.services.backup_service import (
+    SNAPSHOT_MODE,
+    UnsafeSnapshotPath,
+    sanitize_row,
+)
 
 #: Rows per statement, matching the bulk seeder: round trips dominate.
 BATCH = 2000
 
-#: Columns whose values are credentials, not data. Signed CarImages URLs
-#: embed the API key, so the snapshot keeps the row (restore tests and FKs
-#: still see it) but blanks the value. A blank URL reads as stale and is
-#: refetched when the app is online.
-CREDENTIAL_COLUMNS: dict[str, tuple[str, ...]] = {
-    "VEHICLE_MEDIA": ("image_url", "model_3d_url"),
-}
 
-PRIVATE_FILE_MODE = 0o600
+def _sqlite_source_path(source_url: str) -> Path | None:
+    """The on-disk file behind a SQLite URL, or None for MySQL/memory."""
+    url = make_url(source_url)
+    if not url.drivername.startswith("sqlite"):
+        return None
+    if not url.database or url.database == ":memory:":
+        return None
+    return Path(url.database).resolve()
 
 
-def _sanitize_rows(table_name: str, rows: list[dict]) -> list[dict]:
-    """Drop credential-bearing values before they ever reach the target."""
-    columns = CREDENTIAL_COLUMNS.get(table_name)
-    if not columns:
-        return rows
-    return [
-        {**row, **{column: "" for column in columns if column in row}}
-        for row in rows
-    ]
+def _refuse_overwriting_source(source_url: str, out_path: Path) -> None:
+    """A backup must never unlink or replace the database it reads."""
+    source_path = _sqlite_source_path(source_url)
+    if source_path is not None and out_path.resolve() == source_path:
+        raise UnsafeSnapshotPath(
+            "refusing to write the snapshot over its SQLite source"
+        )
 
 
 def _source_label(url: str) -> str:
@@ -74,6 +78,7 @@ def _fast_sqlite(target) -> None:
 
 
 def copy_database(source_url: str, out_path: Path) -> dict[str, int]:
+    _refuse_overwriting_source(source_url, out_path)
     source = create_engine(source_url, pool_pre_ping=True)
 
     # The target schema mirrors the SOURCE, not the ORM models: the live
@@ -101,23 +106,24 @@ def copy_database(source_url: str, out_path: Path) -> dict[str, int]:
 
     if out_path.exists():
         out_path.unlink()
+    # Snapshot still holds password hashes: create it private, not at the
+    # process umask, even before the first row lands. On POSIX this is a real
+    # 0600; on Windows Python only toggles the read-only bit, which is the
+    # closest equivalent the platform offers.
+    out_path.touch(mode=SNAPSHOT_MODE)
+    os.chmod(out_path, SNAPSHOT_MODE)
     target = create_engine(f"sqlite:///{out_path}")
     _fast_sqlite(target)
     metadata.create_all(target)
-    # Restrict before customer data lands in the file. On POSIX this is a
-    # real 0600; on Windows Python only toggles the read-only bit, which is
-    # the closest equivalent the platform offers.
-    os.chmod(out_path, PRIVATE_FILE_MODE)
 
     counts: dict[str, int] = {}
     with Session(source) as src, Session(target) as dst:
         # `sorted_tables` is dependency order, so parents land before
         # children even with the FK pragma off.
         for table in metadata.sorted_tables:
-            rows = _sanitize_rows(
-                table.name,
-                [dict(row) for row in src.execute(select(table)).mappings()],
-            )
+            rows = [dict(row) for row in src.execute(select(table)).mappings()]
+            for row in rows:
+                sanitize_row(table.name, row)
             for start in range(0, len(rows), BATCH):
                 dst.execute(table.insert(), rows[start : start + BATCH])
             dst.commit()
@@ -148,6 +154,12 @@ def main() -> None:
     out_path = Path(args.out)
     if not out_path.is_absolute():
         out_path = BASE_DIR / out_path
+
+    # Guard before the failure cleanup below can unlink a source file.
+    try:
+        _refuse_overwriting_source(args.source_url, out_path)
+    except UnsafeSnapshotPath as exc:
+        parser.error(str(exc))
 
     print(f"source: {_source_label(args.source_url)}")
     print(f"target: {out_path}")

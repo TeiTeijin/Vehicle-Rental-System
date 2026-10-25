@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -231,3 +232,83 @@ class TestSettingsPage:
             assert window.current_page_key == "settings"
         finally:
             window.deleteLater()
+
+    def test_backup_button_writes_only_a_sanitized_snapshot(
+        self, branch, tmp_path, monkeypatch
+    ):
+        import stat
+
+        from sqlalchemy import create_engine, select
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.orm import Session
+
+        import app.staff.pages.settings as settings_mod
+        from app.models import Vehicle, Vehicle_Category, Vehicle_Media
+        from app.staff.pages.settings import SettingsPage
+        from app.staff.shell import StaffShell
+
+        _built, context = branch
+        source = Path(make_url(context.selection.url).database)
+        with context.session() as session:
+            category = Vehicle_Category(
+                category_name="Car", base_rate_multiplier="1.00"
+            )
+            session.add(category)
+            session.flush()
+            vehicle = Vehicle(
+                category_id=category.category_id,
+                make="Ford",
+                model="Explorer",
+                year=2024,
+                plate_number="BAK1234",
+                daily_rate="50.00",
+                mileage=1200,
+                status="available",
+                created_at=datetime(2026, 1, 2, 9, 0),
+            )
+            session.add(vehicle)
+            session.flush()
+            session.add(
+                Vehicle_Media(
+                    vehicle_id=vehicle.vehicle_id,
+                    source="carimagesapi",
+                    view_angle="front34",
+                    image_url=(
+                        "https://carimagesapi.com/image?sig=abc&api_key=secret"
+                    ),
+                    model_3d_url=(
+                        "https://carimagesapi.com/model?sig=def&api_key=secret"
+                    ),
+                    cached_at=datetime(2026, 1, 2, 9, 0),
+                )
+            )
+
+        before = source.read_bytes()
+        monkeypatch.setattr(
+            settings_mod.prefs, "export_folder", lambda default: tmp_path
+        )
+        monkeypatch.setattr(settings_mod, "toast", lambda *args, **kwargs: None)
+
+        window = StaffShell(context)
+        try:
+            page = SettingsPage(window)
+            page._on_backup()
+        finally:
+            window.deleteLater()
+
+        backups = list(tmp_path.glob("backup_*.db"))
+        assert len(backups) == 1
+        snapshot = backups[0]
+        assert b"api_key=" not in snapshot.read_bytes()
+        assert b"secret" not in snapshot.read_bytes()
+        assert source.read_bytes() == before
+        if os.name != "nt":
+            assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+
+        target = create_engine(f"sqlite:///{snapshot}")
+        with Session(target) as session:
+            media = session.execute(select(Vehicle_Media)).scalar_one()
+            assert media.image_url == ""
+            assert media.model_3d_url == ""
+            assert media.source == "carimagesapi"
+        target.dispose()

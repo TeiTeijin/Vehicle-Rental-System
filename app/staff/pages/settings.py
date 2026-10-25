@@ -741,17 +741,23 @@ class SettingsPage(StaffPage):
             toast(self, "Cannot parse database URL.", "error")
             return
         if url.drivername.startswith("sqlite"):
-            import shutil
             from datetime import datetime
+
+            from app.services import backup_service
+
             src = Path(url.database) if url.database else None
             if src is None or not src.exists():
                 toast(self, "SQLite file not found.", "error")
                 return
             dest_dir = prefs.export_folder(Path("receipts"))
-            dest = dest_dir / f"backup_{src.stem}_{datetime.now():%Y%m%d_%H%M%S}{src.suffix}"
+            dest = dest_dir / (
+                f"backup_{src.stem}_"
+                f"{datetime.now():%Y%m%d_%H%M%S_%f}{src.suffix}"
+            )
             try:
-                shutil.copyfile(src, dest)
-            except OSError as exc:
+                # Never a raw copy: media URLs carry the CarImages API key.
+                backup_service.create_sanitized_sqlite_snapshot(src, dest)
+            except Exception as exc:
                 toast(self, f"Backup failed: {exc}", "error")
                 return
             toast(self, f"Backup saved: {dest.name}.")

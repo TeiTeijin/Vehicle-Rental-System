@@ -63,6 +63,15 @@ ca.pem  LILIAN-S\Lily Ann:(F)
 On POSIX the same script still applies mode `0600`. The security tests assert
 ACLs on Windows and mode bits on POSIX, so the suite is green on both.
 
+## Backup snapshot security
+
+Both the CLI and the Settings “Backup database” button now use the shared
+sanitizer in `app/services/backup_service.py`. Snapshots blank signed media
+URLs, are owner-only, and are deleted if sanitization fails. The CLI also
+refuses to write over its own SQLite source. Pre-fix snapshots still contain
+the old `api_key=` value and must be deleted; rotate the CarImages key if one
+was shared. See `docs/backup-security.md`.
+
 ## Known limitations
 
 - The demo’s interactive flows were exercised through tests, not a human

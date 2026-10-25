@@ -1,6 +1,9 @@
 """The live -> local snapshot: a copy must round-trip faithfully, and a
 failed run must never leave something that looks like a backup."""
 
+import os
+import sqlite3
+import stat
 from datetime import date, datetime
 
 import pytest
@@ -10,6 +13,10 @@ from sqlalchemy.orm import Session
 import app.models  # noqa: F401 - registers every table on Base.metadata
 from app.database import Base
 from app.models import Users, Vehicle, Vehicle_Category, Vehicle_Media
+from app.services.backup_service import (
+    SnapshotError,
+    create_sanitized_sqlite_snapshot,
+)
 from scripts.backup_live_db import copy_database
 
 
@@ -159,3 +166,108 @@ def test_a_failed_snapshot_is_deleted_not_left_behind(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         backup_live_db.main()
     assert not out.exists()
+
+
+def _minimal_media_db(path) -> None:
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE VEHICLE_MEDIA "
+        "(image_url TEXT, model_3d_url TEXT, source TEXT)"
+    )
+    connection.execute(
+        "INSERT INTO VEHICLE_MEDIA VALUES (?, ?, ?)",
+        (
+            "https://cdn.example/image.webp?sig=abc&api_key=secret",
+            "https://cdn.example/model.glb?sig=def&api_key=secret",
+            "carimagesapi",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+
+def test_the_settings_backup_helper_sanitizes_only_the_copy(tmp_path):
+    source = tmp_path / "settings-source.db"
+    _minimal_media_db(source)
+    before = source.read_bytes()
+    out = tmp_path / "settings-backup.db"
+
+    create_sanitized_sqlite_snapshot(source, out)
+
+    assert b"api_key=" not in out.read_bytes()
+    assert b"secret" not in out.read_bytes()
+    assert source.read_bytes() == before
+    if os.name != "nt":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+    connection = sqlite3.connect(out)
+    try:
+        rows = connection.execute(
+            "SELECT image_url, model_3d_url, source FROM VEHICLE_MEDIA"
+        ).fetchall()
+    finally:
+        connection.close()
+    assert rows == [("", "", "carimagesapi")]
+
+
+def test_an_unsanitizable_snapshot_is_deleted(tmp_path):
+    """A table that lost its URL columns cannot be certified safe."""
+    source = tmp_path / "not-a-rental.db"
+    connection = sqlite3.connect(source)
+    connection.execute("CREATE TABLE VEHICLE_MEDIA (source TEXT)")
+    connection.commit()
+    connection.close()
+
+    out = tmp_path / "copy.db"
+    with pytest.raises(SnapshotError, match="URL columns"):
+        create_sanitized_sqlite_snapshot(source, out)
+    assert not out.exists()
+
+
+def test_a_snapshot_is_owner_only(tmp_path):
+    source = tmp_path / "source.db"
+    _seed_source(source)
+    out = tmp_path / "copy.db"
+
+    copy_database(f"sqlite:///{source}", out)
+
+    if os.name != "nt":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_a_snapshot_refuses_to_overwrite_its_source(tmp_path):
+    source = tmp_path / "source.db"
+    _seed_source(source)
+    before = source.read_bytes()
+
+    with pytest.raises(ValueError, match="source"):
+        copy_database(f"sqlite:///{source}", source)
+
+    assert source.read_bytes() == before
+
+
+def test_the_cli_refuses_an_out_path_that_is_the_source(tmp_path, monkeypatch):
+    import sys
+
+    from scripts import backup_live_db
+
+    source = tmp_path / "source.db"
+    _seed_source(source)
+    before = source.read_bytes()
+    monkeypatch.setattr(backup_live_db, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backup_live_db",
+            "--source-url",
+            f"sqlite:///{source}",
+            "--out",
+            "source.db",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        backup_live_db.main()
+
+    assert source.read_bytes() == before
