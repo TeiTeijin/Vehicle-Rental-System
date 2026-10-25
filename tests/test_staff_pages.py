@@ -3735,6 +3735,97 @@ class TestInspectionsPage:
         _wait_for_inspections(page)
         assert page.table.row_count() == 0
 
+    def test_search_finds_a_report_outside_the_cap(self, branch):
+        from app.staff import prefs
+        from app.staff.pages.inspections import _inspection_rows
+
+        built, context = branch
+        limit = prefs.rows_limit(500)
+        with context.session() as session:
+            target_staff = Users(
+                full_name="Zulu Inspector",
+                email="zulu.inspector@example.com",
+                password_hash="x",
+                address="1 Shop Street",
+                license_number=None,
+                license_expiry=TODAY + timedelta(days=365),
+                role="staff",
+                birthdate=date(1990, 1, 1),
+                source="walk_in",
+                is_active=True,
+                created_at=datetime(2020, 1, 1, 9, 0),
+            )
+            session.add(target_staff)
+            session.flush()
+            for index in range(limit + 20):
+                session.add(
+                    Inspection_Report(
+                        booking_id=built.out_booking.booking_id,
+                        inspection_type="post-rental",
+                        inspected_by=built.counter.user_id,
+                        mileage_reading=12000 + index,
+                        fuel_level="full",
+                        damage_notes=None,
+                        photo_url=None,
+                        inspected_at=datetime.combine(
+                            TODAY, datetime.min.time()
+                        ) + timedelta(minutes=index),
+                    )
+                )
+            session.add(
+                Inspection_Report(
+                    booking_id=built.out_booking.booking_id,
+                    inspection_type="post-rental",
+                    inspected_by=target_staff.user_id,
+                    mileage_reading=12000,
+                    fuel_level="full",
+                    damage_notes=None,
+                    photo_url=None,
+                    inspected_at=datetime(2020, 1, 1, 9, 0),
+                )
+            )
+
+        rows = _inspection_rows(context, search="Zulu Inspector")
+        assert len(rows) == 1
+        assert rows[0][9] == "Zulu Inspector"
+
+    def test_inspection_list_is_not_n_plus_one(self, branch):
+        from app.staff.pages.inspections import _inspection_rows
+        from app.staff.query_metrics import count_queries
+
+        built, context = branch
+        with context.session() as session:
+            for index in range(30):
+                session.add(
+                    Inspection_Report(
+                        booking_id=built.out_booking.booking_id,
+                        inspection_type="post-rental",
+                        inspected_by=built.counter.user_id,
+                        mileage_reading=12000 + index,
+                        fuel_level="full",
+                        damage_notes=None,
+                        photo_url=None,
+                        inspected_at=datetime.combine(
+                            TODAY, datetime.min.time()
+                        ) + timedelta(minutes=index),
+                    )
+                )
+
+        with count_queries(context.engine) as queries:
+            rows = _inspection_rows(context)
+        assert len(rows) >= 30
+        assert queries.count <= 3, f"{queries.count} queries for the inspection list"
+
+    def test_the_latest_limit_is_shown(self, shell, branch):
+        from app.staff import prefs
+
+        page = InspectionsPage(shell)
+        page.refresh()
+        _wait_for_inspections(page)
+        caption = page.count_caption.text().lower()
+        assert "latest" in caption
+        assert str(prefs.rows_limit(500)) in caption
+
     def test_clear_restores_the_list(self, shell, branch):
         page = InspectionsPage(shell)
         page.refresh()
@@ -3865,6 +3956,75 @@ class TestMaintenancePage:
         page.search.setText("no-such-job")
         _wait_for_maintenance(page)
         assert page.table.row_count() == 0
+
+    def test_search_finds_a_row_outside_the_cap(self, branch):
+        from app.staff import prefs
+        from app.staff.pages.maintenance import _maintenance_rows
+
+        built, context = branch
+        limit = prefs.rows_limit(500)
+        with context.session() as session:
+            for index in range(limit + 20):
+                session.add(
+                    Maintenance_Record(
+                        vehicle_id=built.shop_car.vehicle_id,
+                        description=f"Routine job {index}",
+                        maintenance_type="routine",
+                        start_date=TODAY - timedelta(days=1),
+                        end_date=None,
+                        status="completed",
+                        cost=Decimal("1000.00"),
+                    )
+                )
+            session.add(
+                Maintenance_Record(
+                    vehicle_id=built.shop_car.vehicle_id,
+                    description="Zulu target job",
+                    maintenance_type="routine",
+                    start_date=date(2020, 1, 1),
+                    end_date=date(2020, 1, 2),
+                    status="completed",
+                    cost=Decimal("1000.00"),
+                )
+            )
+
+        rows = _maintenance_rows(context, search="Zulu target")
+        assert len(rows) == 1
+        assert rows[0][3] == "Zulu target job"
+
+    def test_maintenance_list_is_not_n_plus_one(self, branch):
+        from app.staff.pages.maintenance import _maintenance_rows
+        from app.staff.query_metrics import count_queries
+
+        built, context = branch
+        with context.session() as session:
+            for index in range(30):
+                session.add(
+                    Maintenance_Record(
+                        vehicle_id=built.shop_car.vehicle_id,
+                        description=f"Routine job {index}",
+                        maintenance_type="routine",
+                        start_date=TODAY - timedelta(days=index + 1),
+                        end_date=None,
+                        status="completed",
+                        cost=Decimal("1000.00"),
+                    )
+                )
+
+        with count_queries(context.engine) as queries:
+            rows = _maintenance_rows(context)
+        assert len(rows) >= 30
+        assert queries.count <= 3, f"{queries.count} queries for the maintenance list"
+
+    def test_the_latest_limit_is_shown(self, shell, branch):
+        from app.staff import prefs
+
+        page = MaintenancePage(shell)
+        page.refresh()
+        _wait_for_maintenance(page)
+        caption = page.count_caption.text().lower()
+        assert "latest" in caption
+        assert str(prefs.rows_limit(500)) in caption
 
     def test_clear_restores_the_list(self, shell, branch):
         page = MaintenancePage(shell)
@@ -4347,6 +4507,34 @@ class TestReportsPage:
         assert first == second
         assert len(calls) == 1
 
+    def test_utilization_export_bypasses_the_cache(
+        self, shell, branch, monkeypatch
+    ):
+        from app.staff.pages import report_panels as panels
+
+        page = ReportsPage(shell)
+        panel = page._panels["utilization"]
+        panel.set_range(TODAY - timedelta(days=7), TODAY)
+        panel.snapshot_filters()
+        panel.fetch_report()  # warm the panel cache
+
+        calls = []
+        real = panels.report_service.utilization_report
+
+        def spy(*args, **kwargs):
+            calls.append(1)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(
+            panels.report_service, "utilization_report", spy
+        )
+        title, _summary, _headers, rows = panel.export_data(
+            TODAY - timedelta(days=7), TODAY
+        )
+        assert title == "Fleet utilization report"
+        assert rows
+        assert len(calls) == 1
+
     def test_utilization_ranks_the_fleet(self, shell, branch):
         page = ReportsPage(shell)
         page.refresh()
@@ -4668,6 +4856,44 @@ class TestBookingsPageActions:
         assert "10:00" in joined and "18:00" in joined
         assert joined.count("Main Branch") == 2
         panel.deleteLater()
+
+    def test_booking_search_finds_a_row_outside_the_cap(self, branch):
+        from app.staff import prefs
+        from app.staff.pages.bookings import BookingFilter, _booking_rows
+
+        built, context = branch
+        limit = prefs.rows_limit(100)
+        with context.session() as session:
+            for index in range(limit + 20):
+                session.add(
+                    Booking(
+                        user_id=built.customer.user_id,
+                        vehicle_id=built.free_car.vehicle_id,
+                        start_date=TODAY + timedelta(days=30 + index),
+                        end_date=TODAY + timedelta(days=32 + index),
+                        total_cost=Decimal("1000.00"),
+                        status="confirmed",
+                        created_by=None,
+                        created_at=datetime(2026, 10, 25, 12, index % 60),
+                    )
+                )
+            target = Booking(
+                user_id=built.customer.user_id,
+                vehicle_id=built.free_car.vehicle_id,
+                start_date=TODAY + timedelta(days=30),
+                end_date=TODAY + timedelta(days=32),
+                total_cost=Decimal("1000.00"),
+                status="confirmed",
+                created_by=None,
+                reference_code="RW-OUTSIDE-CAP",
+                created_at=datetime(2020, 1, 1, 9, 0),
+            )
+            session.add(target)
+            session.flush()
+            target_id = target.booking_id
+
+        rows = _booking_rows(context, BookingFilter(search="RW-OUTSIDE-CAP"))
+        assert [row[0] for row in rows] == [f"#{target_id}"]
 
     def test_booking_page_load_is_not_n_plus_one(self, branch):
         from app.staff.pages.bookings import BookingFilter, _booking_rows

@@ -6,10 +6,10 @@ on the report's booking so damage can be acted on.
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import joinedload
 
-from app.models import Booking, Inspection_Report
+from app.models import Booking, Inspection_Report, Users, Vehicle
 from app.staff import theme
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
@@ -20,14 +20,6 @@ TYPE_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("Pre rental", "pre-rental"),
     ("Post rental", "post-rental"),
 )
-
-
-def _matches(needle: str, *haystacks) -> bool:
-    """Case-insensitive substring match over the given fields."""
-    query = needle.strip().lower()
-    if not query:
-        return True
-    return any(query in (hay or "").lower() for hay in haystacks)
 
 
 def _inspection_rows(
@@ -42,35 +34,59 @@ def _inspection_rows(
     except Exception:
         cap = 500
     with context.reading() as session:
-        stmt = (
-            select(Inspection_Report)
-            .options(
-                joinedload(Inspection_Report.booking).joinedload(Booking.vehicle),
-                joinedload(Inspection_Report.booking).joinedload(Booking.user),
-                joinedload(Inspection_Report.inspector),
-            )
-            .order_by(Inspection_Report.inspected_at.desc())
-            .limit(cap)
+        stmt = select(Inspection_Report).options(
+            joinedload(Inspection_Report.booking).joinedload(Booking.vehicle),
+            joinedload(Inspection_Report.booking).joinedload(Booking.user),
+            joinedload(Inspection_Report.inspector),
         )
+        # Search and the damage filter precede the cap so an old match cannot
+        # be hidden by newer, non-matching handovers.
         if inspection_type is not None:
-            stmt = stmt.where(Inspection_Report.inspection_type == inspection_type)
-        reports = session.execute(stmt).scalars().all()
+            stmt = stmt.where(
+                Inspection_Report.inspection_type == inspection_type
+            )
+        if damage_only:
+            stmt = stmt.where(
+                Inspection_Report.damage_notes.isnot(None),
+                func.trim(Inspection_Report.damage_notes) != "",
+            )
+        needle = search.strip().lower()
+        if needle:
+            pattern = f"%{needle}%"
+            stmt = stmt.where(
+                or_(
+                    cast(Inspection_Report.booking_id, String).like(
+                        f"%{needle.lstrip('#')}%"
+                    ),
+                    Inspection_Report.booking.has(
+                        or_(
+                            Booking.user.has(
+                                func.lower(Users.full_name).like(pattern)
+                            ),
+                            Booking.vehicle.has(
+                                or_(
+                                    func.lower(Vehicle.plate_number).like(
+                                        pattern
+                                    ),
+                                    func.lower(Vehicle.make).like(pattern),
+                                    func.lower(Vehicle.model).like(pattern),
+                                )
+                            ),
+                        )
+                    ),
+                    Inspection_Report.inspector.has(
+                        func.lower(Users.full_name).like(pattern)
+                    ),
+                )
+            )
+        reports = session.execute(
+            stmt.order_by(Inspection_Report.inspected_at.desc()).limit(cap)
+        ).scalars().all()
 
         rows = []
         for report in reports:
-            if damage_only and not (report.damage_notes or "").strip():
-                continue
             booking = report.booking
             vehicle = booking.vehicle if booking is not None else None
-            if not _matches(
-                search,
-                f"#{booking.booking_id}" if booking is not None else "",
-                f"{vehicle.plate_number} {vehicle.make} {vehicle.model}" if vehicle else "",
-                vehicle.plate_number if vehicle else "",
-                booking.user.full_name if booking is not None else "",
-                report.inspector.full_name if report.inspector is not None else "",
-            ):
-                continue
             rows.append(
                 (
                     f"#{booking.booking_id}" if booking is not None else "-",
@@ -170,6 +186,11 @@ class InspectionsPage(StaffPage):
             PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
         )
         data_layout.setSpacing(0)
+        from PySide6.QtWidgets import QLabel
+
+        self.count_caption = QLabel("", self)
+        self.count_caption.setObjectName("pageSubtitle")
+        data_layout.addWidget(self.count_caption)
         data_layout.addWidget(self.table, 1)
         self.body.addWidget(data, 1)
         self._data_panel = data
@@ -273,6 +294,15 @@ class InspectionsPage(StaffPage):
         )
 
     def _land_rows(self, rows) -> None:
+        try:
+            from app.staff import prefs as _prefs
+
+            limit = _prefs.rows_limit(500)
+        except Exception:
+            limit = 500
+        self.count_caption.setText(
+            f"Latest {limit} inspections (showing {len(rows)})."
+        )
         self.table.set_rows(rows)
         self._refresh_actions()
 

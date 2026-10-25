@@ -285,6 +285,18 @@ class TestReceivablesReport:
 
 
 class TestCustomersReport:
+    def test_query_count_is_bounded(self, session, customer_factory, vehicle):
+        from app.staff.query_metrics import count_queries
+
+        for _ in range(20):
+            customer = customer_factory(created_at=_noon(D15))
+            _booking(session, customer, vehicle, created_at=_noon(D15))
+
+        with count_queries(session.get_bind()) as queries:
+            report = report_service.customers_report(session, D15, D17)
+        assert len(report.rows) == 20
+        assert queries.count <= 6, f"{queries.count} queries for customers"
+
     def test_cohorts_top_and_licences(self, session, customer_factory,
                                       customer, vehicle):
         customer.created_at = _noon(D15)

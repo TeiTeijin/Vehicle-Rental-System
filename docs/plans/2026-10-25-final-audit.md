@@ -1557,7 +1557,7 @@ git push origin final-audit
 - Consumes: the optimized staff pages and report services.
 - Produces: verified query budgets, caps, pagination, background loading, and cache behavior.
 
-- [ ] **Step 1: Run the performance tests**
+- [x] **Step 1: Run the performance tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1567,7 +1567,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_report_service.py -q
 ```
 
-- [ ] **Step 2: Verify query budgets**
+- [x] **Step 2: Verify query budgets**
 
 Use `count_queries` around:
 - Bookings list
@@ -1582,7 +1582,7 @@ Use `count_queries` around:
 
 Expected: existing budgets hold; dashboard ≤3 queries; customer page ≤2 queries; payment search runs before the cap.
 
-- [ ] **Step 3: Verify pagination/caps**
+- [x] **Step 3: Verify pagination/caps**
 
 - visible row limits are shown
 - caps do not hide search matches
@@ -1590,13 +1590,13 @@ Expected: existing budgets hold; dashboard ≤3 queries; customer page ≤2 quer
 - utilization cache does not affect exports
 - background refresh does not race with navigation
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark the performance part of `X4`; record any regressions as Medium unless they block a flow.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md

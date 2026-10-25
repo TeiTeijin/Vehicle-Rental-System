@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
 from app.models import Maintenance_Record, Vehicle
@@ -38,14 +38,6 @@ TYPE_FILTERS: tuple[tuple[str, str | None], ...] = (
 )
 
 
-def _matches(needle: str, *haystacks) -> bool:
-    """Case-insensitive substring match over the given fields."""
-    query = needle.strip().lower()
-    if not query:
-        return True
-    return any(query in (hay or "").lower() for hay in haystacks)
-
-
 def _cost_text(record: Maintenance_Record) -> str:
     if record.cost is not None:
         return f"{record.cost:,.2f}"
@@ -61,17 +53,34 @@ def _maintenance_rows(context, status=None, kind=None, search: str = ""):
     except Exception:
         cap = 500
     with context.reading() as session:
-        stmt = (
-            select(Maintenance_Record)
-            .options(joinedload(Maintenance_Record.vehicle))
-            .order_by(Maintenance_Record.start_date.desc())
-            .limit(cap)
+        stmt = select(Maintenance_Record).options(
+            joinedload(Maintenance_Record.vehicle)
         )
+        # Search precedes the cap; filtering the capped rows would hide an old
+        # job whose plate, vehicle, description or shop matches.
         if status is not None:
             stmt = stmt.where(Maintenance_Record.status == status)
         if kind is not None:
             stmt = stmt.where(Maintenance_Record.maintenance_type == kind)
-        records = session.execute(stmt).scalars().all()
+        needle = search.strip().lower()
+        if needle:
+            pattern = f"%{needle}%"
+            stmt = stmt.where(
+                or_(
+                    Maintenance_Record.vehicle.has(
+                        or_(
+                            func.lower(Vehicle.plate_number).like(pattern),
+                            func.lower(Vehicle.make).like(pattern),
+                            func.lower(Vehicle.model).like(pattern),
+                        )
+                    ),
+                    func.lower(Maintenance_Record.description).like(pattern),
+                    func.lower(Maintenance_Record.shop).like(pattern),
+                )
+            )
+        records = session.execute(
+            stmt.order_by(Maintenance_Record.start_date.desc()).limit(cap)
+        ).scalars().all()
 
         rows = []
         for record in records:
@@ -81,16 +90,6 @@ def _maintenance_rows(context, status=None, kind=None, search: str = ""):
                 if vehicle is not None
                 else "-"
             )
-            if not _matches(
-                search,
-                vehicle_text,
-                vehicle.plate_number if vehicle is not None else "",
-                vehicle.make if vehicle is not None else "",
-                vehicle.model if vehicle is not None else "",
-                record.description,
-                record.shop or "",
-            ):
-                continue
             rows.append(
                 (
                     record.maintenance_id,
@@ -226,6 +225,8 @@ class MaintenancePage(StaffPage):
         )
         log_layout.setSpacing(8)
         log_layout.addWidget(self._heading("Service log"))
+        self.count_caption = Caption("", parent=self)
+        log_layout.addWidget(self.count_caption)
         self.spend_line = Caption("", parent=self)
         log_layout.addWidget(self.spend_line)
         log_layout.addWidget(self.table, 1)
@@ -354,6 +355,15 @@ class MaintenancePage(StaffPage):
         )
 
     def _land_rows(self, rows) -> None:
+        try:
+            from app.staff import prefs as _prefs
+
+            limit = _prefs.rows_limit(500)
+        except Exception:
+            limit = 500
+        self.count_caption.setText(
+            f"Latest {limit} service records (showing {len(rows)})."
+        )
         self.table.set_rows(rows)
         self._refresh_actions()
 

@@ -20,10 +20,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 
-from app.models import Booking
+from app.models import Booking, Users, Vehicle
 from app.services import booking_service, payment_service
 from app.services.errors import ServiceError
 from app.staff import prefs, theme
@@ -83,34 +83,6 @@ class BookingFilter:
     to_date: date | None = None
 
 
-def _matches(booking: Booking, balance, filtr: BookingFilter, today: date) -> bool:
-    if filtr.statuses is not None and booking.status not in filtr.statuses:
-        return False
-    if filtr.channel is not None and (booking.channel or "") != filtr.channel:
-        return False
-    if filtr.overdue_only and not (
-        booking.status == "ongoing" and booking.end_date < today
-    ):
-        return False
-    if filtr.from_date is not None and booking.end_date < filtr.from_date:
-        return False
-    if filtr.to_date is not None and booking.start_date > filtr.to_date:
-        return False
-    needle = filtr.search.strip().lower()
-    if needle:
-        haystacks = [
-            str(booking.booking_id),
-            (booking.reference_code or ""),
-            (booking.user.full_name if booking.user else ""),
-            (booking.vehicle.plate_number if booking.vehicle else ""),
-            (booking.vehicle.make if booking.vehicle else ""),
-            (booking.vehicle.model if booking.vehicle else ""),
-        ]
-        if not any(needle in (hay or "").lower() for hay in haystacks):
-            return False
-    return True
-
-
 def _payment_state(balance) -> str:
     if balance.amount_paid <= ZERO:
         return "Unpaid"
@@ -127,22 +99,55 @@ def _booking_rows(context, filtr: BookingFilter):
     except Exception:
         cap = 500
     with context.reading() as session:
-        bookings = session.execute(
-            select(Booking)
-            .options(
-                joinedload(Booking.user),
-                joinedload(Booking.vehicle),
-                selectinload(Booking.payments),
-                selectinload(Booking.penalties),
+        stmt = select(Booking).options(
+            joinedload(Booking.user),
+            joinedload(Booking.vehicle),
+            selectinload(Booking.payments),
+            selectinload(Booking.penalties),
+        )
+        # Every filter and search runs before the cap. Filtering the capped
+        # list in Python would hide a matching old booking behind newer rows.
+        if filtr.statuses is not None:
+            stmt = stmt.where(Booking.status.in_(filtr.statuses))
+        if filtr.channel is not None:
+            stmt = stmt.where(Booking.channel == filtr.channel)
+        if filtr.overdue_only:
+            stmt = stmt.where(
+                Booking.status == "ongoing", Booking.end_date < today
             )
-            .order_by(Booking.created_at.desc(), Booking.booking_id.desc())
-            .limit(cap)
+        if filtr.from_date is not None:
+            stmt = stmt.where(Booking.end_date >= filtr.from_date)
+        if filtr.to_date is not None:
+            stmt = stmt.where(Booking.start_date <= filtr.to_date)
+        needle = filtr.search.strip().lower()
+        if needle:
+            pattern = f"%{needle}%"
+            stmt = stmt.where(
+                or_(
+                    cast(Booking.booking_id, String).like(
+                        f"%{needle.lstrip('#')}%"
+                    ),
+                    func.lower(Booking.reference_code).like(pattern),
+                    Booking.user.has(
+                        func.lower(Users.full_name).like(pattern)
+                    ),
+                    Booking.vehicle.has(
+                        or_(
+                            func.lower(Vehicle.plate_number).like(pattern),
+                            func.lower(Vehicle.make).like(pattern),
+                            func.lower(Vehicle.model).like(pattern),
+                        )
+                    ),
+                )
+            )
+        bookings = session.execute(
+            stmt.order_by(
+                Booking.created_at.desc(), Booking.booking_id.desc()
+            ).limit(cap)
         ).scalars().all()
         rows = []
         for booking in bookings:
             balance = payment_service.booking_balance(session, booking)
-            if not _matches(booking, balance, filtr, today):
-                continue
             vehicle = booking.vehicle
             channel = {"walk_in": "Walk-in", "online": "Online"}.get(
                 booking.channel or "", "—"

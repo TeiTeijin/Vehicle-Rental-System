@@ -953,7 +953,18 @@ def customers_report(
                 licence=licence,
             )
         )
-    repeat = sum(1 for user_id in counts if _lifetime_bookings(session, user_id) > 1)
+    lifetime: dict[int, int] = {}
+    if counts:
+        for user_id, total in session.execute(
+            select(Booking.user_id, func.count(Booking.booking_id))
+            .where(
+                Booking.user_id.in_(list(counts)),
+                Booking.status.notin_(("cancelled",)),
+            )
+            .group_by(Booking.user_id)
+        ).all():
+            lifetime[user_id] = int(total)
+    repeat = sum(1 for total in lifetime.values() if total > 1)
     top = max(rows, key=lambda r: r.spent, default=None)
     return CustomersReport(
         new_count=len(new),
@@ -964,15 +975,6 @@ def customers_report(
         top_spent=top.spent if top else ZERO,
         rows=tuple(rows),
     )
-
-
-def _lifetime_bookings(session: Session, user_id: int) -> int:
-    return session.execute(
-        select(func.count(Booking.booking_id)).where(
-            Booking.user_id == user_id,
-            Booking.status.notin_(("cancelled",)),
-        )
-    ).scalar_one()
 
 
 # --------------------------------------------------------------------------
