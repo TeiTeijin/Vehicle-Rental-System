@@ -985,7 +985,7 @@ git push origin final-audit
 - Consumes: an ongoing booking with rental/deposit payments and possible penalties.
 - Produces: verified checkout quote, deposit application/return, exact settlement, receipt, and customer/report visibility.
 
-- [ ] **Step 1: Run the checkout tests**
+- [x] **Step 1: Run the checkout tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -995,7 +995,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_customer_payments.py -q
 ```
 
-- [ ] **Step 2: Walk a clean return**
+- [x] **Step 2: Walk a clean return**
 
 Verify:
 - `checkout_quote` computes late fee and damage charge
@@ -1011,7 +1011,7 @@ Verify:
 - customer sees the completed booking and payment rows
 - reports reflect rental revenue, penalties, and deposit liability correctly
 
-- [ ] **Step 3: Walk shortfall and failure paths**
+- [x] **Step 3: Walk shortfall and failure paths**
 
 - balance due but no settlement → blocked
 - settlement not exactly equal → blocked
@@ -1019,13 +1019,13 @@ Verify:
 - damage/late penalty → correct rows and totals
 - deposit insufficient for penalties → outstanding balance remains
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S5`, `X2`, `X3`, `X4`, and the return part of `X5`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md

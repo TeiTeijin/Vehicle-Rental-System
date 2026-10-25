@@ -265,7 +265,7 @@ def settle_deposit(session: Session, booking: Booking) -> Decimal:
             Payment(
                 booking=booking,
                 amount=refund,
-                method="cash",
+                method=method,
                 kind="deposit",
                 status="refunded",
                 paid_at=None,

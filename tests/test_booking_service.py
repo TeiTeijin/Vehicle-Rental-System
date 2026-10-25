@@ -530,6 +530,31 @@ class TestCheckOut:
         booking_service.check_in(session, booking, staff, 42000, "full")
         return booking
 
+    def test_deposit_refund_keeps_the_original_tender(
+        self, session, customer, vehicle, staff
+    ):
+        quote = counter_service.quote(session, vehicle, D1, D3)
+        booking, _ = booking_service.complete_counter_rental(
+            session,
+            user=customer,
+            vehicle=vehicle,
+            start_date=D1,
+            end_date=D3,
+            rental_amount=quote.total,
+            method="card",
+            staff_id=staff.user_id,
+            fee_floor=quote.scheduling_fee,
+            deposit=Decimal("3000.00"),
+        )
+        booking_service.check_in(session, booking, staff, 42000, "full")
+        booking_service.check_out(session, booking, staff, D3, 42100, "full")
+        refund = next(
+            p
+            for p in booking.payments
+            if p.kind == "deposit" and p.status == "refunded"
+        )
+        assert refund.method == "card"
+
     def test_completes_the_booking_and_frees_the_vehicle(
         self, session, ongoing, vehicle, staff
     ):
