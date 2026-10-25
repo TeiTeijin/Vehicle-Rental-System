@@ -853,6 +853,35 @@ class TestBalances:
         payment_service.refund_payment(session, payment, reason="Vehicle unavailable")
         assert payment_service.booking_balance(session, booking).balance == 12500
 
+    def test_refunding_a_deposit_row_is_refused(self, session, booking):
+        payment_service.record_payment(
+            session, booking, 2000, "cash", kind="deposit"
+        )
+        deposit = next(p for p in booking.payments if p.kind == "deposit")
+        with pytest.raises(StateError, match="settle_deposit"):
+            payment_service.refund_payment(
+                session, deposit, reason="Customer changed their mind"
+            )
+        assert payment_service.booking_balance(session, booking).deposit_held == 2000
+
+    def test_refunding_an_applied_deposit_is_refused(self, session, booking):
+        payment_service.record_payment(session, booking, 12500, "cash")
+        payment_service.record_payment(
+            session, booking, 2000, "cash", kind="deposit"
+        )
+        booking_service.apply_penalty(session, booking, "damage", 500, "Scratch")
+        payment_service.settle_deposit(session, booking)
+        applied = next(p for p in booking.payments if p.kind == "deposit_applied")
+        before = payment_service.booking_balance(session, booking)
+        with pytest.raises(StateError, match="ledger adjustment"):
+            payment_service.refund_payment(
+                session, applied, reason="Wrong button"
+            )
+        after = payment_service.booking_balance(session, booking)
+        assert after == before
+        assert after.deposit_held == 0
+        assert after.balance == 0
+
     def test_overpayment_shows_as_a_negative_balance(self, session, booking):
         payment_service.record_payment(session, booking, 13000, "cash")
         assert payment_service.booking_balance(session, booking).balance == -500

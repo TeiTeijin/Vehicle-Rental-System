@@ -3250,6 +3250,32 @@ class TestPaymentsPage:
         assert rows["15,000.00"] != "Not cleared"
         assert rows["2,500.00"] == "Not cleared"
 
+    def test_a_deposit_applied_row_reads_as_a_ledger_adjustment(
+        self, shell, branch
+    ):
+        from app.staff.pages.payments import KIND_FILTERS, _payment_rows
+
+        built, context = branch
+        assert ("Deposit applied", "deposit_applied") in KIND_FILTERS
+        with context.session() as session:
+            session.add(
+                Payment(
+                    booking_id=built.overdue.booking_id,
+                    amount=Decimal("500.00"),
+                    method="cash",
+                    kind="deposit_applied",
+                    status="paid",
+                    paid_at=None,
+                    recorded_by=built.counter.user_id,
+                    note="Deposit applied to penalties (ledger adjustment, not cash).",
+                    created_at=datetime.combine(TODAY, datetime.min.time()),
+                )
+            )
+        rows = _payment_rows(context, kind="deposit_applied")
+        assert len(rows) == 1
+        assert rows[0][5] == "Deposit applied"
+        assert rows[0][7] == "Ledger adjustment"
+
     def test_a_settled_booking_is_not_chased(self, shell, branch):
         """The finished rental is fully paid, so it must not be in the list. A
         screen that shows it as owed sends someone after money already taken."""
@@ -6331,6 +6357,8 @@ class TestRentalWizard:
             overlay.hide_overlay()
 
     def test_licence_creates_new_customer_once(self, qapp, shell, branch):
+        from PySide6.QtCore import QDate
+
         from app.staff.rental_wizard import LicencePanel
 
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
@@ -6349,6 +6377,7 @@ class TestRentalWizard:
             form.email_edit.setText("first@example.com")
             form.phone_edit.setText("09170009999")
             form.address_edit.setText("9 Test Street")
+            form.birth_edit.setDate(QDate(1990, 1, 1))
             form._go.click()
             qapp_process(page)
             assert step.next_button.isEnabled() is True

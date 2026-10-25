@@ -286,6 +286,16 @@ def refund_payment(
             f"Payment #{payment.payment_id} is '{payment.status}', so it cannot "
             "be refunded."
         )
+    if payment.kind == "deposit":
+        raise StateError(
+            "A security deposit is returned by settle_deposit at check-out, "
+            "not by refund_payment."
+        )
+    if payment.kind == "deposit_applied":
+        raise StateError(
+            "A deposit application is a ledger adjustment, not a refundable "
+            "payment."
+        )
     if not (reason or "").strip():
         raise ValidationError("A refund needs a reason.", field="reason")
 

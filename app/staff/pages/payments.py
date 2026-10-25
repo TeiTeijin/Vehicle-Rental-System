@@ -39,7 +39,15 @@ KIND_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("All kinds", None),
     ("Rental", "rental"),
     ("Deposit", "deposit"),
+    ("Deposit applied", "deposit_applied"),
 )
+
+#: Display labels for the Kind column (the stored enum uses underscores).
+KIND_LABELS = {
+    "rental": "Rental",
+    "deposit": "Deposit",
+    "deposit_applied": "Deposit applied",
+}
 
 STATUS_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("All statuses", None),
@@ -73,6 +81,12 @@ def _payment_rows(context, method=None, kind=None, status=None, search: str = ""
             customer = booking.user if booking is not None else None
             vehicle = booking.vehicle if booking is not None else None
             recorded_by = payment.recorder
+            if payment.kind == "deposit_applied":
+                taken_at = "Ledger adjustment"
+            elif payment.paid_at:
+                taken_at = payment.paid_at.strftime("%d %b %Y %H:%M")
+            else:
+                taken_at = "Not cleared"
             rows.append(
                 (
                     payment.payment_id,
@@ -80,9 +94,9 @@ def _payment_rows(context, method=None, kind=None, status=None, search: str = ""
                     customer.full_name if customer is not None else "-",
                     f"{payment.amount:,.2f}",
                     payment.method.title(),
-                    payment.kind.title(),
+                    KIND_LABELS.get(payment.kind or "", "Payment"),
                     payment.status,
-                    payment.paid_at.strftime("%d %b %Y %H:%M") if payment.paid_at else "Not cleared",
+                    taken_at,
                     payment.reference_no or "-",
                     recorded_by.full_name if recorded_by is not None else "-",
                 )

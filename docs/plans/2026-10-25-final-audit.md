@@ -1279,7 +1279,7 @@ git push origin final-audit
 - Consumes: `record_payment`, `refund_payment`, `settle_deposit`, `booking_balance`, `takings`, `outstanding_total`, `payments_for_user`.
 - Produces: verified payment ledger, refunds, deposits, takings, and outstanding balances.
 
-- [ ] **Step 1: Run the payment tests**
+- [x] **Step 1: Run the payment tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1290,7 +1290,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_staff_pages.py -q
 ```
 
-- [ ] **Step 2: Walk the staff ledger**
+- [x] **Step 2: Walk the staff ledger**
 
 Verify:
 - search runs in SQL before the row cap
@@ -1301,7 +1301,7 @@ Verify:
 - outstanding uses the same balance rules as booking checkout
 - customer payment history matches staff ledger for the same booking
 
-- [ ] **Step 3: Verify money invariants**
+- [x] **Step 3: Verify money invariants**
 
 - `Decimal` end-to-end
 - no float writes
@@ -1310,13 +1310,13 @@ Verify:
 - refund cannot exceed paid amount
 - checkout shortfall cannot be hidden by a deposit row
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S10`, `X2`, and the payments part of `X3`/`X4`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md
