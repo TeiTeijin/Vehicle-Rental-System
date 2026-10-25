@@ -199,6 +199,7 @@ def recent_transactions(
             .options(
                 joinedload(Payment.booking).joinedload(Booking.user),
             )
+            .where(Payment.kind.in_(("rental", "deposit")))
             .order_by(Payment.created_at.desc(), Payment.payment_id.desc())
             .limit(limit)
         )

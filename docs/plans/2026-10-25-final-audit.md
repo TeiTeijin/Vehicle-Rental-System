@@ -1339,7 +1339,7 @@ git push origin final-audit
 - Consumes: completed/cancelled bookings, payments, deposits, penalties, fleet, maintenance, customers, staff.
 - Produces: verified report numbers, dashboard figures, query behavior, and exports.
 
-- [ ] **Step 1: Run the reporting tests**
+- [x] **Step 1: Run the reporting tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1348,7 +1348,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_staff_pages.py -q
 ```
 
-- [ ] **Step 2: Verify every report panel**
+- [x] **Step 2: Verify every report panel**
 
 For `revenue`, `bookings`, `utilization`, `performance`, `maintenance`, `receivables`, `customers`, and `staff`:
 - summary is non-empty
@@ -1359,7 +1359,7 @@ For `revenue`, `bookings`, `utilization`, `performance`, `maintenance`, `receiva
 - customer-created online bookings are included
 - export CSV/PDF row counts and totals match the panel
 
-- [ ] **Step 3: Verify dashboard and cache**
+- [x] **Step 3: Verify dashboard and cache**
 
 - dashboard collect uses at most 3 queries
 - dashboard remains off the GUI thread
@@ -1367,13 +1367,13 @@ For `revenue`, `bookings`, `utilization`, `performance`, `maintenance`, `receiva
 - exports always read fresh data, not the utilization cache
 - query counts do not regress
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S11`, `X4`, and the reporting part of `X2`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md

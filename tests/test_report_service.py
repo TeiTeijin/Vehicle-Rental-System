@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 
 from app.models import Booking, Maintenance_Record, Payment, Penalty
-from app.services import report_service
+from app.services import payment_service, report_service
 from tests.conftest import TODAY
 
 D10 = date(2026, 9, 10)
@@ -315,3 +315,52 @@ class TestStaffReport:
         assert [(r.day, r.staff) for r in report.rows] == [
             (D16, "Staff User"), (D15, "Staff User"),
         ]
+
+
+class TestOutstanding:
+    def test_a_held_deposit_is_not_a_payment_against_the_bill(
+        self, session, customer, vehicle
+    ):
+        booking = _booking(
+            session, customer, vehicle, total="5000.00", status="confirmed"
+        )
+        _pay(session, booking, "2000.00", D15, kind="deposit")
+        assert (
+            payment_service.booking_balance(session, booking).balance
+            == Decimal("5000.00")
+        )
+        assert report_service.outstanding_total(session) == Decimal("5000.00")
+
+    def test_an_overpayment_cannot_hide_another_bookings_debt(
+        self, session, customer, vehicle, customer_factory, car_category,
+        vehicle_factory,
+    ):
+        overpaid = _booking(session, customer, vehicle, total="1000.00")
+        _pay(session, overpaid, "1500.00", D15)
+        debtor = customer_factory()
+        other_vehicle = vehicle_factory(car_category, plate_number="DEBT-001")
+        _booking(
+            session, debtor, other_vehicle, total="3000.00", status="confirmed"
+        )
+        assert report_service.outstanding_total(session) == Decimal("3000.00")
+
+
+class TestReportDateBasis:
+    def test_a_backdated_payment_counts_on_the_day_it_was_paid(
+        self, session, customer, vehicle
+    ):
+        booking = _booking(session, customer, vehicle)
+        payment = _pay(session, booking, "7500.00", D15)
+        payment.created_at = _noon(D20)
+        report = report_service.build_report(session, D15, D15)
+        assert report.collections == Decimal("7500.00")
+        assert report.days[0].collections == Decimal("7500.00")
+
+    def test_a_backdated_deposit_counts_on_the_day_it_was_paid(
+        self, session, customer, vehicle
+    ):
+        booking = _booking(session, customer, vehicle)
+        deposit = _pay(session, booking, "2000.00", D15, kind="deposit")
+        deposit.created_at = _noon(D20)
+        report = report_service.build_report(session, D15, D15)
+        assert report.deposits == Decimal("2000.00")

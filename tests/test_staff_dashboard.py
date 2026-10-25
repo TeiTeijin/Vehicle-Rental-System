@@ -923,6 +923,31 @@ class TestPaymentStatus:
         labels = [cell] if isinstance(cell, QLabel) else cell.findChildren(QLabel)
         return labels
 
+    def test_a_deposit_application_is_not_a_cash_transaction(self, branch):
+        from datetime import datetime
+
+        from app.models import Payment
+
+        built, context = branch
+        with context.session() as session:
+            session.add(
+                Payment(
+                    booking_id=built.overdue.booking_id,
+                    amount=Decimal("777.77"),
+                    method="cash",
+                    kind="deposit_applied",
+                    status="paid",
+                    paid_at=None,
+                    recorded_by=built.counter.user_id,
+                    created_at=datetime.now(),
+                )
+            )
+
+        with context.reading() as session:
+            rows = dashboard_service.recent_transactions(session, 20)
+
+        assert all(row.amount != Decimal("777.77") for row in rows)
+
     def test_pending_and_failed_amounts_are_not_styled_as_received_cash(
         self, shell, branch
     ):

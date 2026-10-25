@@ -47,12 +47,12 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Severity | Open | Fixed | Deferred | Waived |
 |---|---|---|---|---|
 | Critical | 0 | 0 | 0 | 0 |
-| High | 2 | 5 | 0 | 0 |
+| High | 2 | 6 | 0 | 0 |
 | Medium | 1 | 5 | 0 | 0 |
-| Low | 2 | 3 | 0 | 0 |
+| Low | 2 | 5 | 0 | 0 |
 | Environmental | 0 | 0 | 0 | 0 |
 
-Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010). Task 14 found and fixed a High extension defect: online return times were not moved and same-day time conflicts were missed (F-012). Task 16 found and fixed a Medium open-ended-workshop crash (F-015) and a Low odometer-integrity gap (F-014). Task 17 found and fixed a High customer-data defect: the staff edit form invented a 2000-01-01 birthdate for customers with none, bypassing the missing-DOB eligibility block (F-016). Task 18 found and fixed a Medium deposit-ledger defect (refunds could flip deposit/applied rows) and a Low ledger-label defect (F-017, F-018).
+Task 3 fixed two High migration defects: MySQL `ENUM` DDL was emitted on SQLite (F-001), and the documented order did not create the PSGC reference tables (F-002). A Low legacy-SQLite nullability limitation (F-003) is open for Task 24 disposition. Task 7 found two open High pricing defects: online long-term discount (F-005) and motorcycle multiplier (F-006) are not applied. Task 8 found an open Medium labeling defect: `deposit_applied` rows read as cash in customer history (F-007). Task 12 found and fixed a High pickup-gate defect: check-in did not re-check customer eligibility or refuse retired vehicles (F-010). Task 14 found and fixed a High extension defect: online return times were not moved and same-day time conflicts were missed (F-012). Task 16 found and fixed a Medium open-ended-workshop crash (F-015) and a Low odometer-integrity gap (F-014). Task 17 found and fixed a High customer-data defect: the staff edit form invented a 2000-01-01 birthdate for customers with none, bypassing the missing-DOB eligibility block (F-016). Task 18 found and fixed a Medium deposit-ledger defect (refunds could flip deposit/applied rows) and a Low ledger-label defect (F-017, F-018). Task 19 found and fixed a High outstanding-report defect (held deposits counted as paid; overpayments netted across bookings), plus Low date-basis and dashboard-label defects (F-019, F-020, F-021).
 
 Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 
@@ -70,6 +70,9 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 - **F-016 (Task 17, High):** the staff customer form now represents a missing birthdate as "Not on file" and submits `None`, so editing another field cannot invent 2000-01-01 or bypass the missing-DOB eligibility block. Regression tests: `test_edit_form_keeps_a_missing_birthdate_empty`, `test_new_customer_form_does_not_invent_a_birthdate`.
 - **F-017 (Task 18, Medium):** `refund_payment` now refuses `deposit` and `deposit_applied` rows, so a refund cannot silently mark a held deposit returned or remove a penalty credit. Regression tests: `test_refunding_a_deposit_row_is_refused`, `test_refunding_an_applied_deposit_is_refused`.
 - **F-018 (Task 18, Low):** the staff ledger labels `deposit_applied` as "Deposit applied", shows "Ledger adjustment" instead of "Not cleared", and offers it in the Kind filter. Regression test: `test_a_deposit_applied_row_reads_as_a_ledger_adjustment`.
+- **F-019 (Task 19, High):** `outstanding_total` now sums each booking's rental + penalties − (rental + deposit_applied) and clamps each at zero, so held deposits no longer reduce debt and one booking's overpayment cannot hide another's. Regression tests: `test_a_held_deposit_is_not_a_payment_against_the_bill`, `test_an_overpayment_cannot_hide_another_bookings_debt`.
+- **F-020 (Task 19, Low):** report collections and deposits now filter by `paid_at`, matching the daily rows and every other revenue figure. Regression tests: `test_a_backdated_payment_counts_on_the_day_it_was_paid`, `test_a_backdated_deposit_counts_on_the_day_it_was_paid`.
+- **F-021 (Task 19, Low):** the dashboard's Recent Transactions list now shows only rental and deposit cash rows, not `deposit_applied` ledger adjustments. Regression test: `test_a_deposit_application_is_not_a_cash_transaction`.
 
 ## Deferred and waived items
 

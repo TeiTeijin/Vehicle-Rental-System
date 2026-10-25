@@ -387,14 +387,19 @@ def payments_for_user(session: Session, user_id: int) -> list[Payment]:
 
 
 def takings(session: Session, *, from_date: datetime | None = None, to_date: datetime | None = None) -> Decimal:
+    """Rental money received, filtered by `paid_at` (when it arrived).
+
+    The revenue reports and the daily rows use the same basis, so a payment
+    entered later still lands on the day it was paid.
+    """
     # Held deposits are not revenue: only rental-kind takings count.
     stmt = select(func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.kind == "rental",
         Payment.status == "paid",
     )
     if from_date:
-        stmt = stmt.where(Payment.created_at >= from_date)
+        stmt = stmt.where(Payment.paid_at >= from_date)
     if to_date:
-        stmt = stmt.where(Payment.created_at <= to_date)
+        stmt = stmt.where(Payment.paid_at <= to_date)
     total = session.execute(stmt).scalar_one()
     return money(total or 0, field="takings")

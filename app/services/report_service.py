@@ -67,14 +67,17 @@ def collections_between(session: Session, from_date: date, to_date: date) -> Dec
 
 
 def deposits_between(session: Session, from_date: date, to_date: date) -> Decimal:
-    payments = payment_service.list_payments(
-        session,
-        kind="deposit",
-        status="paid",
-        from_date=datetime.combine(from_date, datetime.min.time()),
-        to_date=datetime.combine(to_date, datetime.max.time()),
-    )
-    return money(sum((p.amount for p in payments), ZERO), field="deposits")
+    start, _ = _day_bounds(from_date)
+    _, end = _day_bounds(to_date)
+    total = session.execute(
+        select(func.coalesce(func.sum(Payment.amount), 0)).where(
+            Payment.kind == "deposit",
+            Payment.status == "paid",
+            Payment.paid_at >= start,
+            Payment.paid_at <= end,
+        )
+    ).scalar_one()
+    return money(total or 0, field="deposits")
 
 
 def penalties_between(session: Session, from_date: date, to_date: date) -> Decimal:
@@ -146,31 +149,38 @@ def bookings_per_day(
 
 
 def outstanding_total(session: Session) -> Decimal:
-    """Money still owed: rental + penalties minus what arrived, over every
-    booking that was never cancelled. Clamped at zero so overpayments net
-    out instead of printing as negative debt."""
-    rental = session.execute(
-        select(func.coalesce(func.sum(Booking.total_cost), 0)).where(
-            Booking.status.notin_(("cancelled",))
-        )
-    ).scalar_one()
-    penalties = session.execute(
+    """Money still owed: rental + penalties minus credited payments, summed
+    per booking and clamped at zero.
+
+    A held security deposit is a liability, not a payment, so it never
+    reduces the bill (only `deposit_applied` does). Clamping per booking means
+    an overpayment on one rental cannot hide another rental's debt.
+    """
+    penalty_total = (
         select(func.coalesce(func.sum(Penalty.amount), 0))
-        .select_from(Penalty)
-        .join(Booking, Penalty.booking_id == Booking.booking_id)
-        .where(Booking.status.notin_(("cancelled",)))
-    ).scalar_one()
-    paid = session.execute(
+        .where(Penalty.booking_id == Booking.booking_id)
+        .correlate(Booking)
+        .scalar_subquery()
+    )
+    paid_total = (
         select(func.coalesce(func.sum(Payment.amount), 0))
-        .select_from(Payment)
-        .join(Booking, Payment.booking_id == Booking.booking_id)
         .where(
-            Booking.status.notin_(("cancelled",)),
-            Payment.status.in_(("paid",)),
+            Payment.booking_id == Booking.booking_id,
+            Payment.status == "paid",
+            Payment.kind.in_(("rental", "deposit_applied")),
         )
+        .correlate(Booking)
+        .scalar_subquery()
+    )
+    balance = Booking.total_cost + penalty_total - paid_total
+    total = session.execute(
+        select(
+            func.coalesce(
+                func.sum(case((balance > 0, balance), else_=0)), 0
+            )
+        ).where(Booking.status.notin_(("cancelled",)))
     ).scalar_one()
-    total = money(rental or 0) + money(penalties or 0) - money(paid or 0)
-    return money(max(total, ZERO), field="outstanding")
+    return money(total or 0, field="outstanding")
 
 
 def build_report(session: Session, from_date: date, to_date: date) -> PeriodReport:
