@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **0/11 tasks complete**.
+- Performance work: **1/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -107,7 +107,7 @@ These are the highest-risk behavior changes implied by the performance work. Eac
 - Consumes: `_booking_rows(context, filtr)`, `BookingFilter`, `payment_service.booking_balance`.
 - Produces: unchanged row tuple shape; the same filters and balances, but with customer, vehicle, payments, and penalties loaded in three statements.
 
-- [ ] **Step 1: Write the failing query-count test**
+- [x] **Step 1: Write the failing query-count test**
 
 Add `test_booking_page_load_is_not_n_plus_one` to `tests/test_staff_pages.py` near the existing customer N+1 test. Insert at least 40 extra `Booking` rows for the existing branch customer and vehicle, then use a SQLAlchemy `before_cursor_execute` listener around `_booking_rows(context, BookingFilter())`.
 
@@ -118,7 +118,7 @@ assert len(rows) >= 40
 assert len(queries) <= 4, f"{len(queries)} queries for the bookings list"
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run:
 
@@ -128,7 +128,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py::
 
 Expected: FAIL with roughly 150+ queries because every booking lazy-loads four relationships.
 
-- [ ] **Step 3: Add eager loading**
+- [x] **Step 3: Add eager loading**
 
 In `_booking_rows`, add:
 
@@ -152,7 +152,7 @@ select(Booking)
 
 Do not change the row tuple or balance calculations.
 
-- [ ] **Step 4: Run the test and the existing Bookings tests**
+- [x] **Step 4: Run the test and the existing Bookings tests**
 
 Run:
 
@@ -162,7 +162,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; the new test uses at most four statements.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 Mark this task complete and update the progress snapshot. Then:
 
@@ -718,7 +718,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 
 ## Completion Checklist
 
-- [ ] Task 1: Bookings eager loading
+- [x] Task 1: Bookings eager loading
 - [ ] Task 2: Fleet batch loading
 - [ ] Task 3: Payments aggregate + cap
 - [ ] Task 4: Outstanding aggregate + cap

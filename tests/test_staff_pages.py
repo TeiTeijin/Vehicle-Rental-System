@@ -4275,6 +4275,48 @@ class TestBookingsPageActions:
                 return
         raise AssertionError(f"{booking_ref} not in the table")
 
+    def test_booking_page_load_is_not_n_plus_one(self, branch):
+        from sqlalchemy import event
+
+        from app.staff.pages.bookings import BookingFilter, _booking_rows
+
+        built, context = branch
+        with context.session() as session:
+            for index in range(40):
+                session.add(
+                    Booking(
+                        user_id=built.customer.user_id,
+                        vehicle_id=built.free_car.vehicle_id,
+                        start_date=TODAY + timedelta(days=30 + index),
+                        end_date=TODAY + timedelta(days=32 + index),
+                        total_cost=Decimal("1000.00"),
+                        status="confirmed",
+                        created_by=None,
+                        created_at=datetime(2026, 9, 1, 10, index % 60),
+                    )
+                )
+
+        queries = []
+
+        def before_cursor_execute(
+            _conn, _cursor, statement, _params, _context, _many
+        ):
+            queries.append(statement)
+
+        event.listen(
+            context.engine, "before_cursor_execute", before_cursor_execute
+        )
+        try:
+            rows = _booking_rows(context, BookingFilter())
+        finally:
+            event.remove(
+                context.engine,
+                "before_cursor_execute",
+                before_cursor_execute,
+            )
+        assert len(rows) >= 40
+        assert len(queries) <= 4, f"{len(queries)} queries for the bookings list"
+
     def test_the_list_shows_the_balance(self, shell, branch):
         built, _context = branch
         page = BookingsPage(shell)

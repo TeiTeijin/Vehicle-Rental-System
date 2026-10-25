@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.models import Booking
 from app.services import booking_service, payment_service
@@ -125,7 +126,15 @@ def _booking_rows(context, filtr: BookingFilter):
         cap = 500
     with context.reading() as session:
         bookings = session.execute(
-            select(Booking).order_by(Booking.created_at.desc(), Booking.booking_id.desc()).limit(cap)
+            select(Booking)
+            .options(
+                joinedload(Booking.user),
+                joinedload(Booking.vehicle),
+                selectinload(Booking.payments),
+                selectinload(Booking.penalties),
+            )
+            .order_by(Booking.created_at.desc(), Booking.booking_id.desc())
+            .limit(cap)
         ).scalars().all()
         rows = []
         for booking in bookings:
