@@ -19,8 +19,8 @@
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Live indexes: all seven composite indexes were applied to MySQL and verified on 2026-10-25.
 - Follow-up correctness fix: payment search now runs in SQL before the 100-row cap (`90c2071`).
-- Final Linux suite: exit 0, one skip, run on `90c2071` after the payment-search fix.
-- Follow-up tasks: Task 12 customers, Task 13 utilization, Task 14 dashboard.
+- Final Linux suite: exit 0, one skip, run on `42e0789` after the three follow-ups.
+- Follow-up tasks: Task 12 customers, Task 13 utilization, Task 14 dashboard — all complete and pushed.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
 
