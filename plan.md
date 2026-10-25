@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **3/11 tasks complete**.
+- Performance work: **4/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -320,14 +320,14 @@ git push origin staff-audit-remediation
 - Consumes: `_outstanding_rows(context, search)`, `payment_service.booking_balance` semantics.
 - Produces: one aggregate query for outstanding bookings, ordered by largest balance, capped at `prefs.rows_limit(100)`, with the same displayed balances.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add:
 
 1. `test_outstanding_page_load_is_not_n_plus_one` — create enough bookings to exceed the cap; wrap `_outstanding_rows(context)` in a query-count listener; assert at most four SQL statements and a row count at most the configured cap.
 2. Extend the existing balance tests to assert the outstanding amounts still match `booking_balance` for rental, penalty, paid, and `deposit_applied` cases.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "outstanding_page_load or outstanding" -v
@@ -335,7 +335,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: FAIL because the current code loads every qualifying booking and eagerly loads payments/penalties.
 
-- [ ] **Step 3: Replace the full scan with an aggregate query**
+- [x] **Step 3: Replace the full scan with an aggregate query**
 
 In `_outstanding_rows`, query `Booking` with `joinedload(Booking.user)` and `joinedload(Booking.vehicle)`, and correlated scalar subqueries for:
 
@@ -347,7 +347,7 @@ Filter to `Booking.status IN ("confirmed", "ongoing", "completed")` and `balance
 
 Add a visible “Largest 100 balances” label using the configured limit.
 
-- [ ] **Step 4: Run the Payments and report tests**
+- [x] **Step 4: Run the Payments and report tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "payments or outstanding" tests/test_report_service.py -v
@@ -355,7 +355,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; outstanding remains largest-first and settled bookings remain hidden.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/staff/pages/payments.py tests/test_staff_pages.py
@@ -721,7 +721,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 1: Bookings eager loading
 - [x] Task 2: Fleet batch loading
 - [x] Task 3: Payments aggregate + cap
-- [ ] Task 4: Outstanding aggregate + cap
+- [x] Task 4: Outstanding aggregate + cap
 - [ ] Task 5: Explicit caps
 - [ ] Task 6: Customers SQL filters + cap
 - [ ] Task 7: Dashboard async

@@ -3064,6 +3064,77 @@ class TestPaymentsPage:
         assert len(queries) == 1
         assert "sum(" in queries[0].lower()
 
+    def test_outstanding_page_load_is_not_n_plus_one(self, branch):
+        from sqlalchemy import event
+
+        from app.staff import prefs
+        from app.staff.pages.payments import _outstanding_rows
+
+        built, context = branch
+        limit = prefs.rows_limit(100)
+        with context.session() as session:
+            for index in range(limit + 20):
+                session.add(
+                    Booking(
+                        user_id=built.customer.user_id,
+                        vehicle_id=built.free_car.vehicle_id,
+                        start_date=TODAY + timedelta(days=30 + index),
+                        end_date=TODAY + timedelta(days=32 + index),
+                        total_cost=Decimal("1000.00"),
+                        status="confirmed",
+                        created_by=None,
+                        created_at=datetime(2026, 9, 1, 10, index % 60),
+                    )
+                )
+
+        queries = []
+
+        def before_cursor_execute(
+            _conn, _cursor, statement, _params, _context, _many
+        ):
+            queries.append(statement)
+
+        event.listen(
+            context.engine, "before_cursor_execute", before_cursor_execute
+        )
+        try:
+            rows = _outstanding_rows(context)
+        finally:
+            event.remove(
+                context.engine,
+                "before_cursor_execute",
+                before_cursor_execute,
+            )
+        assert len(rows) <= limit
+        assert len(queries) <= 4, f"{len(queries)} queries for outstanding"
+
+    def test_outstanding_uses_deposit_applied_as_paid(self, shell, branch):
+        built, context = branch
+        with context.session() as session:
+            session.add(
+                Payment(
+                    booking_id=built.overdue.booking_id,
+                    amount=Decimal("500.00"),
+                    method="cash",
+                    kind="deposit_applied",
+                    status="paid",
+                    paid_at=datetime.combine(TODAY, datetime.min.time()),
+                    recorded_by=built.counter.user_id,
+                    created_at=datetime.combine(TODAY, datetime.min.time()),
+                )
+            )
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+        row = next(
+            r
+            for r in range(page.outstanding.row_count())
+            if page.outstanding.cell_text(r, 0)
+            == f"#{built.overdue.booking_id}"
+        )
+        assert page.outstanding.cell_text(row, 7) == "500.00"
+        assert page.outstanding.cell_text(row, 8) == "7,000.00"
+
     def test_payment_ledger_is_capped(self, shell, branch):
         from app.staff import prefs
         from app.staff.pages.payments import _payment_rows

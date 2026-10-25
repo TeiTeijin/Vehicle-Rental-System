@@ -8,10 +8,10 @@ its own pay form -- its Outstanding list deep-links into Bookings via
 from __future__ import annotations
 
 from decimal import Decimal
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy.orm import joinedload
 
-from app.models import Booking
+from app.models import Booking, Payment, Penalty, Users, Vehicle
 from app.services import payment_service
 from app.staff import prefs, theme
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
@@ -23,7 +23,7 @@ from app.staff.tables import (
     LoadState,
     LoadStateTable,
 )
-from app.utils.money import pesos
+from app.utils.money import money, pesos
 
 #: Balances at or below this count as settled.
 SETTLED_AT = Decimal("0.00")
@@ -110,51 +110,81 @@ def _takings_total(context) -> Decimal:
 
 
 def _outstanding_rows(context, search: str = ""):
+    limit = prefs.rows_limit(100)
     with context.reading() as session:
-        rows = []
-        # Eager-load everything the balance math and the row text touch:
-        # without this each booking costs ~7 lazy round-trips (N+1), which
-        # froze the GUI for seconds on every search keystroke.
-        bookings = session.execute(
-            select(Booking)
-            .options(
-                selectinload(Booking.payments),
-                selectinload(Booking.penalties),
-                joinedload(Booking.vehicle),
-                joinedload(Booking.user),
+        penalty_total = (
+            select(func.coalesce(func.sum(Penalty.amount), 0))
+            .where(Penalty.booking_id == Booking.booking_id)
+            .correlate(Booking)
+            .scalar_subquery()
+        )
+        paid_total = (
+            select(func.coalesce(func.sum(Payment.amount), 0))
+            .where(
+                Payment.booking_id == Booking.booking_id,
+                Payment.status == "paid",
+                Payment.kind.in_(("rental", "deposit_applied")),
             )
-            .where(Booking.status.in_(("confirmed", "ongoing", "completed")))
-        ).scalars().all()
-        for booking in bookings:
-            balance = payment_service.booking_balance(session, booking)
-            if balance.balance <= SETTLED_AT:
-                continue
+            .correlate(Booking)
+            .scalar_subquery()
+        )
+        balance_expr = Booking.total_cost + penalty_total - paid_total
+        stmt = (
+            select(
+                Booking,
+                penalty_total.label("penalties"),
+                paid_total.label("paid"),
+                balance_expr.label("balance"),
+            )
+            .options(joinedload(Booking.user), joinedload(Booking.vehicle))
+            .where(
+                Booking.status.in_(("confirmed", "ongoing", "completed")),
+                balance_expr > SETTLED_AT,
+            )
+            .order_by(balance_expr.desc())
+            .limit(limit)
+        )
+        needle = search.strip().lower().lstrip("#")
+        if needle:
+            pattern = f"%{needle}%"
+            stmt = stmt.where(
+                or_(
+                    cast(Booking.booking_id, String).like(pattern),
+                    Booking.user.has(
+                        func.lower(Users.full_name).like(pattern)
+                    ),
+                    Booking.vehicle.has(
+                        or_(
+                            func.lower(Vehicle.plate_number).like(pattern),
+                            func.lower(Vehicle.make).like(pattern),
+                            func.lower(Vehicle.model).like(pattern),
+                        )
+                    ),
+                )
+            )
+
+        rows = []
+        for booking, penalties, paid, owed in session.execute(stmt).all():
             vehicle = booking.vehicle
+            rental = money(booking.total_cost, field="total_cost")
+            penalty = money(penalties or 0, field="penalty_total")
+            paid_amount = money(paid or 0, field="amount_paid")
+            due = money(rental + penalty, field="total_due")
+            balance = money(owed or 0, field="balance")
             vehicle_text = f"{vehicle.plate_number} {vehicle.make} {vehicle.model}"
-            if not _matches(
-                search,
-                f"#{booking.booking_id}",
-                booking.user.full_name,
-                vehicle_text,
-                vehicle.plate_number,
-                vehicle.make,
-                vehicle.model,
-            ):
-                continue
             rows.append(
                 (
                     f"#{booking.booking_id}",
                     booking.user.full_name,
                     vehicle_text,
                     booking.status,
-                    f"{balance.rental_cost:,.2f}",
-                    f"{balance.penalty_total:,.2f}",
-                    f"{balance.total_due:,.2f}",
-                    f"{balance.amount_paid:,.2f}",
-                    f"{balance.balance:,.2f}",
+                    f"{rental:,.2f}",
+                    f"{penalty:,.2f}",
+                    f"{due:,.2f}",
+                    f"{paid_amount:,.2f}",
+                    f"{balance:,.2f}",
                 )
             )
-        rows.sort(key=lambda r: Decimal(r[-1].replace(",", "")), reverse=True)
         return rows
 
 
@@ -280,6 +310,8 @@ class PaymentsPage(StaffPage):
         )
         outstanding_layout.setSpacing(8)
         outstanding_layout.addWidget(self._heading("Outstanding balances"))
+        self.outstanding_caption = self._heading("")
+        outstanding_layout.addWidget(self.outstanding_caption)
         outstanding_layout.addWidget(self.outstanding, 1)
         self.body.addWidget(outstanding_box, 1)
         self._outstanding_panel = outstanding_box
@@ -516,6 +548,10 @@ class PaymentsPage(StaffPage):
             self._search_timer.stop()
         self._request_load()
         self._refresh_takings_total()
+        limit = prefs.rows_limit(100)
+        self.outstanding_caption.setText(
+            f"Largest {limit} balances (change the row limit in Settings to see more)."
+        )
         self._refresh_collect()
 
     @property
