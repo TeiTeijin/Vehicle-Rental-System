@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.models import Booking
 from app.services import payment_service
-from app.staff import theme
+from app.staff import prefs, theme
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.tables import (
@@ -66,10 +66,11 @@ def _matches(needle: str, *haystacks) -> bool:
 
 
 def _payment_rows(context, method=None, kind=None, status=None, search: str = ""):
+    limit = prefs.rows_limit(100)
     with context.reading() as session:
         rows = []
         for payment in payment_service.list_payments(
-            session, method=method, kind=kind, status=status
+            session, method=method, kind=kind, status=status, limit=limit
         ):
             booking = payment.booking
             customer = booking.user if booking is not None else None
@@ -262,6 +263,8 @@ class PaymentsPage(StaffPage):
         )
         takings_layout.setSpacing(8)
         takings_layout.addWidget(self._heading("All payments"))
+        self.takings_caption = self._heading("")
+        takings_layout.addWidget(self.takings_caption)
         takings_layout.addWidget(self.takings, 1)
         self.body.addWidget(takings_box, 1)
         self._takings_panel = takings_box
@@ -445,6 +448,10 @@ class PaymentsPage(StaffPage):
         total = _takings_total(self.context)
         self.takings_total.setText(
             f"{pesos(total)} collected (rental only; deposits held separately)."
+        )
+        limit = prefs.rows_limit(100)
+        self.takings_caption.setText(
+            f"Latest {limit} payments (change the row limit in Settings to see more)."
         )
 
     # -- outstanding -> Bookings handoff --------------------------------

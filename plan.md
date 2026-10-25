@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **2/11 tasks complete**.
+- Performance work: **3/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -256,14 +256,14 @@ git push origin staff-audit-remediation
 - Consumes: `payment_service.takings`, `payment_service.list_payments`, `_payment_rows`, `_takings_total`.
 - Produces: `takings()` as a single `SUM()` query; `list_payments(..., limit=None)`; the ledger shows the latest `prefs.rows_limit(100)` rows with an explicit “latest” label.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add two tests:
 
 1. `test_takings_total_uses_one_aggregate_query` — insert a rental payment and a deposit payment, wrap `payment_service.takings(session)` in a query-count listener, and assert one SQL statement and the same Decimal total as before.
 2. `test_payment_ledger_is_capped` — insert enough payments to exceed the configured limit, call `_payment_rows(context)`, and assert the returned count is at most `prefs.rows_limit(100)` and that the UI text says the list is capped/latest.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "takings_total_uses_one_aggregate or payment_ledger_is_capped" -v
@@ -271,7 +271,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: FAIL because `takings()` loads full `Payment` rows and `_payment_rows` returns the whole ledger.
 
-- [ ] **Step 3: Implement the aggregate and limit**
+- [x] **Step 3: Implement the aggregate and limit**
 
 In `payment_service.py`, import `func` and replace `takings()` with a `select(func.coalesce(func.sum(Payment.amount), 0))` query filtered by:
 
@@ -292,7 +292,7 @@ Latest 100 payments (change the row limit in Settings to see more).
 
 Use the actual configured limit in the text.
 
-- [ ] **Step 4: Run the Payments tests**
+- [x] **Step 4: Run the Payments tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "payments or takings" -v
@@ -300,7 +300,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; deposit and pending payments are still excluded from takings.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/services/payment_service.py app/staff/pages/payments.py tests/test_staff_pages.py
@@ -720,7 +720,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 
 - [x] Task 1: Bookings eager loading
 - [x] Task 2: Fleet batch loading
-- [ ] Task 3: Payments aggregate + cap
+- [x] Task 3: Payments aggregate + cap
 - [ ] Task 4: Outstanding aggregate + cap
 - [ ] Task 5: Explicit caps
 - [ ] Task 6: Customers SQL filters + cap

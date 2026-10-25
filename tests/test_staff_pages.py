@@ -3021,6 +3021,80 @@ class TestCustomersPage:
 
 
 class TestPaymentsPage:
+    def test_takings_total_uses_one_aggregate_query(self, branch):
+        from sqlalchemy import event
+
+        from app.services import payment_service
+
+        built, context = branch
+        with context.session() as session:
+            session.add(
+                Payment(
+                    booking_id=built.overdue.booking_id,
+                    amount=Decimal("2500.00"),
+                    method="cash",
+                    kind="deposit",
+                    status="paid",
+                    paid_at=datetime.combine(TODAY, datetime.min.time()),
+                    recorded_by=built.counter.user_id,
+                    created_at=datetime.combine(TODAY, datetime.min.time()),
+                )
+            )
+
+        queries = []
+
+        def before_cursor_execute(
+            _conn, _cursor, statement, _params, _context, _many
+        ):
+            queries.append(statement)
+
+        event.listen(
+            context.engine, "before_cursor_execute", before_cursor_execute
+        )
+        try:
+            with context.reading() as session:
+                total = payment_service.takings(session)
+        finally:
+            event.remove(
+                context.engine,
+                "before_cursor_execute",
+                before_cursor_execute,
+            )
+        assert total == Decimal("15000.00")
+        assert len(queries) == 1
+        assert "sum(" in queries[0].lower()
+
+    def test_payment_ledger_is_capped(self, shell, branch):
+        from app.staff import prefs
+        from app.staff.pages.payments import _payment_rows
+
+        built, context = branch
+        limit = prefs.rows_limit(100)
+        with context.session() as session:
+            for index in range(limit + 20):
+                session.add(
+                    Payment(
+                        booking_id=built.overdue.booking_id,
+                        amount=Decimal("1.00"),
+                        method="cash",
+                        kind="rental",
+                        status="paid",
+                        paid_at=datetime.combine(TODAY, datetime.min.time()),
+                        recorded_by=built.counter.user_id,
+                        created_at=datetime.combine(
+                            TODAY, datetime.min.time()
+                        ),
+                    )
+                )
+
+        assert len(_payment_rows(context)) == limit
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+        caption = page.takings_caption.text().lower()
+        assert "latest" in caption
+        assert str(limit) in caption
+
     def test_both_payments_are_listed(self, shell, branch):
         page = PaymentsPage(shell)
         page.refresh()

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Booking, Payment
@@ -310,6 +310,7 @@ def list_payments(
     recorded_by: int | None = None,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
+    limit: int | None = None,
 ) -> list[Payment]:
     stmt = select(Payment).options(
         joinedload(Payment.booking).joinedload(Booking.vehicle),
@@ -328,10 +329,21 @@ def list_payments(
         stmt = stmt.where(Payment.created_at >= from_date)
     if to_date:
         stmt = stmt.where(Payment.created_at <= to_date)
-    return list(session.execute(stmt.order_by(Payment.created_at.desc())).scalars().unique())
+    stmt = stmt.order_by(Payment.created_at.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(session.execute(stmt).scalars().unique())
 
 
 def takings(session: Session, *, from_date: datetime | None = None, to_date: datetime | None = None) -> Decimal:
     # Held deposits are not revenue: only rental-kind takings count.
-    payments = list_payments(session, kind="rental", status="paid", from_date=from_date, to_date=to_date)
-    return money(sum((p.amount for p in payments), ZERO), field="takings")
+    stmt = select(func.coalesce(func.sum(Payment.amount), 0)).where(
+        Payment.kind == "rental",
+        Payment.status == "paid",
+    )
+    if from_date:
+        stmt = stmt.where(Payment.created_at >= from_date)
+    if to_date:
+        stmt = stmt.where(Payment.created_at <= to_date)
+    total = session.execute(stmt).scalar_one()
+    return money(total or 0, field="takings")
