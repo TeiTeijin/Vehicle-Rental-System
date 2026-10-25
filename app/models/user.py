@@ -12,11 +12,25 @@ class Users(Base):
     phone = Column(String(255))
     password_hash = Column(String(255), nullable=False)
     address = Column(String(255), nullable=False)
-    license_number = Column(String(12), nullable=False, unique=True)
+    #: PSGC codes and the street line the customer typed at sign-up. The
+    #: formatted `address` above stays the human-readable copy used by staff.
+    region_code = Column(String(9), nullable=True)
+    province_code = Column(String(9), nullable=True)
+    city_municipality_code = Column(String(9), nullable=True)
+    barangay_code = Column(String(9), nullable=True)
+    street_address = Column(String(255), nullable=True)
+    #: Online sign-up collects the guarantor instead of a licence number; the
+    #: branch records the licence when the customer first picks a vehicle up.
+    license_number = Column(String(12), nullable=True, unique=True)
     license_expiry = Column(Date, nullable=False)
     role = Column(Enum('customer', 'staff', 'admin'), nullable=False, default='customer')
     birthdate = Column(Date, nullable=True)
+    #: The old single-line contact is kept in sync with the guarantor columns
+    #: so the staff screens and receipts built before this change keep working.
     emergency_contact = Column(String(255), nullable=True)
+    guarantor_first_name = Column(String(120), nullable=True)
+    guarantor_last_name = Column(String(120), nullable=True)
+    guarantor_mobile = Column(String(20), nullable=True)
     #: Where the record came from. Walk-ins may never log in.
     source = Column(Enum('walk_in', 'online'), nullable=True)
     #: Deactivate instead of delete: bookings keep their FK forever.

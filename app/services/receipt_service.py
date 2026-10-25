@@ -69,7 +69,7 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
         Row(f"Name: {user.full_name}"),
         Row(f"Email: {user.email}"),
         Row(f"Phone: {user.phone}"),
-        Row(f"Licence: {user.license_number}"),
+        Row(f"Licence: {user.license_number or 'Not on file (verified at pickup)'}"),
         Row("", "blank"),
 
         Row("Vehicle", "heading"),
@@ -369,7 +369,7 @@ def statement_rows(session, customer) -> list[Row]:
         Row(f"Name: {customer.full_name}"),
         Row(f"Email: {customer.email}"),
         Row(f"Phone: {customer.phone or '-'}"),
-        Row(f"Licence: {customer.license_number}"),
+        Row(f"Licence: {customer.license_number or 'Not on file (verified at pickup)'}"),
         Row("", "blank"),
     ]
     bookings = (

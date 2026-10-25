@@ -25,6 +25,7 @@ class Vehicle(Base):
     color = Column(String(50), nullable=True)
     registration_expiry = Column(Date, nullable=True)
     insurance_expiry = Column(Date, nullable=True)
+
     #: When the vehicle was retired (deactivated). NULL while in service.
     #: History-safe: bookings keep their vehicle_id FK forever.
     retired_at = Column(Date, nullable=True)

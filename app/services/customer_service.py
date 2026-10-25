@@ -8,6 +8,7 @@ renters resolve to their existing row instead of piling up duplicates.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -70,6 +71,28 @@ def _validate_field_lengths(values: dict) -> None:
             _check_length(value.strip(), limit, field, label)
 
 
+#: Shape of the licence numbers this app stores: a letter followed by nine
+#: digits, shown as D03-1234-567 (the format the demo/seed rows already use,
+#: and the 12 characters USERS.license_number allows).
+LICENCE_EXAMPLE = "D03-1234-567"
+_LICENCE_COMPACT_RE = re.compile(r"^[A-Z]\d{9}$")
+
+
+def canonical_licence(raw: str | None) -> str | None:
+    """Return the canonical licence number, or None when it is not one.
+
+    Spaces and dashes are ignored, so ``d03 1234 567`` and ``D031234567``
+    both come back as ``D03-1234-567``. The strict shape is deliberate: the
+    licence box must not accept a random word.
+    """
+    compact = "".join(
+        ch for ch in (raw or "").upper() if ch not in " -"
+    )
+    if not _LICENCE_COMPACT_RE.match(compact):
+        return None
+    return f"{compact[:3]}-{compact[3:7]}-{compact[7:]}"
+
+
 def normalize_licence(raw: str | None) -> str:
     """Compare licences ignoring case, spaces and dashes (`D03-1234-567`
     matches `d031234567`). Stored values keep their original shape."""
@@ -87,13 +110,20 @@ def customers(session: Session) -> list[Users]:
     )
 
 
-def find_by_licence(session: Session, licence_number: str) -> Users | None:
+def find_by_licence(
+    session: Session, licence_number: str, *, any_role: bool = False
+) -> Users | None:
     """Exact licence match (normalized). The table is branch-scale, so the
-    normalization compares in Python over customer rows."""
+    normalization compares in Python over customer rows.
+
+    ``any_role=True`` also inspects staff rows: the UNIQUE column is global,
+    so customer sign-up must not collide with a staff member's licence.
+    """
     wanted = normalize_licence(licence_number)
     if not wanted:
         return None
-    for customer in customers(session):
+    rows = session.query(Users).all() if any_role else customers(session)
+    for customer in rows:
         if normalize_licence(customer.license_number) == wanted:
             return customer
     return None

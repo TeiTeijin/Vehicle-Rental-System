@@ -25,19 +25,26 @@ class CachedImage:
     url: str
 
 
-def _identity(make: str, model: str, year: int) -> str:
-    """A filesystem-safe key for one vehicle.
+def _identity(make: str, model: str, year: int, variant: str = "") -> str:
+    """A filesystem-safe key for one vehicle photo.
 
     The readable slug comes from the lowercased identity; the SHA-256 digest
     keeps two vehicles whose names slugify to the same text apart. The raw
     values are hashed, so `../../evil` cannot contribute a path component.
+    The optional variant keeps multiple photos of one vehicle apart.
     """
     make_text = str(make).strip()
     model_text = str(model).strip()
     year_text = str(year).strip()
-    raw = "\0".join((make_text.lower(), model_text.lower(), year_text))
+    raw_parts = [make_text.lower(), model_text.lower(), year_text]
+    slug_parts = [make_text, model_text, year_text]
+    if variant:
+        variant_text = str(variant).strip()
+        raw_parts.append(variant_text.lower())
+        slug_parts.append(variant_text)
+    raw = "\0".join(raw_parts)
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:_DIGEST_LENGTH]
-    slug = _UNSAFE.sub("-", f"{make_text}-{model_text}-{year_text}".lower()).strip("-")
+    slug = _UNSAFE.sub("-", "-".join(slug_parts).lower()).strip("-")
     slug = slug[:_SLUG_LIMIT].strip("-") or "vehicle"
     return f"{slug}-{digest}"
 
@@ -57,9 +64,11 @@ def _paths(key: str) -> tuple[Path, Path]:
     return bytes_path, meta_path
 
 
-def load(make: str, model: str, year: int) -> CachedImage | None:
+def load(
+    make: str, model: str, year: int, variant: str = ""
+) -> CachedImage | None:
     try:
-        bytes_path, meta_path = _paths(_identity(make, model, year))
+        bytes_path, meta_path = _paths(_identity(make, model, year, variant))
     except (OSError, ValueError):
         return None
     try:
@@ -81,11 +90,12 @@ def store(
     year: int,
     data: bytes,
     url: str,
+    variant: str = "",
 ) -> None:
     if not data:
         return
     try:
-        bytes_path, meta_path = _paths(_identity(make, model, year))
+        bytes_path, meta_path = _paths(_identity(make, model, year, variant))
     except (OSError, ValueError):
         return
     try:
@@ -102,6 +112,7 @@ def store(
                     "make": make,
                     "model": model,
                     "year": year,
+                    "variant": variant,
                     "url": url,
                 },
                 indent=2,

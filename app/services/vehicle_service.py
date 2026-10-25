@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
@@ -9,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Vehicle, Vehicle_Category, Vehicle_Media
-from app.services import media_service
+from app.services import media_service, vehicle_photos
 
 
 CC_BUCKETS: tuple[tuple[str, int | None, int | None], ...] = (
@@ -417,3 +418,402 @@ def list_showcase_vehicles(
     statuses: tuple[str, ...] = ("available",),
 ) -> list[ShowcaseVehicle]:
     return [to_showcase(v) for v in showcase_vehicle_records(session, category, statuses)]
+
+
+# =========================================================================
+#  SHOWROOM COPY  (customer app: app/ui/vehicle_details.py)
+#  -------------------------------------------------------------------------
+#  Display-only translations of stored values. The stored value is never
+#  changed -- "Petrol" stays "Petrol" in the database and reads "Gas
+#  (Unleaded)" on the vehicle page. Everything shown comes from the counter's
+#  own columns: the customer app keeps no vehicle copy of its own.
+# =========================================================================
+
+#: Fuel wording for the spec grid.
+FUEL_LABELS: dict[str, str] = {
+    "Petrol": "Gas (Unleaded)",
+    "Diesel": "Diesel",
+    "Electric": "Electric",
+    "Hybrid": "Hybrid",
+}
+
+#: What a NULL column reads as in the spec grid.
+NOT_GIVEN = "\u2014"
+
+#: The four spec boxes on the vehicle page, in reading order.
+SPEC_FIELDS: tuple[str, ...] = ("passengers", "transmission", "fuel", "body")
+
+
+def fuel_label(fuel_type: str | None) -> str:
+    if not fuel_type:
+        return NOT_GIVEN
+    return FUEL_LABELS.get(fuel_type, fuel_type)
+
+
+def transmission_label(transmission: str | None) -> str:
+    return transmission or NOT_GIVEN
+
+
+def passengers_label(vehicle: Vehicle) -> str:
+    return str(vehicle.seats) if vehicle.seats else NOT_GIVEN
+
+
+def body_label(vehicle: Vehicle) -> str:
+    """'MPV' -- the body style, falling back to the size class."""
+    explicit = (vehicle.body_style or "").strip()
+    if explicit:
+        return explicit
+    return (
+        VEHICLE_CLASS_LABELS.get((vehicle.vehicle_class or "").strip().lower(), "")
+        or NOT_GIVEN
+    )
+
+
+#: Kept as the name the vehicle page reads: what kind of vehicle this is.
+category_label = body_label
+
+
+def display_name(vehicle: Vehicle) -> str:
+    """'Toyota Innova' -- make and model, as one phrase."""
+    return f"{vehicle.make} {vehicle.model}".strip()
+
+
+def mileage_label(vehicle: Vehicle) -> str:
+    """'84,280 km'. Counter rows always carry a mileage; 0 means unrecorded."""
+    if not vehicle.mileage:
+        return NOT_GIVEN
+    return f"{vehicle.mileage:,} km"
+
+
+def spec_values(vehicle: Vehicle) -> dict[str, str]:
+    """The 2x2 spec grid: caption key -> value, straight from the row."""
+    return {
+        "passengers": passengers_label(vehicle),
+        "transmission": transmission_label(vehicle.transmission),
+        "fuel": fuel_label(vehicle.fuel_type),
+        "body": body_label(vehicle),
+    }
+
+
+def summary_line(vehicle: Vehicle) -> str:
+    """'MPV \u00b7 7 seats \u00b7 Diesel' -- the one-line description."""
+    parts = [
+        body_label(vehicle),
+        f"{vehicle.seats} seats" if vehicle.seats else "",
+        vehicle.fuel_type or "",
+    ]
+    return " \u00b7 ".join(part for part in parts if part and part != NOT_GIVEN)
+
+
+def showroom_vehicles(
+    session: Session, statuses: tuple[str, ...] = ("available",)
+) -> list[Vehicle]:
+    """Every vehicle the shop is offering, newest first, any category."""
+    return showcase_vehicle_records(session, category=None, statuses=statuses)
+
+
+def showroom_page(
+    session: Session,
+    *,
+    search: str = "",
+    limit: int = 24,
+    offset: int = 0,
+    statuses: tuple[str, ...] = ("available",),
+) -> list[tuple[Vehicle, str | None]]:
+    """One page of the showroom grid: (vehicle, cached photo url or None).
+
+    The catalog is 1000+ rows on a live database, so the browse page never
+    loads it whole: it pages with `limit`/`offset` and searches server-side.
+    """
+    filters = VehicleFilter(search=(search or "").strip() or None)
+    return showcase_vehicle_rows(
+        session,
+        category=None,
+        statuses=statuses,
+        limit=limit,
+        offset=offset,
+        filters=filters,
+    )
+
+
+def showroom_count(
+    session: Session, *, search: str = "", statuses: tuple[str, ...] = ("available",)
+) -> int:
+    """How many vehicles the same search would page through."""
+    filters = VehicleFilter(search=(search or "").strip() or None)
+    query = session.query(func.count(Vehicle.vehicle_id))
+    if statuses:
+        query = query.filter(Vehicle.status.in_(statuses))
+    if not filters.is_empty():
+        query = _apply_filter(query, filters)
+    return int(query.scalar() or 0)
+
+
+# =========================================================================
+#  SHOWROOM DASHBOARD  (app/ui/home.py)
+#  -------------------------------------------------------------------------
+#  The landing page shows the showroom as a hero plus shelves ("Best cars
+#  for 4 seaters", "Popular cars for road trips", and the rest below).
+#  The available fleet is under a thousand rows, so one pass over it feeds
+#  every shelf, the type chips and the search -- the page never runs ten
+#  queries to draw ten rows, and paging "See all" touches no database.
+# =========================================================================
+
+#: "Best cars for 4 seaters" -- in rental terms a four-seater is the usual
+#: four/five-seat car (SEAT_COUNTS' 4 and 5), not the two-seat coupe.
+SHOP_FOUR_SEATS: tuple[int, ...] = (4, 5)
+
+#: Where the family shelf starts.
+SHOP_FAMILY_SEATS = 7
+
+#: Bodies that make a good road trip.
+SHOP_ROADTRIP_BODIES: frozenset[str] = frozenset({"SUV", "MPV", "Crossover"})
+
+#: The working-fleet size classes.
+SHOP_WORK_CLASSES: frozenset[str] = frozenset({"van", "pickup", "truck"})
+
+#: How many cards one shelf shows before its "See all".
+SHOP_ROW_SIZE = 12
+
+
+@dataclass(frozen=True)
+class ShopVehicle:
+    """A showroom row reduced to plain values the customer pages can keep.
+
+    The dashboard is built from one snapshot taken when the window opens;
+    nothing here is session-bound, so pages hold it for as long as they live.
+    """
+
+    vehicle_id: int
+    make: str
+    model: str
+    year: int
+    name: str
+    meta: str
+    rate: Decimal
+    status: str
+    body: str
+    vehicle_class: str
+    seats: int | None
+    transmission: str | None
+    fuel_type: str | None
+    category: str | None
+    plate_number: str | None
+    photo_ref: vehicle_photos.VehicleRef
+
+    @property
+    def eyebrow(self) -> str:
+        """'TOYOTA / MPV / 2026' -- the hero's small caption."""
+        parts = [self.make]
+        if self.body and self.body != NOT_GIVEN:
+            parts.append(self.body)
+        parts.append(str(self.year))
+        return " / ".join(parts).upper()
+
+    @property
+    def specs(self) -> str:
+        """'7 seats \u00b7 Automatic \u00b7 Diesel' -- the hero's spec line."""
+        parts: list[str] = []
+        if self.seats:
+            parts.append(f"{self.seats} seats")
+        if self.transmission:
+            parts.append(self.transmission)
+        if self.fuel_type:
+            parts.append(fuel_label(self.fuel_type))
+        return " \u00b7 ".join(parts)
+
+
+@dataclass(frozen=True)
+class ShopSection:
+    """One shelf: its name, the cards it shows, how many it holds."""
+
+    key: str
+    title: str
+    vehicles: tuple[ShopVehicle, ...]
+    total: int
+
+
+@dataclass(frozen=True)
+class ShopSectionSpec:
+    """A shelf's recipe: how to pick and order its vehicles."""
+
+    key: str
+    title: str
+    pick: Callable[[Sequence[ShopVehicle]], list[ShopVehicle]]
+
+
+def _pick_four(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if (item.seats or 0) in SHOP_FOUR_SEATS]
+
+
+def _pick_roadtrip(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if (item.body or "") in SHOP_ROADTRIP_BODIES]
+
+
+def _pick_family(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if (item.seats or 0) >= SHOP_FAMILY_SEATS]
+
+
+def _pick_city(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if (item.vehicle_class or "").lower() == "small"]
+
+
+def _pick_automatic(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if item.transmission == "Automatic"]
+
+
+def _pick_budget(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    # Cars only: the two-wheeler shelf has the cheap scooters already.
+    cars = (
+        item for item in items if (item.vehicle_class or "").lower() != "motorcycle"
+    )
+    return sorted(cars, key=lambda item: (item.rate, item.vehicle_id))
+
+
+def _pick_work(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if (item.vehicle_class or "").lower() in SHOP_WORK_CLASSES]
+
+
+def _pick_premium(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    # The top of the SUV range, not the work trucks (they cost more per day).
+    suvs = (item for item in items if (item.vehicle_class or "").lower() == "suv")
+    return sorted(suvs, key=lambda item: (-item.rate, item.vehicle_id))
+
+
+def _pick_motorcycles(items: Sequence[ShopVehicle]) -> list[ShopVehicle]:
+    return [item for item in items if (item.category or "") == "Motorcycle"]
+
+
+#: The shelves, in the order the page shows them. The snapshot already
+#: arrives newest first, so most recipes only filter -- the two that sort
+#: (budget, premium) say so on purpose.
+SHOP_SECTIONS: tuple[ShopSectionSpec, ...] = (
+    ShopSectionSpec("four_seaters", "Best cars for 4 seaters", _pick_four),
+    ShopSectionSpec("road_trips", "Popular cars for road trips", _pick_roadtrip),
+    ShopSectionSpec("family", "Seven seats and up for the family", _pick_family),
+    ShopSectionSpec("city", "Easy in the city", _pick_city),
+    ShopSectionSpec("automatic", "Automatic, zero hassle", _pick_automatic),
+    ShopSectionSpec("budget", "Ride for less", _pick_budget),
+    ShopSectionSpec("work", "Pickups and vans that work", _pick_work),
+    ShopSectionSpec("premium", "Premium picks", _pick_premium),
+    ShopSectionSpec("two_wheels", "Two wheels, less fuel", _pick_motorcycles),
+)
+
+
+def _to_shop_vehicle(vehicle: Vehicle) -> ShopVehicle:
+    return ShopVehicle(
+        vehicle_id=vehicle.vehicle_id,
+        make=vehicle.make or "",
+        model=vehicle.model or "",
+        year=int(vehicle.year or 0),
+        name=display_name(vehicle),
+        meta=summary_line(vehicle),
+        rate=Decimal(str(vehicle.daily_rate or 0)),
+        status=vehicle.status or "available",
+        body=body_label(vehicle),
+        vehicle_class=(vehicle.vehicle_class or "").strip(),
+        seats=vehicle.seats,
+        transmission=vehicle.transmission,
+        fuel_type=vehicle.fuel_type,
+        category=(
+            vehicle.category.category_name if vehicle.category is not None else None
+        ),
+        plate_number=vehicle.plate_number,
+        photo_ref=vehicle_photos.ref_for(vehicle),
+    )
+
+
+def shop_snapshot(
+    session: Session, statuses: tuple[str, ...] = ("available",)
+) -> list[ShopVehicle]:
+    """The whole available showroom, plain values, one query.
+
+    The customer pages keep this snapshot in memory; the live fleet is under
+    a thousand available rows, which is one round trip and a few hundred KB.
+    """
+    return [
+        _to_shop_vehicle(vehicle)
+        for vehicle in showroom_vehicles(session, statuses=statuses)
+    ]
+
+
+def shop_hero(
+    snapshot: Sequence[ShopVehicle], limit: int = 5
+) -> list[ShopVehicle]:
+    """The hero slides: the newest of each make, motorcycles aside."""
+    picks: list[ShopVehicle] = []
+    seen: set[str] = set()
+    for item in snapshot:
+        if (item.category or "") == "Motorcycle" or item.make in seen:
+            continue
+        seen.add(item.make)
+        picks.append(item)
+        if len(picks) >= limit:
+            break
+    return picks
+
+
+def shop_sections(
+    snapshot: Sequence[ShopVehicle], per_row: int = SHOP_ROW_SIZE
+) -> list[ShopSection]:
+    """Every shelf with something on it, in the order the page shows them."""
+    sections: list[ShopSection] = []
+    for spec in SHOP_SECTIONS:
+        picked = spec.pick(snapshot)
+        if picked:
+            sections.append(
+                ShopSection(
+                    key=spec.key,
+                    title=spec.title,
+                    vehicles=tuple(picked[:per_row]),
+                    total=len(picked),
+                )
+            )
+    return sections
+
+
+def body_section(name: str) -> ShopSectionSpec:
+    """A shelf keyed by one body style -- what the type chips open."""
+    body = name.strip()
+    return ShopSectionSpec(
+        key=f"body:{body}",
+        title=body,
+        pick=lambda items: [item for item in items if item.body == body],
+    )
+
+
+def shop_section_spec(key: str) -> ShopSectionSpec | None:
+    """The shelf recipe behind a key ('four_seaters', 'body:SUV', ...)."""
+    for spec in SHOP_SECTIONS:
+        if spec.key == key:
+            return spec
+    prefix, _, name = key.partition(":")
+    if prefix == "body" and name.strip():
+        return body_section(name)
+    return None
+
+
+def shop_body_types(snapshot: Sequence[ShopVehicle]) -> list[tuple[str, int]]:
+    """(body style, count) for the type chips, the common ones first."""
+    counts = Counter(
+        item.body for item in snapshot if item.body and item.body != NOT_GIVEN
+    )
+    return sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+
+
+def search_snapshot(
+    snapshot: Sequence[ShopVehicle], needle: str
+) -> list[ShopVehicle]:
+    """The top bar's search, over the same snapshot the shelves came from."""
+    text = (needle or "").strip().lower()
+    if not text:
+        return list(snapshot)
+    return [
+        item
+        for item in snapshot
+        if text in item.make.lower()
+        or text in item.model.lower()
+        or text in (item.plate_number or "").lower()
+    ]
+
+

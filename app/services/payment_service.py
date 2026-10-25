@@ -359,6 +359,23 @@ def list_payments(
     return list(session.execute(stmt).scalars().unique())
 
 
+def payments_for_user(session: Session, user_id: int) -> list[Payment]:
+    """One customer's payment history, newest first.
+
+    The join is deliberate: a payment only belongs to a customer through its
+    booking. It also means a row with a missing booking can never leak into
+    somebody else's tab.
+    """
+    stmt = (
+        select(Payment)
+        .join(Payment.booking)
+        .options(joinedload(Payment.booking).joinedload(Booking.vehicle))
+        .where(Booking.user_id == user_id)
+        .order_by(Payment.created_at.desc(), Payment.payment_id.desc())
+    )
+    return list(session.execute(stmt).scalars().unique())
+
+
 def takings(session: Session, *, from_date: datetime | None = None, to_date: datetime | None = None) -> Decimal:
     # Held deposits are not revenue: only rental-kind takings count.
     stmt = select(func.coalesce(func.sum(Payment.amount), 0)).where(

@@ -103,3 +103,663 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
 #primaryButton:disabled { background: @btn_disabled; color: rgba(255, 255, 255, 140); }
 
 #divider { background: @card_border; }
+
+/* =========================================================================
+   CUSTOMER SCREENS  (app/ui/main_window.py and the pages it hosts)
+   ========================================================================= */
+
+/* ---- page shells ---- */
+#page, #pageBody { background: @bg_cream; }
+
+/* ---- top bar ---- */
+#navbar {
+    background: @surface;
+    border-bottom: 1px solid @line;
+}
+#navSection { background: transparent; }
+#navBrand { color: @text_dark; font-size: 13pt; font-weight: 700; }
+
+#navItem {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 2px;
+    color: @text_muted;
+    font-size: 11pt;
+    font-weight: 700;
+}
+#navItem:hover { color: @text_dark; border-bottom: 2px solid @line_strong; }
+#navItem:checked { color: @text_dark; border-bottom: 2px solid @text_dark; }
+
+#navSearch {
+    background: @surface_soft;
+    border: 1px solid @line;
+    border-radius: 18px;
+    padding: 8px 14px;
+    color: @text_dark;
+    font-size: 10pt;
+}
+#navSearch:focus { border: 1px solid @gold; background: @surface; }
+
+#notifButton {
+    background: transparent;
+    border: 1px solid @line;
+    border-radius: 20px;
+    padding: 0;
+}
+#notifButton:hover {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+}
+#notifButton[unread="true"] {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+}
+
+#authButton {
+    background: @bg_dark;
+    border: 1px solid @bg_dark;
+    border-radius: 20px;
+    padding: 0 18px;
+    color: @text_on_dark;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#authButton:hover { background: @btn_hover; }
+#authButton[authenticated="true"] {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+    border-radius: 20px;
+    color: @text_dark;
+    /* A perfect circle around the account avatar, not a text button. */
+    padding: 0;
+}
+#authButton[authenticated="true"]:hover {
+    background: @surface;
+    border-color: @gold;
+}
+
+/* ---- account popup (app/ui/account_popup.py) ---- */
+#accountPopup { background: transparent; }
+#accountPanel {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 20px;
+}
+#accountAvatar {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+    border-radius: 24px;
+}
+#accountName { color: @text_dark; font-size: 12pt; font-weight: 700; }
+#accountEmail { color: @text_muted; font-size: 9pt; }
+#accountClose {
+    background: transparent;
+    border: none;
+    border-radius: 14px;
+    padding: 2px;
+}
+#accountClose:hover { background: @panel_tan_soft; }
+#accountDivider { background: @line; }
+#accountSection {
+    color: @text_muted;
+    font-size: 8pt;
+    font-weight: 700;
+    padding-top: 2px;
+}
+#accountAction {
+    background: @surface_soft;
+    border: 1px solid @line;
+    border-radius: 14px;
+}
+#accountAction:hover {
+    background: @panel_tan_soft;
+    border-color: @line_strong;
+}
+#accountAction[danger="true"] {
+    background: #FDF7F5;
+    border-color: #F0DDD7;
+}
+#accountAction[danger="true"]:hover {
+    background: @danger_soft;
+    border-color: #E5B8AD;
+}
+#accountActionIcon {
+    background: @panel_tan_soft;
+    border-radius: 18px;
+}
+#accountActionIcon[danger="true"] { background: @danger_soft; }
+#accountActionTitle { color: @text_dark; font-size: 10pt; font-weight: 700; }
+#accountActionTitle[danger="true"] { color: @danger; }
+#accountActionSubtitle { color: @text_muted; font-size: 9pt; }
+#accountActionArrow { background: transparent; }
+
+/* ---- native menus kept for any older popup ---- */
+QMenu {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 6px;
+}
+QMenu::item {
+    background: transparent;
+    color: @text_dark;
+    padding: 8px 28px 8px 12px;
+    border-radius: 6px;
+}
+QMenu::item:selected { background: @panel_tan_soft; }
+QMenu::item:disabled { color: @text_muted; }
+QMenu::separator {
+    height: 1px;
+    background: @line;
+    margin: 6px 8px;
+}
+
+/* ---- notifications (app/ui/notifications.py) ---- */
+#notificationPopup { background: transparent; }
+#notificationPanel {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#notificationTitle { color: @text_dark; font-size: 15pt; font-weight: 700; }
+#notificationSubtitle { color: @text_muted; font-size: 9pt; }
+#notificationCount {
+    background: @panel_tan_soft;
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 2px 8px;
+    color: @text_dark;
+    font-size: 8pt;
+    font-weight: 700;
+}
+#notificationClose {
+    background: transparent;
+    border: none;
+    border-radius: 14px;
+    padding: 0;
+}
+#notificationClose:hover { background: @panel_tan_soft; }
+#notificationDivider { background: @line; border: none; }
+
+#notificationItem {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+}
+#notificationItem:hover {
+    background: @surface_soft;
+    border: 1px solid @line;
+}
+#notificationItem[unread="true"] {
+    background: @panel_tan_soft;
+    border: 1px solid @line;
+}
+#notificationIcon {
+    background: @surface_soft;
+    border: 1px solid @line;
+    border-radius: 17px;
+}
+#notificationIcon[kind="pickup"] { background: @amber_soft; border-color: #e8d7b5; }
+#notificationIcon[kind="pending"] { background: @amber_soft; border-color: #e8d7b5; }
+#notificationIcon[kind="success"] { background: @green_soft; border-color: #cfe3d3; }
+#notificationIcon[kind="ongoing"] { background: @panel_tan_soft; border-color: @line_strong; }
+#notificationIcon[kind="completed"] { background: @surface_soft; border-color: @line; }
+#notificationItemTitle { color: @text_dark; font-size: 10pt; font-weight: 700; }
+#notificationItemBody { color: @text_muted; font-size: 9pt; }
+#notificationItemMeta { color: @muted_soft; font-size: 8pt; }
+
+#notificationEmptyIcon {
+    background: @green_soft;
+    border: 1px solid #cfe3d3;
+    border-radius: 22px;
+}
+#notificationEmptyTitle { color: @text_dark; font-size: 11pt; font-weight: 700; }
+#notificationEmptyBody { color: @text_muted; font-size: 9pt; }
+
+/* ---- account information (app/ui/profile.py) ---- */
+#profileHeader {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#profileAvatar {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+    border-radius: 39px;
+}
+#profileName { color: @text_dark; font-size: 23pt; font-weight: 700; }
+#profileEmail { color: @text_muted; font-size: 11pt; }
+#profileMeta { color: @text_muted; font-size: 9pt; }
+
+#profileTabRow {
+    background: transparent;
+    border-bottom: 1px solid @line;
+}
+#profileTab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 3px;
+    color: @text_muted;
+    font-size: 10pt;
+    font-weight: 700;
+}
+#profileTab:hover { color: @text_dark; border-bottom: 2px solid @line_strong; }
+#profileTab:checked { color: @text_dark; border-bottom: 2px solid @text_dark; }
+
+#profilePanel {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#profileCardTitle { color: @text_dark; font-size: 13pt; font-weight: 700; }
+#profileField { background: transparent; }
+#profileValue { color: @text_dark; font-size: 11pt; font-weight: 600; }
+#profileValue[tone="muted"] { color: @muted_soft; font-weight: 500; }
+#profileNote {
+    background: @panel_tan_soft;
+    border: 1px solid @line;
+    border-radius: 16px;
+}
+
+/* ---- cards and panels ---- */
+#panel, #overlayCard, #gridCard {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 6px;
+}
+/* The showroom card is the bubble: a softer, rounder box than the panels
+   behind the stepped booking screens. */
+#gridCard {
+    border-radius: 22px;
+}
+#gridCard:hover { border: 1px solid @gold; }
+#panelTan {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+    border-radius: 6px;
+}
+#photoFrame, #modelCanvas {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 14px;
+}
+#photoCanvas {
+    background: @surface;
+    border: none;
+    border-radius: 12px;
+    color: @muted_soft;
+    font-size: 10pt;
+}
+#photoCanvas[empty="true"] { color: @muted_soft; }
+/* The hero's photo: CarImages serves WebP cutouts, so no white plate. */
+#photoCutout {
+    background: transparent;
+    border: none;
+    color: @muted_soft;
+    font-size: 10pt;
+}
+
+/* ---- type ---- */
+#sectionTitle { color: @text_dark; font-size: 15pt; font-weight: 700; }
+#overline { color: @text_muted; font-size: 8pt; font-weight: 700; }
+#pageTitle { color: @text_dark; font-size: 34pt; font-weight: 700; }
+#pagePrice { color: @text_dark; font-size: 17pt; font-weight: 700; }
+#pageSummary { color: @text_muted; font-size: 11pt; }
+#gridName { color: @text_dark; font-size: 13pt; font-weight: 700; }
+#gridMeta { color: @text_muted; font-size: 10pt; }
+#gridPrice { color: @text_dark; font-size: 12pt; font-weight: 700; }
+#availabilityLine { color: @green; font-size: 13pt; font-weight: 700; }
+#valueCaption { color: @text_muted; font-size: 10pt; }
+#valueAmount { color: @text_dark; font-size: 10pt; font-weight: 600; }
+#valueCaption[strong="true"] { color: @text_dark; font-size: 11pt; font-weight: 700; }
+#valueAmount[strong="true"] { color: @text_dark; font-size: 14pt; font-weight: 700; }
+#hint[tone="danger"] { color: @danger; }
+#hint[tone="green"] { color: @green; }
+#hint[tone="amber"] { color: @amber; }
+
+/* ---- spec grid ---- */
+#specTile { background: @surface_soft; border: 1px solid @line; border-radius: 4px; }
+#specValue { color: @text_dark; font-size: 11pt; font-weight: 600; }
+#specIcon { background: @panel_tan_soft; border-radius: 17px; }
+
+/* ---- buttons ---- */
+#viewTab {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 2px;
+    padding: 9px 18px;
+    color: @text_muted;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#viewTab:hover { border-color: @line_strong; color: @text_dark; }
+#viewTab:checked { background: @panel_tan; border-color: @line_strong; color: @text_dark; }
+
+#pill {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 16px;
+    padding: 7px 16px;
+    color: @text_muted;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#pill:hover { border-color: @line_strong; color: @text_dark; }
+#pill:checked { background: @bg_dark; border-color: @bg_dark; color: @text_on_dark; }
+
+#ghostButton {
+    background: transparent;
+    border: 1px solid @line_strong;
+    border-radius: 2px;
+    padding: 10px 20px;
+    color: @text_dark;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#ghostButton:hover { background: @panel_tan_soft; }
+#ghostButton:disabled { border-color: @line; color: @muted_soft; }
+
+#textButton {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: @text_dark;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#textButton:hover { color: @gold; }
+
+#primaryButton[wide="true"] { padding: 14px 20px; }
+
+/* ---- status chips ---- */
+#statusChip {
+    border-radius: 12px;
+    padding: 5px 14px;
+    font-size: 8pt;
+    font-weight: 700;
+}
+#statusChip[tone="green"] { background: @green_soft; color: @green; }
+#statusChip[tone="amber"] { background: @amber_soft; color: @amber; }
+#statusChip[tone="red"] { background: @danger_soft; color: @danger; }
+#statusChip[tone="muted"] { background: @panel_tan_soft; color: @text_muted; }
+#statusChip[tone="dark"] { background: @bg_dark; color: @text_on_dark; }
+
+/* ---- booking step strip ---- */
+#stepStrip { background: transparent; }
+#stepItem { background: transparent; }
+#stepDot {
+    border-radius: 11px;
+    border: 1px solid @line_strong;
+    background: @surface;
+    color: @text_muted;
+    font-size: 9pt;
+    font-weight: 700;
+}
+#stepDot[state="current"], #stepDot[state="done"] {
+    background: @bg_dark;
+    border-color: @bg_dark;
+    color: @text_on_dark;
+}
+#stepLabel { color: @muted_soft; font-size: 9pt; font-weight: 700; }
+#stepLabel[state="current"] { color: @text_dark; }
+#stepLabel[state="done"] { color: @text_muted; }
+
+/* ---- calendar ---- */
+#calendar { background: @surface; border: 1px solid @line; border-radius: 6px; }
+#calMonth { color: @text_dark; font-size: 12pt; font-weight: 700; }
+#calNav { background: transparent; border: none; border-radius: 14px; }
+#calNav:hover { background: @panel_tan_soft; }
+#calWeekday { color: @muted_soft; font-size: 8pt; font-weight: 700; }
+#calDay {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 17px;
+    color: @text_dark;
+    font-size: 10pt;
+}
+#calDay:hover:enabled { background: @panel_tan_soft; border-color: @line_strong; }
+#calDay:checked { background: @bg_dark; border-color: @bg_dark; color: @text_on_dark; font-weight: 700; }
+#calDay:disabled { color: @line_strong; background: @surface_soft; }
+#calDay[today="true"] { border-color: @gold; }
+#calDay[today="true"]:checked { border-color: @bg_dark; }
+
+/* ---- overlay (sign-in gate, confirmation) ---- */
+#dimBackdrop { background: rgba(24, 21, 16, 150); }
+#overlayClose { background: transparent; border: none; border-radius: 14px; padding: 2px; }
+#overlayClose:hover { background: @panel_tan_soft; }
+#overlayTitle { color: @text_dark; font-size: 20pt; font-weight: 700; }
+#overlaySubtitle { color: @text_muted; font-size: 10pt; }
+#overlayNote { color: @text_muted; font-size: 9pt; }
+
+/* ---- password reset ---- */
+#successBanner {
+    background: @green_soft;
+    border: 1px solid #CFE3D3;
+    border-radius: 10px;
+}
+#successTitle { color: @green; font-size: 8pt; font-weight: 700; }
+
+/* ---- payment method radios ---- */
+#methodCard {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 6px;
+    padding: 12px 14px;
+}
+#methodCard:hover { border-color: @line_strong; }
+/* Selected methods go dark, matching the checkout guide. The child labels
+   carry their own `selected` property because Qt does not reliably re-polish
+   descendants when only the parent's dynamic property changes. */
+#methodCard[selected="true"] {
+    border: 1px solid @bg_dark;
+    background: @bg_dark;
+}
+#methodCard[selected="true"]:hover { border-color: @bg_dark; }
+#methodTitle { color: @text_dark; font-size: 11pt; font-weight: 700; }
+#methodTitle[selected="true"] { color: @text_on_dark; }
+#methodNote { color: @text_muted; font-size: 9pt; }
+#methodNote[selected="true"] { color: @text_on_dark_muted; }
+#methodLogo {
+    background: #FFFFFF;
+    border: 1px solid @line;
+    border-radius: 8px;
+}
+#methodLogo[selected="true"] { border-color: #3B362C; }
+#gcashQr {
+    background: #FFFFFF;
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 6px;
+}
+#gcashQr:hover { border-color: @gold; }
+
+/* ---- fixed-size GCash QR preview ---- */
+#qrFullscreen { background: #17140F; }
+#qrFullscreenTitle { color: #FFFFFF; font-size: 22pt; font-weight: 700; }
+#qrFullscreenSubtitle { color: rgba(255, 255, 255, 175); font-size: 10pt; }
+#qrFullscreenClose {
+    background: rgba(255, 255, 255, 18);
+    border: 1px solid rgba(255, 255, 255, 40);
+    border-radius: 19px;
+}
+#qrFullscreenClose:hover {
+    background: rgba(255, 255, 255, 34);
+    border-color: rgba(255, 255, 255, 70);
+}
+#qrFullscreenCard {
+    background: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 18px;
+}
+#qrFullscreenImage { background: #FFFFFF; }
+#qrFullscreenFooter { color: rgba(255, 255, 255, 150); font-size: 9pt; }
+
+/* ---- booking summary bar ---- */
+#summaryBar {
+    background: @bg_dark;
+    border: none;
+    border-radius: 6px;
+}
+#summaryBar QLabel { background: transparent; }
+#summaryLabel { color: @text_on_dark_muted; font-size: 8pt; font-weight: 700; }
+#summaryValue { color: @text_on_dark; font-size: 12pt; font-weight: 700; }
+
+/* ---- empty states ---- */
+#emptyState {
+    background: @surface;
+    border: 1px dashed @line_strong;
+    border-radius: 14px;
+    color: @text_muted;
+    font-size: 11pt;
+}
+
+/* ---- screen 3: pickup / return cards ---- */
+#momentCard {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 6px;
+}
+#momentCard:hover { border-color: @line_strong; }
+#momentCard[focused="true"] {
+    border: 1px solid @gold;
+    background: @panel_tan_soft;
+}
+#momentDate { color: @text_dark; font-size: 16pt; font-weight: 700; }
+#rentalDuration { color: @text_dark; font-size: 14pt; font-weight: 700; }
+#comboCaption { color: @muted_soft; font-size: 8pt; font-weight: 700; }
+
+/* ---- combo boxes (branch and time pickers) ---- */
+QComboBox {
+    background: #FFFFFF;
+    border: 1px solid @input_border;
+    border-radius: 2px;
+    padding: 8px 10px;
+    color: @text_dark;
+    font-size: 11pt;
+}
+QComboBox:focus { border: 1px solid @gold; }
+QComboBox:disabled { background: @surface_soft; border-color: @line; color: @muted_soft; }
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    border: none;
+    width: 26px;
+}
+QComboBox::down-arrow { image: url(@chevron); width: 12px; height: 12px; }
+QComboBox::down-arrow:disabled { image: none; }
+QComboBox QAbstractItemView {
+    background: #FFFFFF;
+    border: 1px solid @input_border;
+    color: @text_dark;
+    outline: none;
+    selection-background-color: @bg_dark;
+    selection-color: @text_on_dark;
+}
+/* Editable combos (searchable province / municipality in sign-up step 2):
+   the combo itself is the field, so its line edit must be invisible inside. */
+QComboBox QLineEdit {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: @text_dark;
+    font-size: 11pt;
+}
+QComboBox QLineEdit:focus { border: 0; }
+QComboBox[state="ok"] { border: 1px solid @success; }
+QComboBox[state="error"] { border: 1px solid @danger; }
+
+/* ---- the bookings list ---- */
+#bookingCard {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 14px;
+}
+#bookingCard:hover { border-color: @line_strong; }
+#bookingRef { color: @text_dark; font-size: 13pt; font-weight: 700; }
+#bookingTotal { color: @text_dark; font-size: 13pt; font-weight: 700; }
+#bookingWindow { color: @text_dark; font-size: 11pt; font-weight: 600; }
+#bookingMeta { color: @text_muted; font-size: 10pt; }
+#pillRow { background: transparent; }
+
+/* ---- the payments list ---- */
+#paymentCard {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#paymentCard:hover { border-color: @line_strong; }
+#paymentAmount { color: @text_dark; font-size: 16pt; font-weight: 700; }
+
+/* ---- showroom dashboard (app/ui/home.py) ---- */
+/* The hero sits straight on the cream page: no card, no photo plate -- the
+   car is a transparent cutout over the giant name (see HeroCarousel). */
+#hero, #heroStage { background: transparent; }
+#heroEyebrow { color: @text_muted; font-size: 8pt; font-weight: 700; }
+#heroName { background: transparent; color: @hero_name; }
+#heroPrice { color: @text_dark; font-size: 16pt; font-weight: 700; }
+#heroSpecs { color: @text_muted; font-size: 10pt; }
+#heroArrow {
+    background: @surface;
+    border: 1px solid @line_strong;
+    border-radius: 23px;
+}
+#heroArrow:hover { border-color: @gold; background: @panel_tan_soft; }
+
+#shelf { background: transparent; }
+#shelfArrow {
+    background: @surface;
+    border: 1px solid @line_strong;
+    border-radius: 18px;
+}
+#shelfArrow:hover { border-color: @gold; background: @panel_tan_soft; }
+#shelfArrow:disabled { border-color: @line; background: @surface_soft; }
+
+/* ---- scrollbars: a thin sand line, not the platform's grey chrome ---- */
+/* The margins keep the rounded handle off the window edge and off the top
+   and bottom of the track -- without them its corners read as cropped. */
+QScrollBar:vertical {
+    background: transparent;
+    width: 14px;
+    margin: 6px 3px 6px 3px;
+}
+QScrollBar::handle:vertical {
+    background: @line_strong;
+    border-radius: 4px;
+    min-height: 42px;
+}
+QScrollBar::handle:vertical:hover { background: @gold; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 14px;
+    margin: 3px 6px 3px 6px;
+}
+QScrollBar::handle:horizontal {
+    background: @line_strong;
+    border-radius: 4px;
+    min-width: 42px;
+}
+QScrollBar::handle:horizontal:hover { background: @gold; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical,
+QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
+    background: none;
+    width: 0;
+    height: 0;
+}

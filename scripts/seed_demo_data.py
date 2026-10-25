@@ -241,6 +241,9 @@ def _make_customers(
     customers = []
     for i in range(count):
         name, email, phone, address = _person(rng, i)
+        guarantor_first = FIRST_NAMES[(i * 5 + 2) % len(FIRST_NAMES)]
+        guarantor_last = LAST_NAMES[(i * 11 + 4) % len(LAST_NAMES)]
+        guarantor_mobile = f"09{200000000 + i:09d}"
         if i % 17 == 3:
             expiry = today + timedelta(days=rng.randint(5, 60))   # expiring soon
         elif i % 23 == 7:
@@ -256,6 +259,12 @@ def _make_customers(
                 address=address,
                 license_number=f"LC{i + 1:07d}",
                 license_expiry=expiry,
+                guarantor_first_name=guarantor_first,
+                guarantor_last_name=guarantor_last,
+                guarantor_mobile=guarantor_mobile,
+                emergency_contact=(
+                    f"{guarantor_first} {guarantor_last} - {guarantor_mobile}"
+                ),
                 role="customer",
                 birthdate=date(1990 + (i % 15), (i % 12) + 1, (i % 27) + 1),
                 source="online" if i % 3 == 0 else "walk_in",
