@@ -185,9 +185,13 @@ class StaffShell(QMainWindow):
 
         widget = self._page_for(spec)
         try:
-            refresh = getattr(widget, "refresh", None)
-            if callable(refresh):
-                refresh()
+            refresh_async = getattr(widget, "refresh_async", None)
+            if callable(refresh_async):
+                refresh_async()
+            else:
+                refresh = getattr(widget, "refresh", None)
+                if callable(refresh):
+                    refresh()
         except AccessDenied as exc:
             blocking_error(self, exc, title="Not available")
             return False
@@ -295,6 +299,13 @@ class StaffShell(QMainWindow):
         if spec is None or not spec.auto_refresh:
             return
         widget = self._page_widgets.get(spec.key)
+        refresh_async = getattr(widget, "refresh_async", None)
+        if callable(refresh_async):
+            try:
+                refresh_async()
+            except Exception:  # noqa: BLE001
+                pass
+            return
         refresh = getattr(widget, "refresh", None)
         if not callable(refresh):
             return

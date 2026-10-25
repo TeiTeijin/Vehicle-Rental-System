@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **6/11 tasks complete**.
+- Performance work: **7/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -468,11 +468,11 @@ git push origin staff-audit-remediation
 - Consumes: `dashboard_service.collect`, existing worker pool.
 - Produces: an async dashboard refresh that shows the skeleton/current values until the figures land; cached for the configured refresh interval.
 
-- [ ] **Step 1: Write the failing async test**
+- [x] **Step 1: Write the failing async test**
 
 Add a test that monkeypatches `dashboard_service.collect` to block briefly, calls `page.refresh()`, and asserts the call returns before the figures land and the GUI remains responsive.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py -k "async" -v
@@ -480,11 +480,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.
 
 Expected: FAIL because `refresh()` calls `collect()` synchronously.
 
-- [ ] **Step 3: Use the worker pool and a generation guard**
+- [x] **Step 3: Use the worker pool and a generation guard**
 
-Move the `collect()` call into the shared loader pool, emit the figures back to the GUI thread, and ignore stale generations. Keep a short cache keyed by the configured `behavior/dashboard_refresh_ms`; invalidate on explicit refresh.
+Move the `collect()` call into the shared loader pool, emit the figures back to the GUI thread, and ignore stale generations. Keep a short cache keyed by the configured `behavior/dashboard_refresh_ms`; invalidate on explicit refresh. The shell calls `refresh_async()`; `refresh()` stays synchronous for tests and explicit reloads.
 
-- [ ] **Step 4: Run the dashboard tests**
+- [x] **Step 4: Run the dashboard tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py -v
@@ -492,10 +492,10 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.
 
 Expected: PASS; existing figures and chart behavior are unchanged.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
-git add plan.md app/staff/pages/dashboard.py tests/test_staff_dashboard.py
+git add plan.md app/staff/pages/dashboard.py app/staff/shell.py tests/test_staff_dashboard.py
 git commit -m "perf: load the dashboard off the GUI thread"
 git push origin staff-audit-remediation
 ```
@@ -724,7 +724,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 4: Outstanding aggregate + cap
 - [x] Task 5: Explicit caps
 - [x] Task 6: Customers SQL filters + cap
-- [ ] Task 7: Dashboard async
+- [x] Task 7: Dashboard async
 - [ ] Task 8: Reports batched
 - [ ] Task 9: Composite indexes
 - [ ] Task 10: Query guardrails

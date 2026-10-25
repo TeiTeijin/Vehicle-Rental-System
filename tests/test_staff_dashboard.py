@@ -1016,6 +1016,36 @@ class TestRoles:
         assert not hasattr(page, "strip")
         assert not hasattr(page, "_strip_tiles")
 
+    def test_async_refresh_returns_before_collect_finishes(
+        self, shell, branch, monkeypatch
+    ):
+        import threading
+        import time
+
+        import app.staff.pages.dashboard as module
+        from app.staff.workers import loader_pool
+
+        started = threading.Event()
+        release = threading.Event()
+        real = module.dashboard_service.collect
+
+        def slow_collect(*args, **kwargs):
+            started.set()
+            release.wait(5)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(module.dashboard_service, "collect", slow_collect)
+        page = DashboardPage(shell, animate=False)
+        begin = time.perf_counter()
+        page.refresh_async()
+        elapsed = time.perf_counter() - begin
+        assert elapsed < 0.5
+        assert started.wait(2)
+        release.set()
+        loader_pool().waitForDone(5000)
+        QTest.qWait(50)
+        assert page._done_gen == page._load_gen
+
     def test_a_refresh_runs_every_card_query(self, shell, branch, monkeypatch):
         """Counted, not asserted by eye -- this is the gate that used to exist."""
         import app.staff.pages.dashboard as module

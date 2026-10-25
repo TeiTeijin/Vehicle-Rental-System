@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QRunnable, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
@@ -19,7 +20,7 @@ from PySide6.QtWidgets import (
 from sqlalchemy import func, select
 
 from app.services import dashboard_service
-from app.staff import theme
+from app.staff import prefs, theme
 from app.staff.cards import (
     Caption,
     Card,
@@ -52,6 +53,7 @@ from app.staff.metrics import (
     WIDE_CONTENT_W,
 )
 from app.staff.pages.base import StaffPage
+from app.staff.workers import emit_safely, loader_pool
 from app.utils.money import ZERO
 
 
@@ -164,6 +166,37 @@ class _CardGrid(QWidget):
             self._relayout()
 
 
+class _DashboardLoadSignals(QObject):
+    loaded = Signal(int, object)
+    failed = Signal(int, object)
+
+
+class _DashboardLoader(QRunnable):
+    """Collect dashboard figures off the GUI thread."""
+
+    def __init__(self, context, gen: int, signals: _DashboardLoadSignals) -> None:
+        super().__init__()
+        self._context = context
+        self._gen = gen
+        self._loaded = signals.loaded
+        self._failed = signals.failed
+
+    def run(self) -> None:
+        try:
+            with self._context.reading() as session:
+                figures = dashboard_service.collect(
+                    session,
+                    today=date.today(),
+                    weeks=dashboard_service.HEATMAP_WEEKS,
+                    recent=5,
+                    monthly=True,
+                )
+        except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
+            emit_safely(self._failed, self._gen, exc)
+        else:
+            emit_safely(self._loaded, self._gen, figures)
+
+
 class DashboardPage(StaffPage):
     PANEL = True
 
@@ -194,6 +227,15 @@ class DashboardPage(StaffPage):
 
         self._first_load = True
         self._animations_pending = False
+        self._pool = loader_pool()
+        self._load_signals = _DashboardLoadSignals(self)
+        self._load_signals.loaded.connect(self._on_async_loaded)
+        self._load_signals.failed.connect(self._on_async_failed)
+        self._load_gen = 0
+        self._done_gen = 0
+        self._last_figures = None
+        self._last_loaded_at = 0.0
+        self._load_error = None
 
     # -- card construction -------------------------------------------------
 
@@ -437,8 +479,8 @@ class DashboardPage(StaffPage):
     # -- data -------------------------------------------------------------
 
     def refresh(self) -> None:
+        """Synchronous refresh, kept for tests and explicit reloads."""
         super().refresh()
-
         today = date.today()
         with self.context.reading() as session:
             figures = dashboard_service.collect(
@@ -448,14 +490,50 @@ class DashboardPage(StaffPage):
                 recent=5,
                 monthly=True,
             )
+        self._apply_figures(figures)
 
+    def refresh_async(self) -> None:
+        """Refresh without blocking the GUI thread.
+
+        The shell uses this for navigation and the auto-refresh timer. A
+        recent result is reused for the configured refresh interval.
+        """
+        super().refresh()
+        ttl_ms = prefs.dashboard_refresh_ms()
+        if (
+            self._last_figures is not None
+            and ttl_ms > 0
+            and (time.monotonic() - self._last_loaded_at) * 1000 < ttl_ms
+        ):
+            self._apply_figures(self._last_figures)
+            return
+        self._load_gen += 1
+        self._pool.start(
+            _DashboardLoader(self.context, self._load_gen, self._load_signals)
+        )
+
+    def _on_async_loaded(self, gen: int, figures) -> None:
+        if gen != self._load_gen:
+            return
+        self._apply_figures(figures)
+        self._done_gen = gen
+
+    def _on_async_failed(self, gen: int, exc: BaseException) -> None:
+        if gen != self._load_gen:
+            return
+        self._load_error = exc
+        self._done_gen = gen
+
+    def _apply_figures(self, figures) -> None:
         self._fill_revenue(figures)
         self._fill_channels(figures)
         self._fill_activity(figures)
         self._fill_transactions(figures)
         self._fill_target(figures)
-
         self._first_load = False
+        self._last_figures = figures
+        self._last_loaded_at = time.monotonic()
+        self._done_gen = self._load_gen
 
     def _fill_revenue(self, figures) -> None:
         days = dict(figures.revenue_days)
