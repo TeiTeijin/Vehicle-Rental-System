@@ -31,7 +31,7 @@ from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
 from app.staff.widgets import confirm, toast
 from app.staff.workers import emit_safely, loader_pool
-from app.utils.money import ZERO
+from app.utils.money import ZERO, money
 from app.widgets.skeleton import Skeleton
 
 #: Licences inside this window are flagged, not treated as blocking.
@@ -70,37 +70,6 @@ def _licence_bucket(expiry: date | None, today: date, soon: date) -> str:
     return "valid"
 
 
-def _matches_customer(
-    customer: Users,
-    bucket: str,
-    blocked_text: str,
-    owed,
-    has_open: bool,
-    filtr: CustomerFilter,
-) -> bool:
-    if filtr.licence is not None and bucket != filtr.licence:
-        return False
-    if filtr.blocked_only and blocked_text != "Yes":
-        return False
-    if filtr.has_active and not has_open:
-        return False
-    if filtr.has_balance and owed <= ZERO:
-        return False
-    if filtr.flagged_only and not (customer.flag_reason or "").strip():
-        return False
-    needle = filtr.search.strip().lower()
-    if needle:
-        haystacks = [
-            customer.full_name or "",
-            customer.email or "",
-            customer.phone or "",
-            customer.license_number or "",
-        ]
-        if not any(needle in (hay or "").lower() for hay in haystacks):
-            return False
-    return True
-
-
 def _customer_rows(context, filtr: CustomerFilter):
     today = date.today()
     limit = prefs.rows_limit(100)
@@ -111,7 +80,50 @@ def _customer_rows(context, filtr: CustomerFilter):
                 session, "licence_expiring_days"
             )
         )
-        stmt = select(Users).where(Users.role == "customer")
+        rental_total = (
+            select(func.coalesce(func.sum(Booking.total_cost), 0))
+            .where(
+                Booking.user_id == Users.user_id,
+                Booking.status.in_(customer_service.BALANCE_STATUSES),
+            )
+            .correlate(Users)
+            .scalar_subquery()
+        )
+        penalty_total = (
+            select(func.coalesce(func.sum(Penalty.amount), 0))
+            .join(Booking, Penalty.booking_id == Booking.booking_id)
+            .where(
+                Booking.user_id == Users.user_id,
+                Booking.status.in_(customer_service.BALANCE_STATUSES),
+            )
+            .correlate(Users)
+            .scalar_subquery()
+        )
+        paid_total = (
+            select(func.coalesce(func.sum(Payment.amount), 0))
+            .join(Booking, Payment.booking_id == Booking.booking_id)
+            .where(
+                Booking.user_id == Users.user_id,
+                Booking.status.in_(customer_service.BALANCE_STATUSES),
+                Payment.status == "paid",
+                Payment.kind.in_(("rental", "deposit_applied")),
+            )
+            .correlate(Users)
+            .scalar_subquery()
+        )
+        balance_expr = rental_total + penalty_total - paid_total
+        rental_count = (
+            select(func.count(Booking.booking_id))
+            .where(Booking.user_id == Users.user_id)
+            .correlate(Users)
+            .scalar_subquery()
+        )
+
+        stmt = select(
+            Users,
+            balance_expr.label("balance"),
+            rental_count.label("rental_count"),
+        ).where(Users.role == "customer")
         if filtr.licence == "missing":
             stmt = stmt.where(Users.license_expiry.is_(None))
         elif filtr.licence == "expired":
@@ -153,67 +165,14 @@ def _customer_rows(context, filtr: CustomerFilter):
                 )
             )
         if filtr.has_balance:
-            rental_total = (
-                select(func.coalesce(func.sum(Booking.total_cost), 0))
-                .where(
-                    Booking.user_id == Users.user_id,
-                    Booking.status.in_(customer_service.BALANCE_STATUSES),
-                )
-                .correlate(Users)
-                .scalar_subquery()
-            )
-            penalty_total = (
-                select(func.coalesce(func.sum(Penalty.amount), 0))
-                .join(Booking, Penalty.booking_id == Booking.booking_id)
-                .where(
-                    Booking.user_id == Users.user_id,
-                    Booking.status.in_(customer_service.BALANCE_STATUSES),
-                )
-                .correlate(Users)
-                .scalar_subquery()
-            )
-            paid_total = (
-                select(func.coalesce(func.sum(Payment.amount), 0))
-                .join(Booking, Payment.booking_id == Booking.booking_id)
-                .where(
-                    Booking.user_id == Users.user_id,
-                    Booking.status.in_(customer_service.BALANCE_STATUSES),
-                    Payment.status == "paid",
-                    Payment.kind.in_(("rental", "deposit_applied")),
-                )
-                .correlate(Users)
-                .scalar_subquery()
-            )
-            stmt = stmt.where(
-                rental_total + penalty_total - paid_total > ZERO
-            )
+            stmt = stmt.where(balance_expr > ZERO)
 
-        customers = session.execute(
+        rows = []
+        for customer, owed, rentals in session.execute(
             stmt.order_by(Users.created_at.desc(), Users.user_id.desc()).limit(
                 limit
             )
-        ).scalars().all()
-        customer_ids = [customer.user_id for customer in customers]
-        owed_by_customer = customer_service.outstanding_by_customer(
-            session, customer_ids
-        )
-        open_by_customer = customer_service.open_bookings_by_customer(
-            session, customer_ids
-        )
-        rental_counts = (
-            dict(
-                session.execute(
-                    select(Booking.user_id, func.count(Booking.booking_id))
-                    .where(Booking.user_id.in_(customer_ids))
-                    .group_by(Booking.user_id)
-                ).all()
-            )
-            if customer_ids
-            else {}
-        )
-
-        rows = []
-        for customer in customers:
+        ).all():
             expiry = customer.license_expiry
             bucket = _licence_bucket(expiry, today, soon)
             if bucket == "missing":
@@ -229,7 +188,7 @@ def _customer_rows(context, filtr: CustomerFilter):
                 licence = f"Valid to {expiry:%d %b %Y}"
                 blocked = "-"
 
-            owed = owed_by_customer.get(customer.user_id, ZERO)
+            owed = money(owed or 0, field="balance")
             rows.append(
                 (
                     customer.full_name,
@@ -238,7 +197,7 @@ def _customer_rows(context, filtr: CustomerFilter):
                     customer.license_number or "-",
                     licence,
                     blocked,
-                    rental_counts.get(customer.user_id, 0),
+                    int(rentals or 0),
                     f"{owed:,.2f}",
                     (customer.source or "walk_in").replace("_", " ").title(),
                     (customer.flag_reason or "").strip() or "-",

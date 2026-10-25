@@ -2907,7 +2907,7 @@ class TestCustomersPage:
         with count_queries(context.engine) as queries:
             rows = _customer_rows(context, CustomerFilter())
         assert len(rows) >= 50
-        assert queries.count < 20, f"{queries.count} queries for 50 customers"
+        assert queries.count <= 2, f"{queries.count} queries for 50 customers"
 
     def test_duplicate_check_is_debounced(
         self, qapp, branch, monkeypatch

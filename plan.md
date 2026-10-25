@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **11/11 tasks complete**; follow-ups **0/3**.
+- Performance work: **11/11 tasks complete**; follow-ups **1/3**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Live indexes: all seven composite indexes were applied to MySQL and verified on 2026-10-25.
 - Follow-up correctness fix: payment search now runs in SQL before the 100-row cap (`90c2071`).
@@ -732,7 +732,7 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 | Payments ledger, latest 100 | 1 q / 7.6s (11,275 rows) | **1 q / 0.72s** | ≤2 q, <1s | Pass |
 | Takings total | full ledger load / 5.0s | **1 q / 0.53s** | 1 q, ~0.5s | Pass |
 | Outstanding, largest 100 | 37 q / 12.3s (4,499 rows) | **1 q / 1.03s** | ≤4 q, <1s | Close; 1.03s |
-| Customers, latest 100 | 7 q / 3.5s (304 rows) | **7 q / 3.33s** | ≤10 q, <1.5s | Queries pass, time misses |
+| Customers, latest 100 | 7 q / 3.5s (304 rows) | **2 q / 0.79s** | ≤10 q, <1.5s | Pass (Task 12) |
 | Dashboard collect | 5 q / 1.2s synchronous | **5 q / 2.64s, background** | non-blocking, ~1s | Non-blocking passes; time misses |
 | Inspections, latest 100 | 1 q / ~0.5s | **1 q / 1.48s** | unchanged | Environmental latency |
 | Maintenance, latest 100 | 1 q / ~0.5s | **1 q / 1.61s** | unchanged | Environmental latency |
@@ -740,10 +740,7 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 
 ### What still needs work
 
-- **Customers (3.33s):** the page is seven round trips: customers, settings,
-  three balance aggregates, open-booking flags, and rental counts. Combine the
-  three balance aggregates and the two booking maps into one query, or select
-  the balance/open/count expressions with the customer page query.
+- **Customers:** resolved in Task 12 — two queries, 0.79s live.
 - **Utilization (27.95s for all 1,012):** the query count is fixed, but the
   full-fleet report materializes every vehicle and every booking. Add a visible
   “top N”/page limit, or compute the report only for a selected category/date
@@ -764,11 +761,11 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 - Consumes: `_customer_rows`, `CustomerFilter`, `customer_service.BALANCE_STATUSES`, `customer_service.OPEN_STATUSES`.
 - Produces: the same customer row tuple with the balance and rental count selected as correlated expressions in the page query. The settings lookup plus the page query are the only two statements.
 
-- [ ] **Step 1: Tighten the query-count test**
+- [x] **Step 1: Tighten the query-count test**
 
 In `test_customer_page_load_is_not_n_plus_one`, change the assertion from `< 20` to `<= 2` and include the count in the failure message.
 
-- [ ] **Step 2: Run it and verify it fails**
+- [x] **Step 2: Run it and verify it fails**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "customer_page_load_is_not_n_plus_one" -v
@@ -776,11 +773,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: FAIL with seven queries.
 
-- [ ] **Step 3: Select the metrics with the page query**
+- [x] **Step 3: Select the metrics with the page query**
 
 Build `balance_expr` from the existing rental, penalty, and paid subqueries and add a correlated `COUNT(BOOKING)` scalar subquery. Select `Users`, the balance, and the rental count in one statement; use those values in the row loop. Keep `has_active` and `has_balance` as SQL filters and remove the per-page calls to `outstanding_by_customer` and `open_bookings_by_customer` from this loader. Those service functions remain for other callers.
 
-- [ ] **Step 4: Run the customer tests**
+- [x] **Step 4: Run the customer tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "customer" -q
@@ -788,7 +785,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; balances, rental counts, licence filters, and search outside the cap all still match.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/staff/pages/customers.py tests/test_staff_pages.py
@@ -903,7 +900,7 @@ git push origin staff-audit-remediation
 - [x] Task 9: Composite indexes
 - [x] Task 10: Query guardrails
 - [x] Task 11: Live re-measurement
-- [ ] Task 12: Customers two-query page
+- [x] Task 12: Customers two-query page
 - [ ] Task 13: Utilization load and cache
 - [ ] Task 14: Dashboard three-query collection
 
