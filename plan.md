@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **8/11 tasks complete**.
+- Performance work: **9/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -558,11 +558,11 @@ git push origin staff-audit-remediation
 - Consumes: the existing migration-script pattern.
 - Produces: idempotent MySQL indexes for the hot filters and joins.
 
-- [ ] **Step 1: Write failing migration tests**
+- [x] **Step 1: Write failing migration tests**
 
 Test the generated SQL and an execution against SQLite where supported. Assert the script is idempotent and refuses to run against the wrong database.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_migrate_performance_indexes.py -v
@@ -570,7 +570,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_migrate_performa
 
 Expected: FAIL because the migration script does not exist.
 
-- [ ] **Step 3: Add the indexes**
+- [x] **Step 3: Add the indexes**
 
 Add, with project-consistent names:
 
@@ -586,7 +586,7 @@ USERS(role, created_at)
 
 Do not add an index if an equivalent one already exists. Use `CREATE INDEX IF NOT EXISTS` only if the target MySQL version supports it; otherwise check `information_schema` first.
 
-- [ ] **Step 4: Run the migration tests**
+- [x] **Step 4: Run the migration tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_migrate_performance_indexes.py -v
@@ -594,10 +594,10 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_migrate_performa
 
 Expected: PASS; the script is safe to re-run.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
-git add plan.md scripts/migrate_performance_indexes.py tests/test_migrate_performance_indexes.py app/models
+git add plan.md scripts/migrate_performance_indexes.py tests/test_migrate_performance_indexes.py
 git commit -m "perf: add composite query indexes"
 git push origin staff-audit-remediation
 ```
@@ -726,7 +726,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 6: Customers SQL filters + cap
 - [x] Task 7: Dashboard async
 - [x] Task 8: Reports batched
-- [ ] Task 9: Composite indexes
+- [x] Task 9: Composite indexes
 - [ ] Task 10: Query guardrails
 - [ ] Task 11: Live re-measurement
 
