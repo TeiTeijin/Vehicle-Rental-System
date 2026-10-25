@@ -14,7 +14,7 @@ import pytest
 
 from app.models import Maintenance_Record, Vehicle
 from app.services import booking_service, maintenance_service
-from app.services.errors import StateError, ValidationError
+from app.services.errors import ConflictError, StateError, ValidationError
 from tests.conftest import TODAY
 
 
@@ -158,6 +158,124 @@ class TestCancel:
         maintenance_service.complete_maintenance(session, record, cost=100)
         with pytest.raises(StateError, match="completed"):
             maintenance_service.cancel_maintenance(session, record)
+
+
+class TestOdometer:
+    def test_start_rejects_a_reading_below_the_current_mileage(
+        self, session, vehicle
+    ):
+        from datetime import date
+
+        vehicle.mileage = 10_000
+        session.flush()
+        with pytest.raises(ValidationError, match="below the 10,000 km"):
+            maintenance_service.start_maintenance(
+                session,
+                vehicle,
+                description="Service",
+                start_date=date.today(),
+                odometer=9_000,
+            )
+
+    def test_start_allows_a_historical_reading(self, session, vehicle):
+        from datetime import date
+
+        vehicle.mileage = 10_000
+        session.flush()
+        record = maintenance_service.start_maintenance(
+            session,
+            vehicle,
+            description="Backfilled service",
+            start_date=date.today() - timedelta(days=30),
+            end_date=date.today() - timedelta(days=29),
+            odometer=5_000,
+        )
+        assert record.odometer == 5_000
+
+    def test_completion_rejects_a_reading_below_the_start_reading(
+        self, session, vehicle
+    ):
+        from datetime import date
+
+        record = maintenance_service.start_maintenance(
+            session,
+            vehicle,
+            description="Service",
+            start_date=date.today(),
+            status="in_progress",
+            odometer=10_200,
+        )
+        with pytest.raises(ValidationError, match="when the job started"):
+            maintenance_service.complete_maintenance(
+                session, record, cost=100, odometer=10_100
+            )
+
+    def test_completion_rejects_a_reading_below_the_current_mileage(
+        self, session, vehicle
+    ):
+        from datetime import date
+
+        record = maintenance_service.start_maintenance(
+            session,
+            vehicle,
+            description="Service",
+            start_date=date.today(),
+            status="in_progress",
+            odometer=10_200,
+        )
+        vehicle.mileage = 10_500
+        session.flush()
+        with pytest.raises(ValidationError, match="below the 10,500 km"):
+            maintenance_service.complete_maintenance(
+                session, record, cost=100, odometer=10_400
+            )
+
+
+class TestOpenEndedWorkshop:
+    def test_booking_reports_the_open_ended_window(self, session, customer, vehicle):
+        from datetime import date
+
+        start = date.today()
+        maintenance_service.start_maintenance(
+            session,
+            vehicle,
+            description="Open job",
+            start_date=start,
+            status="in_progress",
+        )
+        with pytest.raises(ConflictError, match="from"):
+            booking_service.create_booking(
+                session,
+                customer,
+                vehicle,
+                start + timedelta(days=1),
+                start + timedelta(days=3),
+            )
+
+    def test_extension_reports_the_open_ended_window(
+        self, session, customer, vehicle
+    ):
+        from datetime import date
+
+        start = date.today()
+        booking = booking_service.create_booking(
+            session,
+            customer,
+            vehicle,
+            start + timedelta(days=1),
+            start + timedelta(days=3),
+        )
+        maintenance_service.start_maintenance(
+            session,
+            vehicle,
+            description="Open job",
+            start_date=start,
+            status="in_progress",
+        )
+        with pytest.raises(ConflictError, match="from"):
+            booking_service.extend_booking(
+                session, booking, start + timedelta(days=5)
+            )
 
 
 class TestDueSoonAndSpend:

@@ -1162,7 +1162,7 @@ git push origin final-audit
 - Consumes: `maintenance_service.start_maintenance`, `complete_maintenance`, `cancel_maintenance`, `sync_vehicle_status`, `due_soon`, `spend_summary`.
 - Produces: verified maintenance lifecycle, vehicle blocking, costs, and reports.
 
-- [ ] **Step 1: Run the maintenance tests**
+- [x] **Step 1: Run the maintenance tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1171,7 +1171,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_staff_pages.py -q
 ```
 
-- [ ] **Step 2: Walk maintenance**
+- [x] **Step 2: Walk maintenance**
 
 Verify:
 - schedule maintenance with type, dates, estimate, shop, odometer
@@ -1182,17 +1182,17 @@ Verify:
 - cancellation keeps history and reason
 - costs and due-soon queries match reports
 
-- [ ] **Step 3: Verify booking conflicts**
+- [x] **Step 3: Verify booking conflicts**
 
 A vehicle in blocking maintenance must not be bookable for those dates. A completed/cancelled record must release it.
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S8` and the maintenance part of `X4`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md

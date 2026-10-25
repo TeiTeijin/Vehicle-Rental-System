@@ -164,6 +164,17 @@ def start_maintenance(
         )
     if odometer is not None and odometer < 0:
         raise ValidationError("Odometer cannot be negative.", field="odometer")
+    if (
+        odometer is not None
+        and day >= date.today()
+        and vehicle.mileage is not None
+        and odometer < vehicle.mileage
+    ):
+        raise ValidationError(
+            f"Odometer reading of {odometer:,} km is below the "
+            f"{vehicle.mileage:,} km already on record. Check the reading.",
+            field="odometer",
+        )
 
     record = Maintenance_Record(        vehicle_id=vehicle.vehicle_id,
         description=description.strip(),
@@ -224,6 +235,26 @@ def complete_maintenance(
     if odometer is not None and odometer < 0:
         raise ValidationError("Odometer cannot be negative.", field="odometer")
 
+    vehicle = record.vehicle
+    if odometer is not None:
+        floor = int(record.odometer or 0)
+        if odometer < floor:
+            raise ValidationError(
+                f"Odometer reading of {odometer:,} km is below the "
+                f"{floor:,} km recorded when the job started.",
+                field="odometer",
+            )
+        if (
+            done >= date.today()
+            and vehicle.mileage is not None
+            and odometer < vehicle.mileage
+        ):
+            raise ValidationError(
+                f"Odometer reading of {odometer:,} km is below the "
+                f"{vehicle.mileage:,} km already on record. Check the reading.",
+                field="odometer",
+            )
+
     record.status = "completed"
     record.end_date = done
     record.cost = value
@@ -233,7 +264,6 @@ def complete_maintenance(
     record.next_due_odometer = next_due_odometer
     session.flush()
 
-    vehicle = record.vehicle
     if odometer is not None and odometer > (vehicle.mileage or 0):
         vehicle.mileage = odometer
     sync_vehicle_status(session, vehicle)

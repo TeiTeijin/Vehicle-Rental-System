@@ -71,6 +71,13 @@ def deposit_for_vehicle(vehicle: Vehicle) -> Decimal:
 EXTENDABLE_STATUSES = ("pending", "confirmed", "ongoing")
 
 
+def _workshop_window(record) -> str:
+    """The shop window as staff read it; an open job has no end date."""
+    if record.end_date is None:
+        return f"from {record.start_date:%d %b %Y}"
+    return f"{record.start_date:%d %b} to {record.end_date:%d %b %Y}"
+
+
 def extension_quote(
     session: Session, booking: Booking, new_end_date: date
 ) -> tuple[Decimal, Decimal]:
@@ -111,8 +118,7 @@ def extension_quote(
     if workshop is not None:
         raise ConflictError(
             f"{vehicle.make} {vehicle.model} enters the workshop "
-            f"({workshop.start_date:%d %b} to {workshop.end_date:%d %b %Y}): "
-            f"{workshop.description}"
+            f"({_workshop_window(workshop)}): {workshop.description}"
         )
     old_total = money(booking.total_cost, field="total_cost")
     new_total = money(
@@ -393,8 +399,7 @@ def assert_available(
     if workshop is not None:
         raise ConflictError(
             f"{vehicle.make} {vehicle.model} is in the workshop "
-            f"({workshop.start_date:%d %b} to {workshop.end_date:%d %b %Y}): "
-            f"{workshop.description}"
+            f"({_workshop_window(workshop)}): {workshop.description}"
         )
 
     if vehicle.status in fleet_service.ALWAYS_BLOCKING_STATUSES:
