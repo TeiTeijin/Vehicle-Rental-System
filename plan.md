@@ -15,8 +15,9 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **9/11 tasks complete**.
+- Performance work: **10/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
+- Live indexes: all seven composite indexes were applied to MySQL and verified on 2026-10-25.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
 
@@ -615,19 +616,19 @@ git push origin staff-audit-remediation
 - Consumes: SQLAlchemy engine events.
 - Produces: a reusable query counter for tests and a development-only slow-query logger.
 
-- [ ] **Step 1: Write failing tests for the helper**
+- [x] **Step 1: Write failing tests for the helper**
 
 Test that the counter records statements, can be attached/removed from an engine, and that the slow-query logger only logs statements over the configured threshold.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py tests/test_report_service.py -k "query_metrics" -v
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_query_metrics.py -v
 ```
 
 Expected: FAIL because the helper does not exist.
 
-- [ ] **Step 3: Implement the helper and use it**
+- [x] **Step 3: Implement the helper and use it**
 
 Add a context manager:
 
@@ -639,7 +640,7 @@ def count_queries(engine):
 
 and a development logger gated by an environment variable such as `STAFF_SLOW_QUERY_MS`. Replace the ad-hoc listeners in the performance tests with the helper. Add query-count assertions to every page loader touched by this plan.
 
-- [ ] **Step 4: Run the page/report tests**
+- [x] **Step 4: Run the page/report tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py tests/test_report_service.py -v
@@ -647,10 +648,10 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py t
 
 Expected: PASS; every loader stays under its documented query budget.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
-git add plan.md app/staff/query_metrics.py tests/test_staff_pages.py tests/test_report_service.py app/staff/context.py
+git add plan.md app/staff/query_metrics.py tests/test_query_metrics.py tests/test_staff_pages.py tests/test_report_service.py
 git commit -m "test: guard staff page query counts"
 git push origin staff-audit-remediation
 ```
@@ -727,7 +728,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 7: Dashboard async
 - [x] Task 8: Reports batched
 - [x] Task 9: Composite indexes
-- [ ] Task 10: Query guardrails
+- [x] Task 10: Query guardrails
 - [ ] Task 11: Live re-measurement
 
 ## Resume Instructions for Another Device

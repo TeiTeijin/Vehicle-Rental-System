@@ -2075,9 +2075,8 @@ class TestFleetPage:
         assert "7" in caption
 
     def test_fleet_page_load_is_not_n_plus_one(self, branch):
-        from sqlalchemy import event
-
         from app.staff.pages.fleet import FleetFilter, _fleet_rows
+        from app.staff.query_metrics import count_queries
 
         _built, context = branch
         for index in range(40):
@@ -2088,26 +2087,10 @@ class TestFleetPage:
                 plate=f"LOAD-{index:03d}",
             )
 
-        queries = []
-
-        def before_cursor_execute(
-            _conn, _cursor, statement, _params, _context, _many
-        ):
-            queries.append(statement)
-
-        event.listen(
-            context.engine, "before_cursor_execute", before_cursor_execute
-        )
-        try:
+        with count_queries(context.engine) as queries:
             rows = _fleet_rows(context, FleetFilter())
-        finally:
-            event.remove(
-                context.engine,
-                "before_cursor_execute",
-                before_cursor_execute,
-            )
         assert len(rows) >= 40
-        assert len(queries) <= 5, f"{len(queries)} queries for the fleet list"
+        assert queries.count <= 5, f"{queries.count} queries for the fleet list"
 
     def test_every_car_is_listed(self, shell, branch):
         page = FleetPage(shell)
@@ -2742,6 +2725,7 @@ class TestCustomersPage:
     def test_customer_search_outside_cap(self, branch):
         from app.staff import prefs
         from app.staff.pages.customers import CustomerFilter, _customer_rows
+        from app.staff.query_metrics import count_queries
 
         _built, context = branch
         limit = prefs.rows_limit(100)
@@ -2897,9 +2881,8 @@ class TestCustomersPage:
         assert names == {"Ana Reyes"}
 
     def test_customer_page_load_is_not_n_plus_one(self, branch):
-        from sqlalchemy import event
-
         from app.staff.pages.customers import CustomerFilter, _customer_rows
+        from app.staff.query_metrics import count_queries
 
         _built, context = branch
         with context.session() as session:
@@ -2921,26 +2904,10 @@ class TestCustomersPage:
                     )
                 )
 
-        queries = []
-
-        def before_cursor_execute(
-            _conn, _cursor, statement, _params, _context, _many
-        ):
-            queries.append(statement)
-
-        event.listen(
-            context.engine, "before_cursor_execute", before_cursor_execute
-        )
-        try:
+        with count_queries(context.engine) as queries:
             rows = _customer_rows(context, CustomerFilter())
-        finally:
-            event.remove(
-                context.engine,
-                "before_cursor_execute",
-                before_cursor_execute,
-            )
         assert len(rows) >= 50
-        assert len(queries) < 20, f"{len(queries)} queries for 50 customers"
+        assert queries.count < 20, f"{queries.count} queries for 50 customers"
 
     def test_duplicate_check_is_debounced(
         self, qapp, branch, monkeypatch
@@ -3083,9 +3050,8 @@ class TestCustomersPage:
 
 class TestPaymentsPage:
     def test_takings_total_uses_one_aggregate_query(self, branch):
-        from sqlalchemy import event
-
         from app.services import payment_service
+        from app.staff.query_metrics import count_queries
 
         built, context = branch
         with context.session() as session:
@@ -3102,34 +3068,17 @@ class TestPaymentsPage:
                 )
             )
 
-        queries = []
-
-        def before_cursor_execute(
-            _conn, _cursor, statement, _params, _context, _many
-        ):
-            queries.append(statement)
-
-        event.listen(
-            context.engine, "before_cursor_execute", before_cursor_execute
-        )
-        try:
+        with count_queries(context.engine) as queries:
             with context.reading() as session:
                 total = payment_service.takings(session)
-        finally:
-            event.remove(
-                context.engine,
-                "before_cursor_execute",
-                before_cursor_execute,
-            )
         assert total == Decimal("15000.00")
-        assert len(queries) == 1
-        assert "sum(" in queries[0].lower()
+        assert queries.count == 1
+        assert "sum(" in queries.statements[0].lower()
 
     def test_outstanding_page_load_is_not_n_plus_one(self, branch):
-        from sqlalchemy import event
-
         from app.staff import prefs
         from app.staff.pages.payments import _outstanding_rows
+        from app.staff.query_metrics import count_queries
 
         built, context = branch
         limit = prefs.rows_limit(100)
@@ -3148,26 +3097,10 @@ class TestPaymentsPage:
                     )
                 )
 
-        queries = []
-
-        def before_cursor_execute(
-            _conn, _cursor, statement, _params, _context, _many
-        ):
-            queries.append(statement)
-
-        event.listen(
-            context.engine, "before_cursor_execute", before_cursor_execute
-        )
-        try:
+        with count_queries(context.engine) as queries:
             rows = _outstanding_rows(context)
-        finally:
-            event.remove(
-                context.engine,
-                "before_cursor_execute",
-                before_cursor_execute,
-            )
         assert len(rows) <= limit
-        assert len(queries) <= 4, f"{len(queries)} queries for outstanding"
+        assert queries.count <= 4, f"{queries.count} queries for outstanding"
 
     def test_outstanding_uses_deposit_applied_as_paid(self, shell, branch):
         built, context = branch
@@ -4527,9 +4460,8 @@ class TestBookingsPageActions:
         assert str(prefs.rows_limit(100)) in caption
 
     def test_booking_page_load_is_not_n_plus_one(self, branch):
-        from sqlalchemy import event
-
         from app.staff.pages.bookings import BookingFilter, _booking_rows
+        from app.staff.query_metrics import count_queries
 
         built, context = branch
         with context.session() as session:
@@ -4547,26 +4479,10 @@ class TestBookingsPageActions:
                     )
                 )
 
-        queries = []
-
-        def before_cursor_execute(
-            _conn, _cursor, statement, _params, _context, _many
-        ):
-            queries.append(statement)
-
-        event.listen(
-            context.engine, "before_cursor_execute", before_cursor_execute
-        )
-        try:
+        with count_queries(context.engine) as queries:
             rows = _booking_rows(context, BookingFilter())
-        finally:
-            event.remove(
-                context.engine,
-                "before_cursor_execute",
-                before_cursor_execute,
-            )
         assert len(rows) >= 40
-        assert len(queries) <= 4, f"{len(queries)} queries for the bookings list"
+        assert queries.count <= 4, f"{queries.count} queries for the bookings list"
 
     def test_the_list_shows_the_balance(self, shell, branch):
         built, _context = branch
