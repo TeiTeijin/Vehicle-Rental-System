@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **11/11 tasks complete**; follow-ups **2/3**.
+- Performance work: **11/11 tasks complete**; follow-ups **3/3**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Live indexes: all seven composite indexes were applied to MySQL and verified on 2026-10-25.
 - Follow-up correctness fix: payment search now runs in SQL before the 100-row cap (`90c2071`).
@@ -733,7 +733,7 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 | Takings total | full ledger load / 5.0s | **1 q / 0.53s** | 1 q, ~0.5s | Pass |
 | Outstanding, largest 100 | 37 q / 12.3s (4,499 rows) | **1 q / 1.03s** | ≤4 q, <1s | Close; 1.03s |
 | Customers, latest 100 | 7 q / 3.5s (304 rows) | **2 q / 0.79s** | ≤10 q, <1.5s | Pass (Task 12) |
-| Dashboard collect | 5 q / 1.2s synchronous | **5 q / 2.64s, background** | non-blocking, ~1s | Non-blocking passes; time misses |
+| Dashboard collect | 5 q / 1.2s synchronous | **3 q / 1.03s, background** | non-blocking, ~1s | Pass (Task 14) |
 | Inspections, latest 100 | 1 q / ~0.5s | **1 q / 1.48s** | unchanged | Environmental latency |
 | Maintenance, latest 100 | 1 q / ~0.5s | **1 q / 1.61s** | unchanged | Environmental latency |
 | Utilization, all 1,012 vehicles | 41 q / 4.77s for 20 vehicles | **5 q / 2.20s** first load; repeat cached | bounded queries | Pass (Task 13) |
@@ -742,9 +742,7 @@ first TLS handshake. Query counts use `app.staff.query_metrics.count_queries`.
 
 - **Customers:** resolved in Task 12 — two queries, 0.79s live.
 - **Utilization:** resolved in Task 13 — 5 queries, 2.20s first load, repeat opens cached for 60s.
-- **Dashboard (2.64s):** it is off the GUI thread now, so it does not freeze the
-  app, but the figure collection is still a five-query remote round trip. Cache
-  or precompute the daily aggregates if it remains slow on the live link.
+- **Dashboard:** resolved in Task 14 — three queries, 1.03s live, still off the GUI thread.
 - Inspections/Maintenance are single-query pages; their ~1.5s is the remote
   round trip, not N+1.
 
@@ -850,11 +848,11 @@ git push origin staff-audit-remediation
 - Adds `revenue_and_months(session, today)` and `orders_and_days(session, today, weeks)`.
 - `collect()` uses the combined functions plus `recent_transactions()`, reducing five statements to three while preserving `DashboardFigures`.
 
-- [ ] **Step 1: Write the failing query-count test**
+- [x] **Step 1: Write the failing query-count test**
 
 Add `test_collect_uses_at_most_three_queries` in `tests/test_staff_dashboard.py`. Use `count_queries` around `dashboard_service.collect(session)` and assert `queries.count <= 3`.
 
-- [ ] **Step 2: Run it and verify it fails**
+- [x] **Step 2: Run it and verify it fails**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py -k "collect_uses_at_most_three" -v
@@ -862,11 +860,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.
 
 Expected: FAIL with five queries.
 
-- [ ] **Step 3: Combine the aggregates**
+- [x] **Step 3: Combine the aggregates**
 
 Build `revenue_and_months` from one payment-grouped-by-day query over the year-to-date, and `orders_and_days` from one booking-grouped-by-day-and-channel query over the heatmap window. Keep the existing standalone functions for direct callers. Update `collect()` to use the combined results, and update the dashboard refresh spy test to watch the new functions.
 
-- [ ] **Step 4: Run the dashboard tests**
+- [x] **Step 4: Run the dashboard tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.py tests/test_staff_pages.py -k "DashboardPage or dashboard" -q
@@ -874,7 +872,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_dashboard.
 
 Expected: PASS; figures match the existing service functions and the refresh still reaches every card.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/services/dashboard_service.py tests/test_staff_dashboard.py
@@ -899,7 +897,7 @@ git push origin staff-audit-remediation
 - [x] Task 11: Live re-measurement
 - [x] Task 12: Customers two-query page
 - [x] Task 13: Utilization load and cache
-- [ ] Task 14: Dashboard three-query collection
+- [x] Task 14: Dashboard three-query collection
 
 ## Resume Instructions for Another Device
 

@@ -653,6 +653,17 @@ class TestFiguresMatchTheService:
         ]
         assert len(page.revenue_sparkline.points) == 7
 
+    def test_collect_uses_at_most_three_queries(self, shell, branch):
+        from app.services import dashboard_service
+        from app.staff.query_metrics import count_queries
+
+        page = DashboardPage(shell, animate=False)
+        with page.context.reading() as session:
+            with count_queries(page.context.engine) as queries:
+                figures = dashboard_service.collect(session)
+        assert queries.count <= 3, f"{queries.count} queries for dashboard collect"
+        assert figures.revenue_days
+
     def test_the_channel_series_carry_the_real_totals(self, shell, branch):
         """The chart is the only place the figures live, so it is checked
         against a fresh read of the same window rather than against a tile."""
@@ -1051,7 +1062,7 @@ class TestRoles:
         import app.staff.pages.dashboard as module
 
         calls: list[str] = []
-        for name in ("month_sales", "orders_per_day", "recent_transactions"):
+        for name in ("revenue_and_months", "orders_and_days", "recent_transactions"):
             real = getattr(module.dashboard_service, name)
 
             def spy(*args, _n=name, _r=real, **kwargs):
@@ -1062,7 +1073,11 @@ class TestRoles:
 
         page = DashboardPage(shell, animate=False)
         page.refresh()
-        assert set(calls) == {"month_sales", "orders_per_day", "recent_transactions"}
+        assert set(calls) == {
+            "revenue_and_months",
+            "orders_and_days",
+            "recent_transactions",
+        }
 
 
 # --------------------------------------------------------------------------

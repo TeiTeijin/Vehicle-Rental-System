@@ -264,6 +264,101 @@ def revenue_by_day(
     return buckets
 
 
+def revenue_and_months(
+    session: Session,
+    today: date,
+) -> tuple[dict[date, Decimal], list[MonthSales]]:
+    """Revenue-by-day and month-to-date in one payment query.
+
+    The dashboard used to run `revenue_by_day` and `month_sales` separately;
+    both group the same PAYMENT rows by day. One read now feeds both cards.
+    """
+    first = date(today.year, 1, 1)
+    rows = session.execute(
+        select(func.date(Payment.paid_at), func.sum(Payment.amount))
+        .where(
+            Payment.status.in_(_MONEY_IN),
+            Payment.kind == "rental",
+            Payment.paid_at >= datetime.combine(first, datetime.min.time()),
+            Payment.paid_at <= datetime.combine(today, datetime.max.time()),
+        )
+        .group_by(func.date(Payment.paid_at))
+    ).all()
+
+    start = today - timedelta(days=REVENUE_DAYS)
+    revenue_days: dict[date, Decimal] = {
+        start + timedelta(days=i): ZERO for i in range(REVENUE_DAYS + 1)
+    }
+    by_month: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    for raw_day, total in rows:
+        day = (
+            raw_day
+            if isinstance(raw_day, date)
+            else date.fromisoformat(str(raw_day))
+        )
+        amount = money(total or 0, field="revenue_by_day")
+        by_month[day.month] += amount
+        if day in revenue_days:
+            revenue_days[day] = amount
+
+    months = [
+        MonthSales(
+            month=date(today.year, number, 1),
+            label=date(today.year, number, 1).strftime("%b"),
+            total=money(by_month[number], field="month_sales"),
+        )
+        for number in range(1, 13)
+    ]
+    return revenue_days, months
+
+
+def orders_and_days(
+    session: Session,
+    today: date,
+    weeks: int = HEATMAP_WEEKS,
+) -> tuple[ChannelTotals, dict[date, int]]:
+    """Channel totals and the daily heatmap in one booking query."""
+    first = _monday_of(today) - timedelta(weeks=weeks - 1)
+    span = (today - first).days + 1
+    buckets: dict[date, int] = {
+        first + timedelta(days=i): 0 for i in range(span)
+    }
+    rows = session.execute(
+        select(
+            func.date(Booking.created_at),
+            Booking.channel,
+            func.count(Booking.booking_id),
+        )
+        .where(
+            Booking.created_at >= datetime.combine(first, datetime.min.time()),
+            Booking.created_at <= datetime.combine(today, datetime.max.time()),
+            Booking.status.notin_(_VOID_STATUSES),
+        )
+        .group_by(func.date(Booking.created_at), Booking.channel)
+    ).all()
+
+    counts: dict[str | None, int] = defaultdict(int)
+    for raw_day, channel, count in rows:
+        day = (
+            raw_day
+            if isinstance(raw_day, date)
+            else date.fromisoformat(str(raw_day))
+        )
+        number = int(count)
+        counts[channel] += number
+        if day in buckets:
+            buckets[day] += number
+
+    return (
+        ChannelTotals(
+            walk_in=counts.get("walk_in", 0),
+            online=counts.get("online", 0),
+            unknown=counts.get(None, 0),
+        ),
+        buckets,
+    )
+
+
 def collect(
     session: Session,
     *,
@@ -275,24 +370,22 @@ def collect(
     today = today or date.today()
 
     figures = DashboardFigures(today=today)
-    figures.revenue_days = revenue_by_day(
-        session, today - timedelta(days=REVENUE_DAYS), today
-    )
+    figures.revenue_days, months = revenue_and_months(session, today)
     figures.revenue_today = figures.revenue_days.get(today, ZERO)
     figures.revenue_yesterday = figures.revenue_days.get(
         today - timedelta(days=1), ZERO
     )
 
     if weeks > 0:
-        first = _monday_of(today) - timedelta(weeks=weeks - 1)
-        figures.channels = orders_between(session, first, today)
-        figures.orders_per_day = orders_per_day(session, weeks, today=today)
+        figures.channels, figures.orders_per_day = orders_and_days(
+            session, today, weeks
+        )
 
     if recent > 0:
         figures.recent = recent_transactions(session, recent)
 
     if monthly:
-        figures.month_sales = month_sales(session, today.year, until=today)
+        figures.month_sales = months
 
     return figures
 
