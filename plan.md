@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **1/11 tasks complete**.
+- Performance work: **2/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -184,7 +184,7 @@ git push origin staff-audit-remediation
 - Consumes: `_fleet_rows(context, filtr)`, `FleetFilter`, `booking_service.BLOCKING_STATUSES`, `fleet_service.maintenance_conflict`.
 - Produces: the same fleet row tuple and flag text, with at most one vehicle query, one maintenance-record query, and one active-booking query.
 
-- [ ] **Step 1: Write the failing query-count test**
+- [x] **Step 1: Write the failing query-count test**
 
 Add `test_fleet_page_load_is_not_n_plus_one` to `tests/test_staff_pages.py`. Insert at least 40 extra vehicles, call `_fleet_rows(context, FleetFilter())` with a `before_cursor_execute` listener, and assert:
 
@@ -193,7 +193,7 @@ assert len(rows) >= 40
 assert len(queries) <= 5, f"{len(queries)} queries for the fleet list"
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py::test_fleet_page_load_is_not_n_plus_one -v
@@ -201,7 +201,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py::
 
 Expected: FAIL with roughly two queries per vehicle.
 
-- [ ] **Step 3: Batch the data**
+- [x] **Step 3: Batch the data**
 
 In `_fleet_rows`:
 
@@ -227,7 +227,7 @@ due_by_vehicle = dict(
 3. Use `due = due_by_vehicle.get(vehicle.vehicle_id)` in the loop.
 4. Keep the existing `maintenance_conflict` call and issue text unchanged.
 
-- [ ] **Step 4: Run the Fleet and Bookings tests**
+- [x] **Step 4: Run the Fleet and Bookings tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "fleet or booking" -v
@@ -235,7 +235,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; Fleet still shows the same due dates, overdue flags, and maintenance text.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/staff/pages/fleet.py tests/test_staff_pages.py
@@ -719,7 +719,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 ## Completion Checklist
 
 - [x] Task 1: Bookings eager loading
-- [ ] Task 2: Fleet batch loading
+- [x] Task 2: Fleet batch loading
 - [ ] Task 3: Payments aggregate + cap
 - [ ] Task 4: Outstanding aggregate + cap
 - [ ] Task 5: Explicit caps

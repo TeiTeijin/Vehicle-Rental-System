@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
-from app.models import Vehicle
+from app.models import Booking, Vehicle
 from app.services import booking_service, fleet_service
 from app.services.errors import ServiceError
 from app.staff import theme
@@ -77,13 +78,26 @@ def _fleet_rows(context, filtr: FleetFilter):
     today = date.today()
     with context.reading() as session:
         vehicles = session.execute(
-            select(Vehicle).order_by(Vehicle.created_at.desc(), Vehicle.vehicle_id.desc())
+            select(Vehicle)
+            .options(selectinload(Vehicle.maintenance_records))
+            .order_by(Vehicle.created_at.desc(), Vehicle.vehicle_id.desc())
         ).scalars().all()
+        due_by_vehicle = dict(
+            session.execute(
+                select(Booking.vehicle_id, func.min(Booking.end_date))
+                .where(
+                    Booking.vehicle_id.in_(
+                        [vehicle.vehicle_id for vehicle in vehicles]
+                    ),
+                    Booking.status.in_(booking_service.BLOCKING_STATUSES),
+                )
+                .group_by(Booking.vehicle_id)
+            ).all()
+        )
 
         rows = []
         for vehicle in vehicles:
-            open_bookings = booking_service.active_bookings(session, vehicle)
-            due = min((b.end_date for b in open_bookings), default=None)
+            due = due_by_vehicle.get(vehicle.vehicle_id)
 
             blocked = fleet_service.maintenance_conflict(
                 session, vehicle, today, today + timedelta(days=30)

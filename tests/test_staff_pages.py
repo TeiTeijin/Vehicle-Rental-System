@@ -2066,6 +2066,41 @@ def test_the_media_resolver_can_be_limited_to_one_page(qapp, branch, monkeypatch
 
 
 class TestFleetPage:
+    def test_fleet_page_load_is_not_n_plus_one(self, branch):
+        from sqlalchemy import event
+
+        from app.staff.pages.fleet import FleetFilter, _fleet_rows
+
+        _built, context = branch
+        for index in range(40):
+            _add_vehicle(
+                context,
+                make="Toyota",
+                model="Vios",
+                plate=f"LOAD-{index:03d}",
+            )
+
+        queries = []
+
+        def before_cursor_execute(
+            _conn, _cursor, statement, _params, _context, _many
+        ):
+            queries.append(statement)
+
+        event.listen(
+            context.engine, "before_cursor_execute", before_cursor_execute
+        )
+        try:
+            rows = _fleet_rows(context, FleetFilter())
+        finally:
+            event.remove(
+                context.engine,
+                "before_cursor_execute",
+                before_cursor_execute,
+            )
+        assert len(rows) >= 40
+        assert len(queries) <= 5, f"{len(queries)} queries for the fleet list"
+
     def test_every_car_is_listed(self, shell, branch):
         page = FleetPage(shell)
         page.refresh()
