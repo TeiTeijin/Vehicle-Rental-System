@@ -404,6 +404,67 @@ class TestCheckIn:
         report = booking_service.check_in(session, booking, staff, 42000, "full")
         assert report.photo_url is None
 
+    def test_refuses_an_expired_licence_at_pickup(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        customer.license_expiry = date.today() - timedelta(days=1)
+        session.flush()
+        with pytest.raises(ConflictError, match="expired"):
+            booking_service.check_in(session, booking, staff, 42000, "full")
+
+    def test_refuses_an_inactive_customer_at_pickup(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        customer.is_active = False
+        session.flush()
+        with pytest.raises(ConflictError, match="deactivated"):
+            booking_service.check_in(session, booking, staff, 42000, "full")
+
+    def test_refuses_a_customer_without_a_licence_number(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        customer.license_number = None
+        session.flush()
+        with pytest.raises(ValidationError, match="licence number"):
+            booking_service.check_in(session, booking, staff, 42000, "full")
+
+    def test_refuses_a_licence_that_expires_before_the_return(
+        self, session, customer, vehicle, staff
+    ):
+        start = date.today() + timedelta(days=10)
+        end = date.today() + timedelta(days=20)
+        booking = booking_service.create_booking(session, customer, vehicle, start, end)
+        customer.license_expiry = date.today() + timedelta(days=15)
+        session.flush()
+        with pytest.raises(ConflictError, match="before the return"):
+            booking_service.check_in(session, booking, staff, 42000, "full")
+
+    def test_a_flagged_customer_needs_an_override_note(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        customer.flag_reason = "Damaged a previous rental."
+        session.flush()
+        with pytest.raises(ConflictError, match="flagged"):
+            booking_service.check_in(session, booking, staff, 42000, "full")
+
+        booking.flag_override_note = "Manager approved by phone."
+        booking.flag_override_by = staff.user_id
+        booking_service.check_in(session, booking, staff, 42000, "full")
+        assert booking.status == "ongoing"
+
+    def test_refuses_a_retired_vehicle_at_pickup(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        vehicle.status = "retired"
+        session.flush()
+        with pytest.raises(ConflictError, match="retired"):
+            booking_service.check_in(session, booking, staff, 42000, "full")
+
 
 # ---------------------------------------------------------------------------
 # Check out

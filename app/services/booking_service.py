@@ -511,10 +511,49 @@ def check_in(
         )
 
     vehicle = booking.vehicle
+    customer = booking.user
+    if not getattr(customer, "is_active", True):
+        raise ConflictError("This customer is deactivated.")
+    if not (getattr(customer, "license_number", None) or "").strip():
+        raise ValidationError(
+            "No licence number is on file: record the physical licence in "
+            "Customers before releasing the vehicle.",
+            field="license_number",
+        )
+    expiry = getattr(customer, "license_expiry", None)
+    if expiry is None:
+        raise ValidationError(
+            "This customer has no licence expiry on file.",
+            field="license_expiry",
+        )
+    if expiry < date.today():
+        raise ConflictError(
+            f"Licence expired on {expiry:%d %b %Y}; the vehicle cannot be "
+            "released."
+        )
+    if expiry < booking.end_date:
+        raise ConflictError(
+            f"Licence expires on {expiry:%d %b %Y}, before the return date "
+            f"of {booking.end_date:%d %b %Y}."
+        )
+    if (getattr(customer, "flag_reason", None) or "").strip() and not (
+        getattr(booking, "flag_override_note", None) or ""
+    ).strip():
+        reason = customer.flag_reason.strip().rstrip(".")
+        raise ConflictError(
+            f"This customer is flagged: {reason}. Record an override note "
+            "before releasing the vehicle."
+        )
+
     if vehicle.status == "maintenance":
         raise ConflictError(
             f"{vehicle.make} {vehicle.model} is in the workshop and cannot be "
             "handed over."
+        )
+    if vehicle.status == "retired":
+        raise ConflictError(
+            f"{vehicle.make} {vehicle.model} is retired and cannot be handed "
+            "over."
         )
 
     if mileage_reading < vehicle.mileage:

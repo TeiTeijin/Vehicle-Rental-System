@@ -927,7 +927,7 @@ git push origin final-audit
 - Consumes: a pending/confirmed booking and an eligible customer/vehicle.
 - Produces: verified check-in, inspection, vehicle status, and payment/deposit state.
 
-- [ ] **Step 1: Run the check-in tests**
+- [x] **Step 1: Run the check-in tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -936,7 +936,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_staff_pages.py -q
 ```
 
-- [ ] **Step 2: Walk check-in**
+- [x] **Step 2: Walk check-in**
 
 Verify:
 - only pending/confirmed bookings can check in
@@ -948,7 +948,7 @@ Verify:
 - booking becomes `ongoing`
 - customer sees the status change
 
-- [ ] **Step 3: Verify invalid check-ins**
+- [x] **Step 3: Verify invalid check-ins**
 
 - wrong status
 - expired/missing licence
@@ -956,13 +956,13 @@ Verify:
 - vehicle in maintenance/retired
 - mileage below recorded value
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `S4`, `X2`, and the pickup part of `X5`.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/staff app/services tests docs/audits/final-audit-register.md
