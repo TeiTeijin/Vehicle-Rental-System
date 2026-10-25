@@ -2371,8 +2371,9 @@ class TestFleetPage:
 
         seen = {}
 
-        def _fake(session, vehicle, include_3d=False):
+        def _fake(session, vehicle, include_3d=False, force=False):
             seen["include_3d"] = include_3d
+            seen["force"] = force
             return []
 
         monkeypatch.setattr(panels_mod.media_service, "get_or_fetch_media", _fake)
@@ -2384,6 +2385,7 @@ class TestFleetPage:
         panel._pool.waitForDone(15000)
         qapp_process(panel)
         assert seen.get("include_3d") is True
+        assert seen.get("force") is False
         panel.deleteLater()
 
     def test_hero_shows_first_photo_without_click(self, shell, branch, monkeypatch):
@@ -2587,9 +2589,13 @@ class TestFleetPage:
         from types import SimpleNamespace
 
         fresh_rows = [SimpleNamespace(**row) for row in fresh]
-        monkeypatch.setattr(
-            panels_mod.media_service, "get_or_fetch_media", lambda *a, **k: fresh_rows
-        )
+        calls: list[bool] = []
+
+        def _fetch(session, vehicle, include_3d=False, force=False):
+            calls.append(force)
+            return fresh_rows
+
+        monkeypatch.setattr(panels_mod.media_service, "get_or_fetch_media", _fetch)
         monkeypatch.setattr(panels_mod, "_download", lambda *a, **k: None)
         page = FleetPage(shell)
         page.refresh()
@@ -2601,14 +2607,9 @@ class TestFleetPage:
         panel._pool.waitForDone(15000)
         qapp_process(panel)
         assert [r["image_url"] for r in panel._media_rows] == ["http://new/1.webp"]
-        with context.reading() as session:
-            urls = [
-                row.image_url
-                for row in session.query(Vehicle_Media).filter_by(
-                    vehicle_id=built.free_car.vehicle_id
-                ).all()
-            ]
-        assert "http://old/stale.webp" not in urls
+        # The panel delegates replacement to the service; it must ask for a
+        # forced fetch rather than deleting rows before the API answers.
+        assert calls[-1] is True
         panel.deleteLater()
 
 

@@ -1503,7 +1503,7 @@ git push origin final-audit
 - Consumes: CarImages availability, cached media, image variants, 3D models, cache clear/stats.
 - Produces: verified graceful degradation and cache safety.
 
-- [ ] **Step 1: Run the media/security tests**
+- [x] **Step 1: Run the media/security tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1511,7 +1511,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_security_hardening.py -q
 ```
 
-- [ ] **Step 2: Walk media failure modes**
+- [x] **Step 2: Walk media failure modes**
 
 With CarImages unavailable:
 - customer vehicle details and staff fleet cards must not hang/crash
@@ -1520,7 +1520,7 @@ With CarImages unavailable:
 - errors are surfaced without blocking booking/payment
 - API status/cache clear controls work
 
-- [ ] **Step 3: Walk cache key compatibility**
+- [x] **Step 3: Walk cache key compatibility**
 
 Verify:
 - old cache keys and new safe/variant keys behave coherently
@@ -1529,13 +1529,13 @@ Verify:
 - clear/stats count both image and API caches correctly
 - no customer/staff data is written into media metadata
 
-- [ ] **Step 4: Record evidence and findings**
+- [x] **Step 4: Record evidence and findings**
 
 Mark `X6`; classify external failures as Environmental.
 
-- [ ] **Step 5: Fix blocking findings with TDD**
+- [x] **Step 5: Fix blocking findings with TDD**
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app/services app/staff tests docs/audits/final-audit-register.md

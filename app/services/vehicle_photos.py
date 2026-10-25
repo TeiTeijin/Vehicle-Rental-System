@@ -12,7 +12,6 @@ so the UI calls them from a worker thread (see app/ui/vehicle_photo.py).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -85,18 +84,14 @@ API_VIEWS: dict[str, str] = {
 #: The three-quarter shot, used for list thumbnails.
 DEFAULT_VIEW = "front34"
 
-#: Where a /api/v1 image is allowed to redirect to before we fetch it.
-_DOWNLOAD_HOSTS = {
-    "carimagesapi.com",
-    "www.carimagesapi.com",
-    "cdn.carimagesapi.com",
-}
+#: Only these hosts receive credentials; the CDN gets a clean request.
+_API_HOSTS = {"carimagesapi.com", "www.carimagesapi.com"}
+_DOWNLOAD_HOSTS = _API_HOSTS | {"cdn.carimagesapi.com"}
 
-_SLUG = re.compile(r"[^a-z0-9]+")
-
-#: Payload per (make, model, year): three views would otherwise mean three
-#: identical lookups. Failures are not kept, so a blip self-heals.
-_payloads: dict[tuple[str, str, int], dict] = {}
+#: Payload per (kind, make, model, year): three views would otherwise mean
+#: three identical lookups. The kind keeps a motorcycle and a car that happen
+#: to share a name apart. Failures are not kept, so a blip self-heals.
+_payloads: dict[tuple[str, str, str, int], dict] = {}
 
 
 def _vehicle_key(vehicle) -> tuple[str, str, int]:
@@ -107,10 +102,16 @@ def _vehicle_key(vehicle) -> tuple[str, str, int]:
     )
 
 
-def _slug(vehicle) -> str:
-    make = _SLUG.sub("-", str(vehicle.make).strip().lower()).strip("-")
-    model = _SLUG.sub("-", str(vehicle.model).strip().lower()).strip("-")
-    return f"{make}-{model}-{vehicle.year}"
+def _glb_path(vehicle) -> Path:
+    """A collision-resistant local path for one vehicle's 3D model.
+
+    Reuses the image cache's digest identity; a readable slug alone would let
+    make "A-B" + model "C" overwrite make "A" + model "B-C".
+    """
+    key = image_cache._identity(
+        vehicle.make, vehicle.model, vehicle.year, "3d"
+    )
+    return image_cache.CACHE_DIR.resolve() / f"{key}.glb"
 
 
 def is_motorcycle(vehicle: VehicleRef) -> bool:
@@ -130,13 +131,14 @@ def _payload(vehicle) -> dict | None:
     API to resolve the same generations again.
     """
     key = _vehicle_key(vehicle)
-    if key in _payloads:
-        return _payloads[key]
-
     kind = "moto-image" if is_motorcycle(vehicle) else "car-image"
+    memory_key = (kind, *key)
+    if memory_key in _payloads:
+        return _payloads[memory_key]
+
     cached = api_cache.load(*key, kind=kind)
     if cached is not None:
-        _payloads[key] = cached
+        _payloads[memory_key] = cached
         return cached
 
     payload: dict | None = None
@@ -153,7 +155,7 @@ def _payload(vehicle) -> dict | None:
         payload = None
 
     if payload:
-        _payloads[key] = payload
+        _payloads[memory_key] = payload
         api_cache.store(*key, payload, kind=kind)
     return payload
 
@@ -189,17 +191,25 @@ def _legacy_url(vehicle, view: str) -> str | None:
 
 
 def _download(url: str, *, with_key: bool) -> bytes | None:
-    """Fetch one image. The keyed endpoints need the secret, the CDN must not
-    see it, so the redirect is followed by hand."""
-    params = {"api_key": CI_API_KEY} if with_key else None
-    headers = {"X-Api-Secret": CI_API_SECRET} if with_key else None
+    """Fetch one image without ever sending the secret to the CDN.
+
+    A keyed URL on the API host gets the key and secret. A URL on the CDN is
+    fetched clean, even when the caller says it came from a keyed payload.
+    Anything outside the known hosts is refused.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or parsed.netloc not in _DOWNLOAD_HOSTS:
+        return None
+    authenticated = with_key and parsed.netloc in _API_HOSTS
+    params = {"api_key": CI_API_KEY} if authenticated else None
+    headers = {"X-Api-Secret": CI_API_SECRET} if authenticated else None
     try:
         response = requests.get(
             url,
             params=params,
             headers=headers,
             timeout=TIMEOUT,
-            allow_redirects=not with_key,
+            allow_redirects=not authenticated,
         )
     except requests.RequestException:
         return None
@@ -210,7 +220,11 @@ def _download(url: str, *, with_key: bool) -> bytes | None:
         return None
 
     location = response.headers.get("location") or ""
-    if urlsplit(location).netloc not in _DOWNLOAD_HOSTS:
+    parsed_location = urlsplit(location)
+    if (
+        parsed_location.scheme != "https"
+        or parsed_location.netloc not in _DOWNLOAD_HOSTS
+    ):
         return None
     try:
         clean = requests.get(location, timeout=TIMEOUT)
@@ -290,7 +304,7 @@ def model_glb_path(vehicle) -> Path | None:
     """
     if is_motorcycle(vehicle):
         return None
-    path = image_cache.CACHE_DIR / f"{_slug(vehicle)}.glb"
+    path = _glb_path(vehicle)
     if path.exists() and path.stat().st_size:
         return path
 

@@ -699,18 +699,17 @@ class _MediaRefresh(QRunnable):
 
     def run(self) -> None:
         try:
-            from app.models import Vehicle_Media
-
             with self._context.session() as session:
                 vehicle = session.get(Vehicle, self._vehicle_id)
                 if vehicle is None:
                     emit_safely(self._done, [])
                     return
-                if self._force:
-                    session.query(Vehicle_Media).filter_by(
-                        vehicle_id=self._vehicle_id
-                    ).delete()
-                rows = media_service.get_or_fetch_media(session, vehicle, include_3d=True)
+                rows = media_service.get_or_fetch_media(
+                    session,
+                    vehicle,
+                    include_3d=True,
+                    force=self._force,
+                )
                 snapshot = [
                     {
                         "view_angle": r.view_angle,

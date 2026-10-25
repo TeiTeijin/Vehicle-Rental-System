@@ -8,7 +8,16 @@ BASE_URL = "https://carimagesapi.com"
 
 TIMEOUT = 30
 
-ALLOWED_DOWNLOAD_HOSTS = {"carimagesapi.com", "www.carimagesapi.com"}
+#: Hosts that receive the API key/secret. Never send credentials to a host
+#: merely because a payload or a database row named it.
+API_HOSTS = {"carimagesapi.com", "www.carimagesapi.com"}
+CDN_HOSTS = {"cdn.carimagesapi.com"}
+ALLOWED_DOWNLOAD_HOSTS = API_HOSTS | CDN_HOSTS
+
+
+def _host_allowed(url: str, hosts: set[str]) -> bool:
+    parsed = urlsplit(url)
+    return parsed.scheme == "https" and parsed.netloc in hosts
 
 
 class CarImagesError(Exception):
@@ -231,7 +240,7 @@ def follow_model_redirect(endpoint_url: str) -> str | None:
     (requests would re-send the secret to the CDN), the CDN hop goes out
     clean. Returns None when anything in the chain fails.
     """
-    if not endpoint_url:
+    if not endpoint_url or not _host_allowed(endpoint_url, API_HOSTS):
         return None
     try:
         first = requests.get(
@@ -246,7 +255,7 @@ def follow_model_redirect(endpoint_url: str) -> str | None:
     if first.status_code not in (301, 302, 303, 307, 308):
         return None
     location = first.headers.get("location") or ""
-    if not location:
+    if not location or not _host_allowed(location, ALLOWED_DOWNLOAD_HOSTS):
         return None
     return location
 
@@ -257,13 +266,40 @@ def download_model_glb(glb_url: str) -> bytes:
         raise CarImagesError(
             f"Refusing to download GLB from untrusted host: {parsed.netloc}"
         )
-    headers = _rest_headers()
-    separator = "&" if "?" in glb_url else "?"
+
+    # Only the API host gets the secret. A signed CDN URL is fetched clean:
+    # following a redirect automatically would let requests forward custom
+    # headers across hosts, so the credentialed hop is done by hand.
+    credentialed = parsed.netloc in API_HOSTS
+    headers = _rest_headers() if credentialed else {}
+    target = glb_url
+    if credentialed:
+        separator = "&" if "?" in target else "?"
+        target = f"{target}{separator}api_key={CI_API_KEY}"
+
     resp = requests.get(
-        f"{glb_url}{separator}api_key={CI_API_KEY}",
+        target,
         headers=headers,
         timeout=60,
+        allow_redirects=not credentialed,
     )
+    if credentialed and resp.status_code in (301, 302, 303, 307, 308):
+        location = resp.headers.get("location") or ""
+        if not _host_allowed(location, ALLOWED_DOWNLOAD_HOSTS):
+            raise CarImagesError("Model redirect points at an untrusted host")
+        resp = requests.get(location, timeout=60)
     if resp.status_code != 200:
         _handle_error(resp)
     return resp.content
+
+
+def ping() -> bool:
+    """Cheap live reachability/credential check for the Settings button.
+
+    Resolving a common model needs both the API key and the secret. A missing
+    key, bad credentials, a timeout, or a malformed payload all mean "no".
+    """
+    try:
+        return resolve_generation_slug("Toyota", "Vios", 2022) is not None
+    except Exception:  # noqa: BLE001 - a status probe must never raise
+        return False

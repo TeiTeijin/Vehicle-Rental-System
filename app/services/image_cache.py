@@ -74,10 +74,19 @@ def load(
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         data = bytes_path.read_bytes()
-    except (OSError, ValueError):
+    except (FileNotFoundError, PermissionError):
+        # A concurrent writer may be replacing one of the two files. Treat
+        # this as a miss but never delete the other writer's entry.
+        return None
+    except OSError:
+        return None
+    except (ValueError, TypeError):
         _discard(bytes_path, meta_path)
         return None
 
+    if not isinstance(meta, dict):
+        _discard(bytes_path, meta_path)
+        return None
     if not data:
         _discard(bytes_path, meta_path)
         return None
@@ -103,23 +112,24 @@ def store(
     except OSError:
         return
 
+    metadata = json.dumps(
+        {
+            "make": make,
+            "model": model,
+            "year": year,
+            "variant": variant,
+            "url": url,
+        },
+        indent=2,
+    ).encode("utf-8")
     try:
+        # Metadata first: if the bytes write then fails, the previous image
+        # is still readable against the new (purely descriptive) sidecar. A
+        # failed write must never delete a valid entry another thread wrote.
+        _atomic_write(meta_path, metadata)
         _atomic_write(bytes_path, data)
-        _atomic_write(
-            meta_path,
-            json.dumps(
-                {
-                    "make": make,
-                    "model": model,
-                    "year": year,
-                    "variant": variant,
-                    "url": url,
-                },
-                indent=2,
-            ).encode("utf-8"),
-        )
     except OSError:
-        _discard(bytes_path, meta_path)
+        pass
 
 
 def _atomic_write(target: Path, data: bytes) -> None:
@@ -153,7 +163,14 @@ def stats() -> tuple[int, int]:
     if not CACHE_DIR.exists():
         return 0, 0
     files = list(CACHE_DIR.glob(f"*{_BYTES_SUFFIX}"))
-    return len(files), sum(f.stat().st_size for f in files if f.exists())
+    total = 0
+    for path in files:
+        try:
+            total += path.stat().st_size
+        except OSError:
+            # Another thread cleared/replaced it between glob and stat.
+            continue
+    return len(files), total
 
 
 __all__ = ["CACHE_DIR", "CachedImage", "clear", "load", "stats", "store"]

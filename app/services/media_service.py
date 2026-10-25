@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+import requests
+
 from app.models import Vehicle_Media
 from app.services import carimages_client as ci
 
@@ -44,7 +46,13 @@ def _fresh_rows(session, vehicle) -> list[Vehicle_Media]:
     return fresh if len(fresh) == len(rows) and rows else []
 
 
-def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
+def _car_rows(vehicle, include_3d: bool = False) -> list[Vehicle_Media]:
+    """Build (but do not add) the media rows for one car.
+
+    Building before deleting is deliberate: a failed lookup must leave the
+    last known rows in place. The caller commits the replacement only after
+    this function returns successfully.
+    """
     image_url = ci.get_signed_image_url(vehicle.make, vehicle.model, vehicle.year)
     model_url = None
     watermarked = True
@@ -61,10 +69,12 @@ def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
                     # the signed CDN URL the viewer can load directly.
                     model_url = ci.follow_model_redirect(glb) or None
                     watermarked = bool((model.get("model") or {}).get("watermarked"))
-        except ci.CarImagesError:
+        except (ci.CarImagesError, requests.RequestException):
             pass
 
-    session.add(
+    if not image_url:
+        return []
+    rows = [
         Vehicle_Media(
             vehicle_id=vehicle.vehicle_id,
             source="carimagesapi",
@@ -74,9 +84,9 @@ def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
             is_watermarked=watermarked,
             cached_at=datetime.now(),
         )
-    )
+    ]
     if model_url:
-        session.add(
+        rows.append(
             Vehicle_Media(
                 vehicle_id=vehicle.vehicle_id,
                 source="carimagesapi",
@@ -87,9 +97,10 @@ def _cache_for_car(session, vehicle, include_3d: bool = False) -> None:
                 cached_at=datetime.now(),
             )
         )
+    return rows
 
 
-def _cache_for_motorcycle(session, vehicle) -> None:
+def _moto_rows(vehicle) -> list[Vehicle_Media]:
     image_url = None
     try:
         gen = ci.resolve_moto_generation_slug(vehicle.make, vehicle.model, vehicle.year)
@@ -102,9 +113,12 @@ def _cache_for_motorcycle(session, vehicle) -> None:
         pass
 
     if not image_url:
-        image_url = ci.get_signed_image_url(vehicle.make, vehicle.model, vehicle.year, type="moto")
-
-    session.add(
+        image_url = ci.get_signed_image_url(
+            vehicle.make, vehicle.model, vehicle.year, type="moto"
+        )
+    if not image_url:
+        return []
+    return [
         Vehicle_Media(
             vehicle_id=vehicle.vehicle_id,
             source="carimagesapi",
@@ -114,7 +128,7 @@ def _cache_for_motorcycle(session, vehicle) -> None:
             is_watermarked=True,
             cached_at=datetime.now(),
         )
-    )
+    ]
 
 
 def pick_photo_url(rows: list[Vehicle_Media]) -> str | None:
@@ -142,18 +156,42 @@ def playable_model_url(session, row: Vehicle_Media) -> str:
     return url
 
 
-def get_or_fetch_media(session, vehicle, include_3d: bool = False) -> list[Vehicle_Media]:
-    cached = _fresh_rows(session, vehicle)
-    if cached:
-        return cached
+def get_or_fetch_media(
+    session, vehicle, include_3d: bool = False, force: bool = False
+) -> list[Vehicle_Media]:
+    """Fresh rows, or a replacement fetched from CarImages.
+
+    Media is optional: when the API is unreachable, the last known rows are
+    returned untouched. ``force`` is a true re-fetch (Refresh photos), but
+    even then the existing rows are deleted only after a successful build.
+    """
+    if not force:
+        cached = _fresh_rows(session, vehicle)
+        if cached:
+            return cached
+
+    existing = list(
+        session.query(Vehicle_Media)
+        .filter_by(vehicle_id=vehicle.vehicle_id)
+        .order_by(Vehicle_Media.media_id)
+        .all()
+    )
+    try:
+        rows = (
+            _moto_rows(vehicle)
+            if is_motorcycle(vehicle)
+            else _car_rows(vehicle, include_3d=include_3d)
+        )
+    except ci.CarImagesError as exc:
+        if not _is_not_found(exc):
+            return existing
+        rows = []
+    except (requests.RequestException, KeyError, ValueError, TypeError):
+        return existing
 
     session.query(Vehicle_Media).filter_by(vehicle_id=vehicle.vehicle_id).delete()
-
-    if is_motorcycle(vehicle):
-        _cache_for_motorcycle(session, vehicle)
-    else:
-        _cache_for_car(session, vehicle, include_3d=include_3d)
-
+    for row in rows:
+        session.add(row)
     session.flush()
     return list(
         session.query(Vehicle_Media)
