@@ -14,6 +14,7 @@
 
 - Branch: `staff-audit-remediation` (remote: `origin`).
 - Completed and merged: Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20.
+- Task 17 follow-up: commit `9bbc57c`; full suite 1101 passed, 1 skipped.
 - In progress: none.
 - Not started: none.
 - Canonical plan path in the repo: `docs/plans/2026-10-22-vehicle-rental-audit-remediation.md`.
@@ -678,6 +679,8 @@ git commit -m "fix: keep bookings committed when receipt generation fails"
 
 ### Task 8: Guard wizard exits and make the pending customer one-shot
 
+**Status:** ✅ complete — commit `e08d9bb`; overlay dismissal guard, wizard cancel/finished, one-shot customer intent.
+
 **Files:**
 - Modify: `app/staff/overlay.py`
 - Modify: `app/staff/vehicle_details.py`
@@ -737,6 +740,8 @@ git commit -m "fix: guard wizard exits and clear one-shot customer intent"
 
 ### Task 9: Make booking actions state-aware and finish the handoff
 
+**Status:** ✅ complete — commit `57be1e6`; status-gated row actions and completed-booking focus handoff.
+
 **Files:**
 - Modify: `app/staff/pages/bookings.py`
 - Modify: `app/staff/pages/new_rental.py`
@@ -795,6 +800,8 @@ git commit -m "fix: gate booking actions by status and focus completed bookings"
 ---
 
 ### Task 10: Zero-deposit and fee configuration validation
+
+**Status:** ✅ complete — commit `b153371`; zero-deposit rentals and scheduling-fee validation.
 
 **Files:**
 - Modify: `app/services/settings_service.py`
@@ -903,6 +910,8 @@ git commit -m "fix: report all rows and count rental days consistently"
 
 ### Task 12: Wire pricing, same-day, and operational settings
 
+**Status:** ✅ complete — commit `a322eda`; pricing policy and operational settings wired to behavior.
+
 **Files:**
 - Create: `app/domain/pricing.py`
 - Create: `tests/test_pricing_policy.py`
@@ -970,6 +979,8 @@ git commit -m "fix: wire pricing and operational settings to behavior"
 
 ### Task 13: Make auto-logout activity-aware
 
+**Status:** ✅ complete — commit `6574525`; idle logout resets on real application input.
+
 **Files:**
 - Modify: `app/staff/shell.py`
 - Modify: `tests/test_staff_shell.py`
@@ -1013,6 +1024,8 @@ git commit -m "fix: reset idle logout on real user input"
 ## Phase 4 — Performance and concurrency
 
 ### Task 14: Aggregate customer balances and debounce duplicate checks
+
+**Status:** ✅ complete — commit `324463d`; aggregated customer balances and debounced duplicate checks.
 
 **Files:**
 - Modify: `app/services/customer_service.py`
@@ -1065,6 +1078,8 @@ git commit -m "perf: aggregate customer balances and debounce duplicate checks"
 ---
 
 ### Task 15: Move New Rental filter work off the GUI thread
+
+**Status:** ✅ complete — commit `d2eaad6`; new-rental filter loading moved off the GUI thread.
 
 **Files:**
 - Modify: `app/staff/pages/new_rental.py`
@@ -1159,12 +1174,14 @@ git commit -m "security: harden cache keys, media URLs, and customer docs"
 
 ### Task 17: Remove local secret exposure from database snapshots
 
-**Status:** ✅ complete — commit `fdfa4dc`; media URLs blanked before insert, snapshot chmod 0600, tested.
+**Status:** ✅ complete — commit `fdfa4dc` plus follow-up `9bbc57c`; shared sanitizer covers the CLI and Settings paths, source-overwrite guard, owner-only snapshots; full suite 1101 passed.
 
 **Files:**
-- Modify: `scripts/backup_live_db.py` or add `scripts/sanitize_backup.py`
-- Modify: `tests/test_backup_live_db.py`
-- Modify: deployment notes / `README.md`
+- Create: `app/services/backup_service.py`
+- Modify: `scripts/backup_live_db.py`
+- Modify: `app/staff/pages/settings.py`
+- Modify: `tests/test_backup_live_db.py`, `tests/test_staff_settings.py`
+- Modify: `docs/backup-security.md`, deployment notes
 
 **Interfaces:**
 - A backup copy must not contain live signed media URLs or API keys. Blank `VEHICLE_MEDIA.image_url`/`model_3d_url` in the snapshot, or document that the backup is encrypted and restricted.
@@ -1188,11 +1205,19 @@ git add scripts/backup_live_db.py scripts/sanitize_backup.py tests/test_backup_l
 git commit -m "security: sanitize media URLs in local database snapshots"
 ```
 
+- [x] **Step 4: Sanitize the Settings backup button too**
+
+Route the SQLite copy through the shared sanitizer, keep the source untouched,
+and cover the button with a byte-level test. Refuse a CLI `--out` path that is
+the SQLite source.
+
 ---
 
 ## Phase 6 — Engineering hygiene
 
 ### Task 18: Make the full suite a CI gate and remove tracked junk
+
+**Status:** ✅ complete — commit `cf904a4`; Windows CI, Ruff, and tracked-junk removal.
 
 **Files:**
 - Add: `.github/workflows/tests.yml`
@@ -1244,6 +1269,8 @@ git commit -m "chore: add CI, linting, and remove tracked junk"
 
 ### Task 19: Show payment status on the dashboard
 
+**Status:** ✅ complete — commit `5f87b1a`; pending/failed dashboard transactions are visibly distinct.
+
 **Files:**
 - Modify: `app/services/dashboard_service.py`
 - Modify: `app/staff/pages/dashboard.py`
@@ -1279,6 +1306,8 @@ git commit -m "fix: distinguish pending and failed dashboard transactions"
 ---
 
 ### Task 20: Final regression and release checks
+
+**Status:** ✅ complete — release checks recorded in `docs/release-checks-2026-10-24.md`; commit `490e8db`.
 
 - [x] **Step 1: Run the complete suite**
 

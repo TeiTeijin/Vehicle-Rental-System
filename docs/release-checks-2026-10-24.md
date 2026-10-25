@@ -15,6 +15,19 @@ checks instead.
 | Non-GUI parallel | `... -n auto --ignore=tests/test_staff_pages.py --ignore=tests/test_staff_dashboard.py` | **687 passed** in 32.03s |
 | Ruff | `py -m ruff check app tests` | All checks passed |
 
+### Task 17 follow-up verification (2026-10-25)
+
+Head: `9bbc57c` (`security: sanitize every local database backup path`).
+
+| Check | Result |
+| --- | --- |
+| `pytest tests/test_backup_live_db.py tests/test_staff_settings.py -q -o addopts=` | **31 passed** |
+| Full suite, Linux/Python 3.14.8, `QT_QPA_PLATFORM=offscreen` | **1101 passed, 1 skipped** in 600.13s |
+| Ruff | Not available in the local `.venv`; the Windows CI Ruff job remains the gate. |
+
+The follow-up adds the shared Settings/CLI sanitizer, the CLI source-overwrite
+guard, owner-only snapshot creation, and byte-level Settings-backup coverage.
+
 Targeted checks run during the remediation:
 
 - Task 12 pricing/receipt work: 127 passed; targeted receipt test passed.
