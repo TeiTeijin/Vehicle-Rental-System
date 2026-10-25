@@ -1396,7 +1396,7 @@ git push origin final-audit
 - Consumes: shared settings, staff account management, backup snapshot/sanitization, cache controls.
 - Produces: verified admin policy, staff account, backup, and cache behavior.
 
-- [ ] **Step 1: Run the settings/backup tests**
+- [x] **Step 1: Run the settings/backup tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest \
@@ -1405,7 +1405,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest \
   tests/test_migrate_app_settings.py -q
 ```
 
-- [ ] **Step 2: Walk settings**
+- [x] **Step 2: Walk settings**
 
 Verify:
 - admin can edit shared policy; staff sees read-only
@@ -1419,13 +1419,13 @@ Verify:
 - backup only on live SQLite; live MySQL is blocked with instructions
 - backup sanitization removes passwords/tokens/PII as designed
 
-- [ ] **Step 3: Record evidence and findings**
+- [x] **Step 3: Record evidence and findings**
 
 Mark `S12` and the settings part of `X8`.
 
-- [ ] **Step 4: Fix blocking findings with TDD**
+- [x] **Step 4: Fix blocking findings with TDD**
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add app/staff app/services scripts tests docs/audits/final-audit-register.md
