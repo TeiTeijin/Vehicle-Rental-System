@@ -53,6 +53,8 @@ class Login(QMainWindow):
 
         # "Sign Up" link at the bottom of the card -> open the sign-up screen
         form.signup.clicked.connect(self._open_signup)
+        form.forgot.clicked.connect(self._open_forgot_password)
+        self.forgot_dialog = None
 
     # ----- signing in -----------------------------------------------------
     def _attempt_sign_in(self) -> None:
@@ -77,6 +79,9 @@ class Login(QMainWindow):
 
     def _show_error(self, message: str) -> None:
         self.form.error.setText(message)
+        self.form.error.setProperty("tone", "danger")
+        self.form.error.style().unpolish(self.form.error)
+        self.form.error.style().polish(self.form.error)
         self.form.error.show()
 
     def _open_app(self, identity: Identity) -> None:
@@ -87,6 +92,32 @@ class Login(QMainWindow):
         self._app_window = window
         window.show()
         self.hide()
+
+    def _open_forgot_password(self) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from app.ui.forgot_password import ForgotPasswordDialog
+
+        dialog = ForgotPasswordDialog(
+            self, email=self.form.email.text().strip()
+        )
+        self.forgot_dialog = dialog
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.reset_completed:
+            self.form.email.setText(dialog.account_email)
+            self.form.password.clear()
+            self._show_success(
+                "Password updated. Sign in with your new password."
+            )
+            self.form.password.setFocus()
+        self.forgot_dialog = None
+
+    def _show_success(self, message: str) -> None:
+        label = self.form.error
+        label.setText(message)
+        label.setProperty("tone", "green")
+        label.style().unpolish(label)
+        label.style().polish(label)
+        label.show()
 
     def _open_signup(self) -> None:
         from app.ui.signup import Signup

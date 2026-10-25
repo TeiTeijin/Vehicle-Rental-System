@@ -1,4 +1,4 @@
-"""Sign-up step 2: PSGC address pair, street line and licence number."""
+"""Sign-up step 2: PSGC address pair, street line and guarantor."""
 
 from __future__ import annotations
 
@@ -54,7 +54,9 @@ def _register(session, **overrides):
         "street_address": "123 Mabini St.",
         "province_key": "012800000",
         "city_municipality_code": "012801000",
-        "license_number": "D03-1234-567",
+        "guarantor_first_name": "Rosa",
+        "guarantor_last_name": "Santos",
+        "guarantor_mobile": "09181234567",
     }
     fields.update(overrides)
     return auth_service.register_customer(session, **fields)
@@ -225,7 +227,15 @@ def test_register_customer_stores_psgc_codes_and_address(session):
     assert user.province_code == "012800000"
     assert user.city_municipality_code == "012801000"
     assert user.barangay_code is None
-    # The typed lowercase/no-dash form is stored canonically.
+    # Online sign-up no longer asks for a licence: the branch records it at
+    # the first pickup, so the column stays empty for this account.
+    assert user.license_number is None
+    assert user.guarantor_first_name == "Rosa"
+    assert user.guarantor_last_name == "Santos"
+    assert user.guarantor_mobile == "09181234567"
+    assert user.emergency_contact == "Rosa Santos - 09181234567"
+    # The typed lowercase/no-dash form is still stored canonically when an
+    # older caller supplies a licence.
     user2 = _register(
         session,
         email="jose@example.com",
@@ -290,9 +300,29 @@ def test_register_customer_rejects_mobile_outside_the_09_format(session, phone):
     assert excinfo.value.field == "phone"
 
 
+def test_register_customer_requires_a_complete_guarantor(session):
+    _seed_ilocos(session)
+
+    with pytest.raises(ValidationError) as excinfo:
+        _register(session, guarantor_first_name="")
+    assert excinfo.value.field == "guarantor_first_name"
+
+    with pytest.raises(ValidationError) as excinfo:
+        _register(session, guarantor_last_name="")
+    assert excinfo.value.field == "guarantor_last_name"
+
+    with pytest.raises(ValidationError) as excinfo:
+        _register(session, guarantor_mobile="08171234567")
+    assert excinfo.value.field == "guarantor_mobile"
+
+    with pytest.raises(ValidationError) as excinfo:
+        _register(session, guarantor_mobile="0918123456")
+    assert excinfo.value.field == "guarantor_mobile"
+
+
 def test_register_customer_rejects_a_duplicate_licence(session):
     _seed_ilocos(session)
-    _register(session)
+    _register(session, license_number="D03-1234-567")
 
     with pytest.raises(ConflictError):
         _register(session, email="other@example.com", license_number="D031234567")

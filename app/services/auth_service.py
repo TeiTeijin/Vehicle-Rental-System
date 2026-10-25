@@ -33,6 +33,10 @@ class NotACustomer(AuthError):
     pass
 
 
+class PasswordResetError(AuthError):
+    """The reset request could not be matched to an active customer."""
+
+
 DUMMY_HASH = "$2b$12$izSvmM0zX.Kx3tsRF.uwIep3aJoUFsgXQKCB/tgDEYzXuknE8bO7S"
 INVALID_CREDENTIALS_MESSAGE = "Incorrect email or password."
 INACTIVE_ACCOUNT_MESSAGE = (
@@ -73,6 +77,47 @@ def is_valid_street_address(text: str) -> bool:
     )
 
 
+def validate_guarantor(
+    first_name: str | None,
+    last_name: str | None,
+    mobile: str | None,
+    *,
+    required: bool = True,
+) -> tuple[str, str, str]:
+    """Normalise and validate a guarantor, returning (first, last, mobile).
+
+    Sign-up requires a complete guarantor. Profile edits use
+    ``required=False`` so a customer can leave the whole section blank until
+    they are ready to add one, but a partially filled section is still
+    rejected.
+    """
+    first = " ".join((first_name or "").split())
+    last = " ".join((last_name or "").split())
+    number = "".join((mobile or "").split())
+
+    if not (first or last or number):
+        if required:
+            raise ValidationError(
+                "Enter your guarantor's first name.", field="guarantor_first_name"
+            )
+        return "", "", ""
+
+    if not first:
+        raise ValidationError(
+            "Enter your guarantor's first name.", field="guarantor_first_name"
+        )
+    if not last:
+        raise ValidationError(
+            "Enter your guarantor's last name.", field="guarantor_last_name"
+        )
+    if not is_valid_mobile(number):
+        raise ValidationError(
+            "Enter an 11-digit mobile number starting with 09.",
+            field="guarantor_mobile",
+        )
+    return first, last, number
+
+
 def sign_in(session: Session, email: str, password: str) -> Users:
     normalized = (email or "").strip().lower()
 
@@ -111,6 +156,48 @@ def sign_in_customer(session: Session, email: str, password: str) -> Users:
     return user
 
 
+def password_reset_account(session: Session, email: str) -> Users:
+    """Return the active customer account a reset request belongs to.
+
+    There is no mail transport in the demo, so the sign-in screen verifies
+    the address immediately; this function is the one rule both the UI and
+    the password writer use. A wrong/unknown address gets the same message so
+    the screen never confirms which emails have accounts.
+    """
+    mail = (email or "").strip().lower()
+    if not EMAIL_RE.match(mail):
+        raise ValidationError("Enter a valid email address.", field="email")
+
+    user = session.query(Users).filter_by(email=mail).one_or_none()
+    if user is None or user.role != "customer" or not bool(user.is_active):
+        raise PasswordResetError(
+            "We couldn't verify a customer account with that email. "
+            "Check the address and try again."
+        )
+    return user
+
+
+def reset_customer_password(
+    session: Session, email: str, new_password: str
+) -> Users:
+    """Set a new password through the self-service reset screen.
+
+    The caller commits; a validation failure leaves the old password intact.
+    """
+    user = password_reset_account(session, email)
+    problems = password_problems(new_password)
+    if problems:
+        raise ValidationError(problems[0], field="password")
+    if verify_password(new_password, user.password_hash):
+        raise ValidationError(
+            "Choose a password you have not used before.", field="password"
+        )
+    user.password_hash = hash_password(new_password)
+    user.must_change_password = False
+    session.flush()
+    return user
+
+
 def password_problems(password: str) -> list[str]:
     """Every rule the password still fails, in the sign-up card's order."""
     value = password or ""
@@ -136,16 +223,21 @@ def register_customer(
     street_address: str,
     province_key: str,
     city_municipality_code: str,
-    license_number: str,
+    license_number: str | None = None,
+    guarantor_first_name: str = "",
+    guarantor_last_name: str = "",
+    guarantor_mobile: str = "",
 ) -> Users:
     """Create a customer account from the two-step sign-up form.
 
+    Online sign-up now asks for a guarantor instead of a licence number: the
+    branch checks the physical licence at pickup. ``license_number`` is kept
+    as an optional argument for older callers (and for tests), but a supplied
+    value is still validated and uniqueness-checked.
+
     The address pair must be an exact province + city/municipality from the
-    PSGC tables and the licence must match the app's licence shape; both are
-    re-checked here, not only in the form. The physical card and its expiry
-    are still verified at the counter on the first rental (the expiry column
-    keeps a stand-in until then). Raises ValidationError/ConflictError with a
-    message fit to show the customer.
+    PSGC tables. Every value is re-checked here, not only in the form. Raises
+    ValidationError/ConflictError with a message fit to show the customer.
     """
     name = " ".join((full_name or "").split())
     mail = (email or "").strip().lower()
@@ -182,18 +274,24 @@ def register_customer(
         session, province_key, city_municipality_code
     )
 
-    licence = customer_service.canonical_licence(license_number)
-    if licence is None:
-        raise ValidationError(
-            f"Enter a valid licence number ({customer_service.LICENCE_EXAMPLE}).",
-            field="license_number",
-        )
-    if customer_service.find_by_licence(
-        session, licence, any_role=True
-    ) is not None:
-        raise ConflictError(
-            "That licence already has an account. Sign in instead."
-        )
+    licence = None
+    if (license_number or "").strip():
+        licence = customer_service.canonical_licence(license_number)
+        if licence is None:
+            raise ValidationError(
+                f"Enter a valid licence number ({customer_service.LICENCE_EXAMPLE}).",
+                field="license_number",
+            )
+        if customer_service.find_by_licence(
+            session, licence, any_role=True
+        ) is not None:
+            raise ConflictError(
+                "That licence already has an account. Sign in instead."
+            )
+
+    guarantor_first, guarantor_last, guarantor_number = validate_guarantor(
+        guarantor_first_name, guarantor_last_name, guarantor_mobile
+    )
 
     customer = Users(
         full_name=name,
@@ -210,6 +308,12 @@ def register_customer(
         role="customer",
         source="online",
         is_active=True,
+        guarantor_first_name=guarantor_first,
+        guarantor_last_name=guarantor_last,
+        guarantor_mobile=guarantor_number,
+        emergency_contact=(
+            f"{guarantor_first} {guarantor_last} - {guarantor_number}"
+        ),
         # USERS.created_at is NOT NULL with no database default, so the row
         # has to carry it (the counter's own customer_service does the same).
         created_at=datetime.now(),

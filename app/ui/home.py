@@ -455,8 +455,17 @@ class Shelf(QScrollArea):
         self._row.insertWidget(self._row.count() - 1, card)
 
     def finalize(self) -> None:
-        """Lock the height to the cards' own (the strip never grows)."""
-        height = self._content.sizeHint().height()
+        """Lock the height to the cards' own (the strip never grows).
+
+        `minimumSizeHint` is the one that matters here: a wrapped card label
+        can report a looser `sizeHint` than its actual minimum, and using the
+        former clipped the bottom few pixels off every shelf card -- including
+        its rounded corners.
+        """
+        height = max(
+            self._content.sizeHint().height(),
+            self._content.minimumSizeHint().height(),
+        )
         if height > 0:
             self.setFixedHeight(height)
         # The range may settle before the first resize; place the ends now.

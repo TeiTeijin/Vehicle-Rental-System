@@ -83,6 +83,14 @@ class AuthGateDialog(theme.OverlayDialog):
         self.error.hide()
         self.column.addWidget(self.error)
 
+        forgot_row = QHBoxLayout()
+        forgot_row.setContentsMargins(0, 0, 0, 0)
+        forgot_row.addStretch(1)
+        self.forgot = text_button("Forgot password?")
+        self.forgot.clicked.connect(self._forgot_password)
+        forgot_row.addWidget(self.forgot)
+        self.column.addLayout(forgot_row)
+
         self.submit_button = primary_button("SIGN IN")
         self.submit_button.clicked.connect(self.submit)
         self.column.addWidget(self.submit_button)
@@ -127,9 +135,29 @@ class AuthGateDialog(theme.OverlayDialog):
         finally:
             self.submit_button.setEnabled(True)
 
-    def _fail(self, message: str) -> None:
+    def _forgot_password(self) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from app.ui.forgot_password import ForgotPasswordDialog
+
+        dialog = ForgotPasswordDialog(self, email=self.email.text().strip())
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.reset_completed:
+            self.email.setText(dialog.account_email)
+            self.password.clear()
+            self._notice(
+                "Password updated. Sign in with your new password.", "green"
+            )
+            self.password.setFocus()
+
+    def _notice(self, message: str, tone: str) -> None:
         self.error.setText(message)
+        self.error.setProperty("tone", tone)
+        self.error.style().unpolish(self.error)
+        self.error.style().polish(self.error)
         self.error.show()
+
+    def _fail(self, message: str) -> None:
+        self._notice(message, "danger")
         self.password.selectAll()
         self.password.setFocus()
 

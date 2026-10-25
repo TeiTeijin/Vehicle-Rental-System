@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QMainWindow,
-    QMenu,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -38,33 +37,27 @@ if __name__ == "__main__" and not __package__:
 
 from app.database import SessionLocal
 from app.models import Vehicle
+from app.services import notification_service
 from app.ui import theme
+from app.ui.account_popup import AccountPopup
 from app.ui.auth_gate_dialog import AuthGateDialog
 from app.ui.booking_checkout import BookingCheckoutPage
 from app.ui.booking_schedule import BookingSchedulePage
 from app.ui.bookings import BookingsPage
+from app.ui.notifications import NotificationPopup
 from app.ui.payments import PaymentsPage
 from app.ui.profile import ProfilePage
 from app.ui.session import BookingDraft, CustomerSession, Identity
 from app.ui.vehicle_details import VehicleDetailsPage
 from app.ui.home import HomePage
 
-#: Tabs that are part of this build; the rest explain themselves.
-COMING_SOON = {
-    "notifications": (
-        "Notifications",
-        "Pickup reminders are not part of this build yet.",
-    ),
-}
-
 #: Tabs that belong to an account: a guest meets the sign-in gate first.
-MEMBER_TABS = frozenset({"bookings", "payments", "notifications"})
+MEMBER_TABS = frozenset({"bookings", "payments"})
 
 #: What the gate says when a guest taps one of those tabs.
 MEMBER_REASONS = {
     "bookings": "Your bookings and pickup details live in your account.",
     "payments": "Your receipts and payment history live in your account.",
-    "notifications": "Pickup reminders and updates are sent to your account.",
 }
 
 
@@ -83,6 +76,10 @@ class MainWindow(QMainWindow):
         self._pages: dict[str, QWidget] = {}
         self._signup_window = None
         self._active_tab = "vehicles"
+        self._notifications: list[notification_service.Notification] = []
+        self._read_notification_keys: set[str] = set()
+        self._notification_popup: NotificationPopup | None = None
+        self._account_popup: AccountPopup | None = None
 
         root = QWidget()
         root.setObjectName("root")
@@ -93,6 +90,7 @@ class MainWindow(QMainWindow):
         self.navbar = theme.NavBar()
         self.navbar.tab_selected.connect(self.show_tab)
         self.navbar.auth_clicked.connect(self._on_auth_clicked)
+        self.navbar.notifications_clicked.connect(self._on_notifications_clicked)
         self.navbar.search_changed.connect(self._on_search)
         column.addWidget(self.navbar)
 
@@ -110,18 +108,17 @@ class MainWindow(QMainWindow):
         self.payments_page.vehicle_selected.connect(self.open_vehicle)
         self.profile_page = ProfilePage()
         self.profile_page.tab_requested.connect(self.show_tab)
+        self.profile_page.profile_updated.connect(self._profile_updated)
         self._register("vehicles", self.vehicles_page)
         self._register("bookings", self.bookings_page)
         self._register("payments", self.payments_page)
         self._register("profile", self.profile_page)
 
-        for key, (title, note) in COMING_SOON.items():
-            self._register(key, self._placeholder(title, note))
-
         self.bookings_page.set_user(self.session.user)
         self.payments_page.set_user(self.session.user)
         self.profile_page.set_user(self.session.user)
         self._sync_chrome()
+        self._refresh_notifications()
         self.show_tab("vehicles")
 
     # ---------- the stack ----------
@@ -141,13 +138,13 @@ class MainWindow(QMainWindow):
                 # Closed the gate: stay where we were, tab strip included.
                 self.navbar.set_active(self._active_tab)
                 return
-        if key in COMING_SOON:
-            self._show_page(key)
-        elif key == "bookings":
+        if key == "bookings":
             self.bookings_page.set_user(self.session.user)
+            self._refresh_notifications()
             self._show_page("bookings")
         elif key == "payments":
             self.payments_page.set_user(self.session.user)
+            self._refresh_notifications()
             self._show_page("payments")
         else:
             self._show_page("vehicles")
@@ -249,6 +246,7 @@ class MainWindow(QMainWindow):
         # customer lands on Bookings, then can step across to the receipt.
         self.payments_page.set_user(self.session.user)
         self.profile_page.set_user(self.session.user)
+        self._refresh_notifications()
         self._show_page("bookings")
         self._active_tab = "bookings"
         self.navbar.set_active("bookings")
@@ -265,75 +263,142 @@ class MainWindow(QMainWindow):
     # ---------- the auth corner ----------
     def _sign_in(self, identity: Identity) -> None:
         self.session.sign_in(identity)
+        self._read_notification_keys.clear()
         self._sync_chrome()
         self.bookings_page.set_user(identity)
         self.payments_page.set_user(identity)
         self.profile_page.set_user(identity)
+        self._refresh_notifications()
 
     def _sign_out(self) -> None:
+        self._close_account_popup()
+        self._close_notification_popup()
         self.session.sign_out()
+        self._read_notification_keys.clear()
+        self._notifications = []
         self._sync_chrome()
+        self.navbar.set_notification_state(False, 0)
         self.bookings_page.set_user(None)
         self.payments_page.set_user(None)
         self.profile_page.set_user(None)
         self.show_tab("vehicles")
 
+    def _profile_updated(self, identity: Identity) -> None:
+        """A customer edited their own details: refresh the account chip."""
+        self.session.sign_in(identity)
+        self._sync_chrome()
+        self.bookings_page.set_user(identity)
+        self.payments_page.set_user(identity)
+
     def _sync_chrome(self) -> None:
         self.navbar.set_user(self.session.display_name or None)
 
-    def _account_menu(self) -> QMenu:
-        """The avatar's two actions: account information and logging out."""
-        menu = QMenu(self)
-        email = self.session.user.email if self.session.user else ""
-        who = menu.addAction(f"Signed in as {email}")
-        who.setEnabled(False)
-        menu.addSeparator()
-        menu.addAction("Account info", self.show_profile)
-        menu.addAction("Log out", self._sign_out)
-        return menu
+    # ---------- notifications ----------
+    def _refresh_notifications(self) -> None:
+        """Re-read booking-derived updates; never let a query break the app."""
+        if not self.session.is_signed_in:
+            self._notifications = []
+            self.navbar.set_notification_state(False, 0)
+            return
+        try:
+            with SessionLocal() as session:
+                self._notifications = notification_service.notifications_for(
+                    session, self.session.user_id
+                )
+        except Exception:  # noqa: BLE001 - the database is remote
+            self._notifications = []
+
+        unread = [
+            item
+            for item in self._notifications
+            if item.key not in self._read_notification_keys
+        ]
+        self.navbar.set_notification_state(bool(unread), len(unread))
+
+    def _on_notifications_clicked(self) -> None:
+        if not self.session.is_signed_in:
+            return
+        self._refresh_notifications()
+        unread_keys = {
+            item.key
+            for item in self._notifications
+            if item.key not in self._read_notification_keys
+        }
+        self._close_notification_popup()
+
+        popup = NotificationPopup(
+            self,
+            self._notifications,
+            unread_keys=unread_keys,
+        )
+        popup.bookings_requested.connect(self._show_bookings_from_notification)
+        popup.dismissed.connect(self._forget_notification_popup)
+        self._notification_popup = popup
+        popup.show_under(self.navbar.notifications_button)
+
+        # Opening the panel is the "read" action; the unread tint inside the
+        # panel still shows which items were new when it opened.
+        self._read_notification_keys.update(
+            item.key for item in self._notifications
+        )
+        self.navbar.set_notification_state(False, 0)
+
+    def _show_bookings_from_notification(self) -> None:
+        """Open Bookings from a notification row."""
+        self.show_tab("bookings")
+
+    def _forget_notification_popup(self) -> None:
+        self._notification_popup = None
+
+    def _close_notification_popup(self) -> None:
+        popup = self._notification_popup
+        self._notification_popup = None
+        if popup is not None:
+            try:
+                popup.close()
+            except RuntimeError:  # already deleted by Qt
+                pass
 
     def _on_auth_clicked(self) -> None:
         if not self.session.is_signed_in:
             self._prompt_sign_in()
             return
 
-        menu = self._account_menu()
-        menu.exec(
-            self.navbar.auth_button.mapToGlobal(
-                self.navbar.auth_button.rect().bottomLeft()
-            )
+        self._close_account_popup()
+        identity = self.session.user
+        if identity is None:
+            return
+        popup = AccountPopup(
+            self,
+            name=identity.full_name,
+            email=identity.email,
         )
-        menu.deleteLater()
+        popup.profile_requested.connect(self.show_profile)
+        popup.logout_requested.connect(self._sign_out)
+        popup.destroyed.connect(
+            lambda _obj=None, p=popup: self._forget_account_popup(p)
+        )
+        self._account_popup = popup
+        popup.show_under(self.navbar.auth_button)
+
+    def _forget_account_popup(self, popup: AccountPopup) -> None:
+        if self._account_popup is popup:
+            self._account_popup = None
+
+    def _close_account_popup(self) -> None:
+        popup = self._account_popup
+        self._account_popup = None
+        if popup is not None:
+            try:
+                popup.close()
+            except RuntimeError:  # already deleted by Qt
+                pass
 
     # ---------- search ----------
     def _on_search(self, text: str) -> None:
         self.vehicles_page.set_search(text)
         if text.strip() and self.stack.currentWidget() is not self.vehicles_page:
             self.show_tab("vehicles")
-
-    # ---------- placeholders ----------
-    def _placeholder(self, title: str, note: str) -> QWidget:
-        page = QWidget()
-        page.setObjectName("page")
-        frame, col = theme.panel("panel", spacing=10)
-        frame.setFixedWidth(520)
-        col.addWidget(theme.overline("Coming soon"))
-        col.addWidget(theme.section_title(title))
-        # A fixed width lets the wrapped note report its real height; the
-        # stylesheet font only lands at polish time, so polish first -- before
-        # that the label measures one line and the panel clips the second.
-        body = theme.hint_label(note)
-        body.setFixedWidth(520 - 48)  # panel's 24px side margins
-        body.ensurePolished()
-        body.setFixedHeight(body.heightForWidth(520 - 48))
-        col.addWidget(body)
-
-        root = QVBoxLayout(page)
-        root.setContentsMargins(40, 40, 40, 40)
-        root.addStretch(1)
-        root.addWidget(frame, 0, Qt.AlignHCenter)
-        root.addStretch(2)
-        return page
 
 
 def main() -> int:

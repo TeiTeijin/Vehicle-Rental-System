@@ -15,9 +15,16 @@ reference code. The card number and CVV are dropped with the widgets -- only
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRegularExpression, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QGuiApplication,
+    QImage,
+    QPixmap,
+    QRegularExpressionValidator,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -25,6 +32,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedLayout,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -61,12 +69,236 @@ from app.ui.vehicle_photo import VehiclePhoto
 
 STEP_INDEX = 3
 
-#: (key, title, note, icon). The keys are the service's own method names.
+#: (key, title, note, logo file). The keys are the service's own method names.
+#: The artwork lives beside the other customer icons; the names keep the
+#: supplied spaces so the source files can be dropped in without renaming.
 PAYMENT_METHODS: tuple[tuple[str, str, str, str], ...] = (
-    ("card", "Credit / debit card", "Visa or Mastercard, charged now.", "card"),
-    ("gcash", "GCash", "Send the payment now, keep the reference.", "gcash"),
-    ("cash", "Cash at the counter", "Pay when you pick the vehicle up.", "cash"),
+    ("card", "Credit / debit card", "Visa or Mastercard, charged now.", "visa mastercard 1.png"),
+    ("gcash", "GCash", "Scan the QR, then enter your reference.", "gcash 1.png"),
+    ("cash", "Cash at the counter", "Pay when you pick the vehicle up.", "cash 1.png"),
 )
+
+
+class ClickableQrLabel(QLabel):
+    """The checkout QR is clickable so it can open at scanning size."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.rect().contains(event.position().toPoint()):
+                self.clicked.emit()
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
+
+
+def qr_preview_pixmap(source: QPixmap) -> QPixmap:
+    """Crop the supplied GCash poster down to its QR block.
+
+    The poster is tall: scaling the whole thing to fit a preview makes the QR
+    itself no larger than the checkout thumbnail. This finds the dense black
+    block in the middle of the artwork and crops around it, with a little white
+    quiet zone. Unknown artwork falls back to the original pixmap.
+    """
+    if source.isNull():
+        return source
+
+    image = source.toImage().convertToFormat(QImage.Format.Format_Grayscale8)
+    scan = image.scaled(
+        400,
+        778,
+        Qt.KeepAspectRatio,
+        Qt.FastTransformation,
+    )
+    width, height = scan.width(), scan.height()
+    left, right = int(width * 0.10), int(width * 0.90)
+    top, bottom = int(height * 0.15), int(height * 0.75)
+
+    row_threshold = max(8, int(width * 0.04))
+    rows = [
+        y
+        for y in range(top, bottom)
+        if sum(
+            1
+            for x in range(left, right)
+            if scan.pixelColor(x, y).value() < 80
+        )
+        > row_threshold
+    ]
+    if not rows:
+        return source
+
+    groups: list[tuple[int, int]] = []
+    start = previous = None
+    for y in rows:
+        if start is None:
+            start = previous = y
+        elif y == previous + 1:
+            previous = y
+        else:
+            groups.append((start, previous))
+            start = previous = y
+    if start is not None:
+        groups.append((start, previous))
+    y0, y1 = max(groups, key=lambda group: group[1] - group[0])
+    if y1 - y0 < 20:
+        return source
+
+    column_threshold = max(8, int((y1 - y0 + 1) * 0.05))
+    columns = [
+        x
+        for x in range(left, right)
+        if sum(
+            1
+            for y in range(y0, y1 + 1)
+            if scan.pixelColor(x, y).value() < 80
+        )
+        > column_threshold
+    ]
+    if not columns:
+        return source
+    x0, x1 = min(columns), max(columns)
+    if not 0.8 <= (x1 - x0 + 1) / max(1, y1 - y0 + 1) <= 1.2:
+        return source
+
+    scale_x = image.width() / width
+    scale_y = image.height() / height
+    x0 = int(x0 * scale_x)
+    x1 = int((x1 + 1) * scale_x)
+    y0 = int(y0 * scale_y)
+    y1 = int((y1 + 1) * scale_y)
+
+    side = max(x1 - x0, y1 - y0)
+    pad = int(side * 0.10)
+    half = side // 2 + pad
+    centre_x = (x0 + x1) // 2
+    centre_y = (y0 + y1) // 2
+    crop_left = max(0, centre_x - half)
+    crop_top = max(0, centre_y - half)
+    crop_right = min(image.width(), centre_x + half)
+    crop_bottom = min(image.height(), centre_y + half)
+    cropped = source.copy(
+        crop_left,
+        crop_top,
+        crop_right - crop_left,
+        crop_bottom - crop_top,
+    )
+    return cropped if not cropped.isNull() else source
+
+
+class QrPreviewDialog(QDialog):
+    """The GCash QR in a fixed-size, centered preview card.
+
+    A checkout-column QR is only about 170px wide; phone cameras can struggle
+    with that at arm's length. The preview is deliberately fixed after it
+    opens: the source pixmap is scaled once to fit the screen, and resizing the
+    window cannot make the QR grow or jump around.
+    """
+
+    def __init__(self, source: QPixmap, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.source = source
+        self.setObjectName("qrFullscreen")
+        self.setWindowTitle("GCash QR")
+        self.setWindowFlags(
+            Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setModal(True)
+
+        screen = (
+            parent.screen()
+            if parent is not None
+            else QGuiApplication.primaryScreen()
+        )
+        available = screen.availableGeometry() if screen is not None else None
+        if available is not None:
+            width = max(520, min(820, available.width() - 100))
+            height = max(560, min(960, available.height() - 100))
+        else:
+            width, height = 820, 960
+        self.setFixedSize(width, height)
+        self._centered = False
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(32, 24, 32, 26)
+        outer.setSpacing(16)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(14)
+        title = QVBoxLayout()
+        title.setContentsMargins(0, 0, 0, 0)
+        title.setSpacing(3)
+        title.addWidget(make_label("Scan to pay with GCash", "qrFullscreenTitle"))
+        title.addWidget(
+            make_label(
+                "Point your phone camera at the QR code. Press Esc when done.",
+                "qrFullscreenSubtitle",
+                wrap=True,
+            )
+        )
+        head.addLayout(title, 1)
+
+        close = QToolButton()
+        close.setObjectName("qrFullscreenClose")
+        close.setCursor(Qt.PointingHandCursor)
+        close.setIcon(icon_from("close", "#FFFFFF", 18))
+        close.setIconSize(QSize(18, 18))
+        close.setFixedSize(38, 38)
+        close.clicked.connect(self.close)
+        head.addWidget(close, 0, Qt.AlignTop)
+        outer.addLayout(head)
+
+        self.card = QFrame()
+        self.card.setObjectName("qrFullscreenCard")
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(0)
+        self.image = QLabel()
+        self.image.setObjectName("qrFullscreenImage")
+        self.image.setAlignment(Qt.AlignCenter)
+        card_layout.addWidget(self.image)
+        outer.addWidget(self.card, 1, Qt.AlignCenter)
+
+        footer = make_label(
+            "Enter the reference number shown on your GCash receipt.",
+            "qrFullscreenFooter",
+        )
+        footer.setAlignment(Qt.AlignCenter)
+        outer.addWidget(footer)
+
+        self._fit_qr()
+
+    def _fit_qr(self) -> None:
+        if self.source.isNull():
+            self.image.setText("GCash QR unavailable")
+            return
+        size = max(240, min(self.width() - 100, self.height() - 210))
+        scaled = self.source.scaled(
+            size,
+            size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        self.image.setPixmap(scaled)
+        self.image.setFixedSize(scaled.size())
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._centered:
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            if screen is not None:
+                available = screen.availableGeometry()
+                self.move(available.center() - self.rect().center())
+            self._centered = True
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+            return
+        super().keyPressEvent(event)
 
 
 class MethodCard(QFrame):
@@ -79,7 +311,7 @@ class MethodCard(QFrame):
         key: str,
         title: str,
         note: str,
-        icon_name: str,
+        logo_file: str,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -92,28 +324,41 @@ class MethodCard(QFrame):
         row.setContentsMargins(14, 12, 14, 12)
         row.setSpacing(12)
 
-        glyph = QLabel()
-        glyph.setObjectName("specIcon")
-        glyph.setPixmap(icon_from(icon_name, TOKENS["text_dark"], 20).pixmap(20, 20))
-        glyph.setFixedSize(34, 34)
-        glyph.setAlignment(Qt.AlignCenter)
-        glyph.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        row.addWidget(glyph, 0, Qt.AlignVCenter)
+        self.logo = QLabel()
+        self.logo.setObjectName("methodLogo")
+        pixmap = QPixmap(str(theme.ICONS_DIR / logo_file))
+        if pixmap.isNull():
+            self.logo.setPixmap(
+                icon_from("card", TOKENS["text_dark"], 22).pixmap(22, 22)
+            )
+        else:
+            self.logo.setPixmap(
+                pixmap.scaled(
+                    66,
+                    36,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+            )
+        self.logo.setFixedSize(78, 44)
+        self.logo.setAlignment(Qt.AlignCenter)
+        self.logo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        row.addWidget(self.logo, 0, Qt.AlignVCenter)
 
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
         text.setSpacing(2)
-        title_label = make_label(title, "methodTitle")
-        note_label = make_label(note, "methodNote", wrap=True)
-        for label in (title_label, note_label):
+        self.title_label = make_label(title, "methodTitle")
+        self.note_label = make_label(note, "methodNote", wrap=True)
+        for label in (self.title_label, self.note_label):
             # Clicks land on the card itself, so the whole tile is the target.
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        text.addWidget(title_label)
-        text.addWidget(note_label)
+        text.addWidget(self.title_label)
+        text.addWidget(self.note_label)
         row.addLayout(text, 1)
 
         self.check = QLabel()
-        self.check.setPixmap(icon_from("check", TOKENS["green"], 18).pixmap(18, 18))
+        self.check.setPixmap(icon_from("check", "#FFFFFF", 18).pixmap(18, 18))
         self.check.setFixedSize(18, 18)
         self.check.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.check.hide()
@@ -122,8 +367,10 @@ class MethodCard(QFrame):
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", selected)
         self.check.setVisible(selected)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        for widget in (self, self.logo, self.title_label, self.note_label):
+            widget.setProperty("selected", selected)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
 
     def mousePressEvent(self, event) -> None:
         super().mousePressEvent(event)
@@ -197,6 +444,7 @@ class BookingCheckoutPage(QWidget):
         self._moments: dict[str, tuple[QLabel, QLabel]] = {}
         self._method = draft.payment_method or "card"
         self._fields: dict[str, QLineEdit] = {}
+        self._qr_dialog: QrPreviewDialog | None = None
 
         # ----- head -----
         self.back_button = text_button("\u2190  Change dates")
@@ -301,8 +549,8 @@ class BookingCheckoutPage(QWidget):
         col.addWidget(section_title("How would you like to pay?"))
 
         self.method_cards: dict[str, MethodCard] = {}
-        for key, title, note, icon_name in PAYMENT_METHODS:
-            card = MethodCard(key, title, note, icon_name)
+        for key, title, note, logo_file in PAYMENT_METHODS:
+            card = MethodCard(key, title, note, logo_file)
             card.chosen.connect(self._choose_method)
             self.method_cards[key] = card
             col.addWidget(card)
@@ -363,14 +611,100 @@ class BookingCheckoutPage(QWidget):
         col = QVBoxLayout(holder)
         col.setContentsMargins(0, 4, 0, 0)
         col.setSpacing(10)
-        col.addWidget(self._field("gcash_number", "GCash mobile number", "0917 123 4567"))
-        col.addWidget(
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(16)
+
+        self.gcash_qr = ClickableQrLabel()
+        self.gcash_qr.setObjectName("gcashQr")
+        self._gcash_qr_source = QPixmap(
+            str(theme.ICONS_DIR / "Gcash_QR.jpg")
+        )
+        self._gcash_qr_preview = qr_preview_pixmap(self._gcash_qr_source)
+        if not self._gcash_qr_source.isNull():
+            self.gcash_qr.setPixmap(
+                self._gcash_qr_source.scaled(
+                    172,
+                    344,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+            )
+            self.gcash_qr.setToolTip("Click to view a larger QR")
+            self.gcash_qr.setCursor(Qt.PointingHandCursor)
+            self.gcash_qr.clicked.connect(self._show_gcash_qr_preview)
+        else:
+            self.gcash_qr.setText("GCash QR unavailable")
+        self.gcash_qr.setAlignment(Qt.AlignCenter)
+        self.gcash_qr.setFixedWidth(184)
+
+        qr_column = QVBoxLayout()
+        qr_column.setContentsMargins(0, 0, 0, 0)
+        qr_column.setSpacing(6)
+        qr_column.addWidget(self.gcash_qr, 0, Qt.AlignTop)
+        self.qr_expand_link = text_button("View full size")
+        self.qr_expand_link.setObjectName("textButton")
+        self.qr_expand_link.clicked.connect(self._show_gcash_qr_preview)
+        if self._gcash_qr_source.isNull():
+            self.qr_expand_link.hide()
+        qr_column.addWidget(self.qr_expand_link, 0, Qt.AlignHCenter)
+        row.addLayout(qr_column, 0)
+
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(10)
+        right.addWidget(
+            make_label(
+                "Scan this QR in GCash, send the exact amount, then enter the "
+                "reference number shown on your receipt. Tap the QR or View "
+                "full size to enlarge it.",
+                "methodNote",
+                wrap=True,
+            )
+        )
+        right.addWidget(
+            self._field(
+                "gcash_reference",
+                "GCash reference number",
+                "Up to 15 digits",
+            )
+        )
+        right.addWidget(
             hint_label(
-                "The mock gateway confirms the GCash payment right away and "
-                "stores the reference on the booking.",
+                "The reference is stored on the booking so the branch can "
+                "match your payment. Enter up to 15 digits.",
+            )
+        )
+        right.addStretch(1)
+        row.addLayout(right, 1)
+        col.addLayout(row)
+        self._fields["gcash_reference"].setMaxLength(
+            card_validation.GCASH_REFERENCE_MAX_DIGITS
+        )
+        self._fields["gcash_reference"].setValidator(
+            QRegularExpressionValidator(
+                QRegularExpression(
+                    f"[0-9]{{0,{card_validation.GCASH_REFERENCE_MAX_DIGITS}}}"
+                ),
+                self._fields["gcash_reference"],
             )
         )
         return holder
+
+    def _show_gcash_qr_preview(self) -> None:
+        source = getattr(self, "_gcash_qr_preview", QPixmap())
+        if source.isNull():
+            source = getattr(self, "_gcash_qr_source", QPixmap())
+        if source.isNull():
+            return
+        dialog = QrPreviewDialog(source, self.window())
+        self._qr_dialog = dialog
+        dialog.destroyed.connect(self._forget_qr_dialog)
+        dialog.show()
+
+    def _forget_qr_dialog(self, *_args) -> None:
+        self._qr_dialog = None
 
     def _cash_form(self) -> QWidget:
         holder = QWidget()
@@ -524,7 +858,7 @@ class BookingCheckoutPage(QWidget):
         self._method = key
         for name, card in self.method_cards.items():
             card.set_selected(name == key)
-        index = [name for name, _t, _n, _i in PAYMENT_METHODS].index(key)
+        index = [name for name, _t, _n, _logo in PAYMENT_METHODS].index(key)
         self.method_forms.setCurrentIndex(index)
 
     def _fail(self, message: str, field: str | None = None) -> None:
@@ -550,6 +884,7 @@ class BookingCheckoutPage(QWidget):
             return
 
         details = None
+        gcash_reference = ""
         if self._method == "card":
             try:
                 details = card_validation.validate_card(
@@ -561,18 +896,19 @@ class BookingCheckoutPage(QWidget):
             except ServiceError as exc:
                 self._fail(str(exc), getattr(exc, "field", None))
                 return
-        if self._method == "gcash" and not card_validation.digits(
-            self._fields["gcash_number"].text()
-        ):
-            self._fail(
-                "Enter the GCash mobile number that will pay.", "gcash_number"
-            )
-            return
+        if self._method == "gcash":
+            try:
+                gcash_reference = card_validation.validate_gcash_reference(
+                    self._fields["gcash_reference"].text()
+                )
+            except ServiceError as exc:
+                self._fail(str(exc), getattr(exc, "field", None))
+                return
 
         self.pay_button.setEnabled(False)
         self.pay_button.setText("PROCESSING...")
         try:
-            reference, receipt = self._write_booking(details)
+            reference, receipt = self._write_booking(details, gcash_reference)
         except ServiceError as exc:
             self._fail(str(exc))
         except Exception as exc:  # noqa: BLE001 - the database is remote
@@ -590,7 +926,9 @@ class BookingCheckoutPage(QWidget):
             self.pay_button.setEnabled(True)
             self._price()
 
-    def _write_booking(self, details) -> tuple[str, str]:
+    def _write_booking(
+        self, details, gcash_reference: str = ""
+    ) -> tuple[str, str]:
         """Charge (mock), then save. Returns (reference, receipt line)."""
         method = self._method
         with SessionLocal() as session:
@@ -608,7 +946,12 @@ class BookingCheckoutPage(QWidget):
             quote = pricing.quote(
                 vehicle.daily_rate, self.draft.pickup_dt, self.draft.return_dt
             )
-            result = card_validation.collect(method, quote.total, details)
+            result = card_validation.collect(
+                method,
+                quote.total,
+                details,
+                reference=gcash_reference,
+            )
             if not result.ok:
                 # Declined: nothing is written, the customer keeps their dates.
                 raise ServiceError(result.message)

@@ -108,6 +108,24 @@ def test_mobile_accepts_only_eleven_digits_starting_09(signup):
     assert edit.text() == "09171234567"
 
 
+def test_signup_step_two_collects_a_guarantor_instead_of_a_licence(signup):
+    assert hasattr(signup, "guarantor_first_name")
+    assert hasattr(signup, "guarantor_last_name")
+    assert hasattr(signup, "guarantor_mobile")
+    assert not hasattr(signup, "license")
+
+    mobile = signup.guarantor_mobile
+    assert mobile.placeholderText() == "09XX XXX XXXX"
+    assert mobile.maxLength() == 11
+    mobile.setFocus()
+    QTest.keyClicks(mobile, "123")
+    assert mobile.text() == ""
+    QTest.keyClicks(mobile, "09181234567")
+    assert mobile.text() == "09181234567"
+    QTest.keyClicks(mobile, "8")
+    assert mobile.text() == "09181234567"
+
+
 @pytest.mark.parametrize("field_name", ["password", "confirm_password"])
 def test_signup_password_eyes_reveal_and_remask(signup, field_name):
     edit = getattr(signup, field_name)

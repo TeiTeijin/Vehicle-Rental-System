@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -64,7 +65,7 @@ from PySide6.QtWidgets import (
 from app.database import SessionLocal
 from app.services import image_cache, media_service, pricing
 from app.services.auth_service import is_valid_mobile, is_valid_street_address
-from app.services.customer_service import LICENCE_EXAMPLE, canonical_licence
+
 from app.services.location_service import MAX_STREET_LENGTH
 from app.services.vehicle_service import (
     ShowcaseVehicle,
@@ -934,7 +935,7 @@ def _build_signup_step_two(
     cities_for: Optional[Callable[[str], Iterable]],
     location_error: str,
 ) -> QWidget:
-    """Step 2: the PSGC address pair, street line and licence number."""
+    """Step 2: the PSGC address pair, street line and guarantor details."""
     page, col = _new_signup_page()
 
     top = QHBoxLayout()
@@ -946,9 +947,9 @@ def _build_signup_step_two(
     col.addLayout(top)
     col.addSpacing(8)
 
-    col.addWidget(make_label("Address & licence", "cardTitle"))
+    col.addWidget(make_label("Address & guarantor", "cardTitle"))
     col.addWidget(make_label(
-        "Where we'll reach you, and the licence you'll show at pickup.",
+        "Where we'll reach you, and who we can call if we can't reach you.",
         "cardSubtitle", wrap=True,
     ))
     col.addSpacing(14)
@@ -981,24 +982,41 @@ def _build_signup_step_two(
     col.addWidget(scroll.street_hint)
     col.addSpacing(14)
 
-    # ----- licence -----
-    licence_lbl, scroll.license = _field(
-        "Driver's licence no.", LICENCE_EXAMPLE
+    # ----- guarantor -----
+    col.addWidget(overline("Guarantor"))
+    col.addWidget(make_label(
+        "Someone we can call if we can't reach you. They must be old enough "
+        "to vouch for you and reachable on a Philippine mobile number.",
+        "note", wrap=True,
+    ))
+    col.addSpacing(8)
+
+    col.addLayout(_field_row(
+        scroll,
+        "Guarantor first name",
+        "First name",
+        "guarantor_first_name",
+        "Guarantor last name",
+        "Last name",
+        "guarantor_last_name",
+    ))
+    col.addSpacing(14)
+
+    guarantor_mobile_lbl, scroll.guarantor_mobile = _field(
+        "Guarantor mobile number", "09XX XXX XXXX"
     )
-    scroll.license.setMaxLength(12)
-    scroll.license.setValidator(
-        QRegularExpressionValidator(
-            QRegularExpression("[A-Za-z0-9 -]*"), scroll.license
-        )
+    scroll.guarantor_mobile.setMaxLength(11)
+    scroll.guarantor_mobile.setValidator(
+        QRegularExpressionValidator(QRegularExpression("09[0-9]*"), scroll.guarantor_mobile)
     )
-    scroll.license_hint = _field_hint()
-    col.addWidget(licence_lbl)
-    col.addWidget(scroll.license)
-    col.addWidget(scroll.license_hint)
+    scroll.guarantor_mobile_hint = _field_hint()
+    col.addWidget(guarantor_mobile_lbl)
+    col.addWidget(scroll.guarantor_mobile)
+    col.addWidget(scroll.guarantor_mobile_hint)
     col.addSpacing(10)
 
     col.addWidget(make_label(
-        "The counter checks your physical licence and its expiry at pickup.",
+        "The counter verifies your physical driver's licence at pickup.",
         "note", wrap=True,
     ))
     col.addSpacing(14)
@@ -1052,12 +1070,19 @@ def _build_signup_step_two(
         city.setCurrentIndex(-1)
         city.blockSignals(False)
 
+    def guarantor_ready() -> bool:
+        return (
+            bool(scroll.guarantor_first_name.text().strip())
+            and bool(scroll.guarantor_last_name.text().strip())
+            and is_valid_mobile(scroll.guarantor_mobile.text())
+        )
+
     def address_ready() -> bool:
         return (
             bool(selected_key(scroll.province))
             and bool(selected_key(scroll.municipality))
             and is_valid_street_address(scroll.street.text())
-            and canonical_licence(scroll.license.text()) is not None
+            and guarantor_ready()
         )
 
     def update_finish() -> None:
@@ -1123,25 +1148,26 @@ def _build_signup_step_two(
             scroll.street_hint.show()
         update_finish()
 
-    def licence_changed(_text: str = "") -> None:
-        text = scroll.license.text().strip()
-        if not text:
-            _set_field_state(scroll.license, "")
-            scroll.license_hint.hide()
-        elif canonical_licence(text):
-            _set_field_state(scroll.license, "ok")
-            scroll.license_hint.hide()
-        else:
-            _set_field_state(scroll.license, "error")
-            scroll.license_hint.setText(f"Use the format {LICENCE_EXAMPLE}.")
-            scroll.license_hint.show()
+    def guarantor_name_changed(_text: str = "") -> None:
+        for edit in (scroll.guarantor_first_name, scroll.guarantor_last_name):
+            _set_field_state(edit, "ok" if edit.text().strip() else "")
         update_finish()
 
-    def commit_licence(*_args) -> None:
-        canon = canonical_licence(scroll.license.text())
-        if canon is not None and canon != scroll.license.text():
-            scroll.license.setText(canon)
-        licence_changed()
+    def guarantor_mobile_changed(_text: str = "") -> None:
+        text = scroll.guarantor_mobile.text().strip()
+        if not text:
+            _set_field_state(scroll.guarantor_mobile, "")
+            scroll.guarantor_mobile_hint.hide()
+        elif is_valid_mobile(text):
+            _set_field_state(scroll.guarantor_mobile, "ok")
+            scroll.guarantor_mobile_hint.hide()
+        else:
+            _set_field_state(scroll.guarantor_mobile, "error")
+            scroll.guarantor_mobile_hint.setText(
+                "Use an 11-digit number starting with 09."
+            )
+            scroll.guarantor_mobile_hint.show()
+        update_finish()
 
     scroll.province.editTextChanged.connect(province_typed)
     scroll.province.currentIndexChanged.connect(lambda _i: province_typed())
@@ -1153,8 +1179,9 @@ def _build_signup_step_two(
     scroll.municipality.lineEdit().editingFinished.connect(commit_city)
     scroll.street.textChanged.connect(street_changed)
     scroll.street.editingFinished.connect(street_changed)
-    scroll.license.textChanged.connect(licence_changed)
-    scroll.license.editingFinished.connect(commit_licence)
+    scroll.guarantor_first_name.textChanged.connect(guarantor_name_changed)
+    scroll.guarantor_last_name.textChanged.connect(guarantor_name_changed)
+    scroll.guarantor_mobile.textChanged.connect(guarantor_mobile_changed)
 
     scroll.province.blockSignals(True)
     for option in province_options:
@@ -1171,9 +1198,14 @@ def _build_signup_step_two(
             "province_key": selected_key(scroll.province) or "",
             "city_municipality_code": selected_key(scroll.municipality) or "",
             "street_address": " ".join(scroll.street.text().split()),
-            "license_number": (
-                canonical_licence(scroll.license.text())
-                or scroll.license.text().strip()
+            "guarantor_first_name": " ".join(
+                scroll.guarantor_first_name.text().split()
+            ),
+            "guarantor_last_name": " ".join(
+                scroll.guarantor_last_name.text().split()
+            ),
+            "guarantor_mobile": "".join(
+                scroll.guarantor_mobile.text().split()
             ),
         }
 
@@ -1289,7 +1321,6 @@ NAV_TABS: tuple[tuple[str, str], ...] = (
     ("vehicles", "Vehicles"),
     ("bookings", "Bookings"),
     ("payments", "Payments"),
-    ("notifications", "Notification"),
 )
 
 #: How many vehicles one page of the browse grid holds.
@@ -1569,6 +1600,7 @@ class NavBar(QFrame):
     tab_selected = Signal(str)
     search_changed = Signal(str)
     auth_clicked = Signal()
+    notifications_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1584,6 +1616,45 @@ class NavBar(QFrame):
         self.search.setMinimumWidth(300)
         self.search.setMaximumWidth(340)
         self.search.textChanged.connect(self.search_changed)
+
+        # The bell is an account feature: hidden until a customer signs in.
+        self._notifications_unread = False
+        self._notifications_count = 0
+        self.notifications_button = QPushButton()
+        self.notifications_button.setObjectName("notifButton")
+        self.notifications_button.setCursor(Qt.PointingHandCursor)
+        self.notifications_button.setFocusPolicy(Qt.NoFocus)
+        self.notifications_button.setFixedSize(40, 40)
+        self.notifications_button.setIconSize(QSize(30, 30))
+        self.notifications_button.setToolTip("Notifications")
+        self.notifications_button.setAccessibleName("Notifications")
+        self.notifications_button.clicked.connect(
+            lambda _checked=False: self.notifications_clicked.emit()
+        )
+        self.notifications_button.hide()
+
+        # Scale the shipped 512px art once; the loop only rotates a 22px copy.
+        self._bell_pixmaps = {
+            state: QPixmap(str(ICONS_DIR / name)).scaled(
+                22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            for state, name in (
+                (False, "notif.png"),
+                (True, "notif_ring.png"),
+            )
+        }
+
+        # One looping swing while there is something unread. The ring icon has
+        # the motion lines; rotating it makes the bell read as "ringing" even
+        # at the small top-bar size.
+        self._bell_animation = QVariantAnimation(self)
+        self._bell_animation.setStartValue(0.0)
+        self._bell_animation.setEndValue(1.0)
+        self._bell_animation.setDuration(1600)
+        self._bell_animation.setLoopCount(-1)
+        self._bell_animation.setEasingCurve(QEasingCurve.Linear)
+        self._bell_animation.valueChanged.connect(self._on_bell_frame)
+        self._paint_bell(0.0)
 
         self.auth_button = QPushButton(GUEST_LABEL)
         self.auth_button.setObjectName("authButton")
@@ -1649,9 +1720,10 @@ class NavBar(QFrame):
         holder.setObjectName("navSection")
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(16)
+        row.setSpacing(12)
         row.addStretch(1)
         row.addWidget(self.search)
+        row.addWidget(self.notifications_button)
         row.addWidget(self.auth_button)
         return holder
 
@@ -1676,19 +1748,79 @@ class NavBar(QFrame):
             button.setChecked(False)
         self._group.setExclusive(True)
 
+    def set_notification_state(self, unread: bool, count: int = 0) -> None:
+        """Swap the bell to the ring icon and swing it while something is new."""
+        unread = bool(unread)
+        self._notifications_unread = unread
+        self._notifications_count = max(0, int(count))
+        self.notifications_button.setProperty("unread", unread)
+        self.notifications_button.style().unpolish(self.notifications_button)
+        self.notifications_button.style().polish(self.notifications_button)
+
+        if unread:
+            noun = (
+                "notification"
+                if self._notifications_count == 1
+                else "notifications"
+            )
+            self.notifications_button.setToolTip(
+                f"{self._notifications_count} new {noun}"
+            )
+            self._paint_bell(0.0)
+            if (
+                self._bell_animation.state()
+                != QAbstractAnimation.State.Running
+            ):
+                self._bell_animation.start()
+        else:
+            self.notifications_button.setToolTip("Notifications")
+            self._bell_animation.stop()
+            self._paint_bell(0.0)
+
+    def _on_bell_frame(self, value) -> None:
+        """One frame of the soft ring: a sine swing around the icon's centre."""
+        angle = 12.0 * math.sin(float(value) * math.tau)
+        self._paint_bell(angle)
+
+    def _paint_bell(self, angle: float) -> None:
+        bell = self._bell_pixmaps[self._notifications_unread]
+        if bell.isNull():
+            self.notifications_button.setIcon(QIcon())
+            return
+
+        # Rotate on a slightly larger transparent canvas so the tips of the
+        # ring never clip against the button's icon bounds.
+        canvas = QPixmap(30, 30)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.translate(canvas.width() / 2, canvas.height() / 2)
+        painter.rotate(angle)
+        painter.drawPixmap(-bell.width() // 2, -bell.height() // 2, bell)
+        painter.end()
+        self.notifications_button.setIcon(QIcon(canvas))
+
     def set_user(self, name: str | None) -> None:
         """Guest shows the call to action; a customer gets the account avatar."""
         signed_in = bool(name)
+        self.notifications_button.setVisible(signed_in)
+        if not signed_in:
+            self.set_notification_state(False, 0)
         if signed_in:
             self.auth_button.setText("")
             self.auth_button.setIcon(QIcon(str(ICONS_DIR / "account.png")))
             self.auth_button.setIconSize(QSize(30, 30))
+            self.auth_button.setFixedSize(40, 40)
             self.auth_button.setToolTip(f"Signed in as {name}")
             self.auth_button.setAccessibleName("Account")
         else:
             self.auth_button.setText(GUEST_LABEL)
             self.auth_button.setIcon(QIcon())
             self.auth_button.setIconSize(QSize(18, 18))
+            self.auth_button.setMinimumWidth(0)
+            self.auth_button.setMaximumWidth(16777215)
+            self.auth_button.setFixedHeight(40)
             self.auth_button.setToolTip("")
             self.auth_button.setAccessibleName(GUEST_LABEL)
         # The property drives the QSS (dark pill for a guest, soft tan chip

@@ -99,6 +99,10 @@ def seed_demo_customer(session: Session) -> Users:
         address="1 Ayala Avenue, Makati City",
         license_number="DEMO-00001",
         license_expiry=date(date.today().year + 5, 12, 31),
+        guarantor_first_name="Rosa",
+        guarantor_last_name="Santos",
+        guarantor_mobile="09181234567",
+        emergency_contact="Rosa Santos - 09181234567",
         role="customer",
         # Signing up through the app is the only way a row gets this stamp.
         source="online",

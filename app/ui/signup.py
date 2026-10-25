@@ -27,7 +27,7 @@ _STEP_ONE_FIELDS = {"full_name", "email", "phone", "password"}
 class Signup(QMainWindow):
     """Create-account screen. Mirrors the sign-in window in customer_login.py.
 
-    The card has two pages: account details, then address and licence. The
+    The card has two pages: account details, then address and guarantor. The
     first page's button slides to the second; only the second page submits.
 
     Parameters
@@ -126,8 +126,8 @@ class Signup(QMainWindow):
         self.form.refresh_address_validation()
         if not self.form.address_ready():
             self._show_step_two_error(
-                "Choose your province and city/municipality, then complete "
-                "the street address and licence number."
+                "Choose your province and city/municipality, complete the "
+                "street address, and add your guarantor's name and mobile."
             )
             return
 
@@ -157,7 +157,9 @@ class Signup(QMainWindow):
                     street_address=address["street_address"],
                     province_key=address["province_key"],
                     city_municipality_code=address["city_municipality_code"],
-                    license_number=address["license_number"],
+                    guarantor_first_name=address["guarantor_first_name"],
+                    guarantor_last_name=address["guarantor_last_name"],
+                    guarantor_mobile=address["guarantor_mobile"],
                 )
                 identity = Identity.of(user)
                 session.commit()
@@ -200,8 +202,10 @@ class Signup(QMainWindow):
             "street_address",
             "province_code",
             "city_municipality_code",
-            "license_number",
-        ) or "licence" in message.lower():
+            "guarantor_first_name",
+            "guarantor_last_name",
+            "guarantor_mobile",
+        ) or "guarantor" in message.lower():
             self._show_step_two_error(message)
             return
         # Unknown failure (database/network): show it where the user is.

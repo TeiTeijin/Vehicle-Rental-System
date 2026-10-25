@@ -28,6 +28,10 @@ DECLINE_SUFFIX = "0002"
 #: How far ahead an expiry may be before we call it a typo.
 MAX_EXPIRY_YEARS = 20
 
+#: Longest GCash receipt reference we accept. Real references vary in length,
+#: so anything from one to fifteen digits is valid.
+GCASH_REFERENCE_MAX_DIGITS = 15
+
 PESO = "\u20b1"
 
 
@@ -74,6 +78,22 @@ def format_expiry(text: str) -> str:
 
 def format_cvv(text: str) -> str:
     return digits(text)[:4]
+
+
+def validate_gcash_reference(text: str) -> str:
+    """Return a 1-15 digit GCash reference, or raise with a field hint."""
+    value = digits(text)
+    if not value:
+        raise ValidationError(
+            "Enter the GCash reference number from your receipt.",
+            field="gcash_reference",
+        )
+    if len(value) > GCASH_REFERENCE_MAX_DIGITS:
+        raise ValidationError(
+            "GCash reference numbers can be up to 15 digits.",
+            field="gcash_reference",
+        )
+    return value
 
 
 # ---------- card checks ----------
@@ -198,12 +218,21 @@ def charge_card(details: CardDetails, amount: Decimal) -> ChargeResult:
     )
 
 
-def charge_gcash(amount: Decimal) -> ChargeResult:
-    """Simulated GCash confirmation: the QR was scanned and paid."""
+def charge_gcash(amount: Decimal, reference: str = "") -> ChargeResult:
+    """Simulated GCash confirmation: the QR was scanned and paid.
+
+    The reference the customer read off their GCash receipt is kept; the
+    generated fallback only exists for callers that have not collected one
+    (the mock gateway tests).
+    """
+    reference_no = (reference or "").strip() or _reference("GCASH")
     return ChargeResult(
         ok=True,
-        message=f"GCash payment of {PESO}{amount:,.2f} confirmed.",
-        reference=_reference("GCASH"),
+        message=(
+            f"GCash payment of {PESO}{amount:,.2f} confirmed "
+            f"(ref {reference_no})."
+        ),
+        reference=reference_no,
     )
 
 
@@ -217,7 +246,11 @@ def pay_at_pickup(amount: Decimal) -> ChargeResult:
 
 
 def collect(
-    method: str, amount: Decimal, details: CardDetails | None = None
+    method: str,
+    amount: Decimal,
+    details: CardDetails | None = None,
+    *,
+    reference: str = "",
 ) -> ChargeResult:
     """Run the mock payment for one method. Never raises; callers read `ok`."""
     if method == "card":
@@ -225,7 +258,7 @@ def collect(
             return ChargeResult(ok=False, message="Card details are missing.")
         return charge_card(details, amount)
     if method == "gcash":
-        return charge_gcash(amount)
+        return charge_gcash(amount, reference)
     return pay_at_pickup(amount)
 
 

@@ -81,6 +81,21 @@ ADDITIONS: dict[str, list[tuple[str, str, str]]] = {
             "who to call. Optional on the form",
         ),
         (
+            "guarantor_first_name",
+            "VARCHAR(120) NULL",
+            "given name of the person to call if the customer is unreachable",
+        ),
+        (
+            "guarantor_last_name",
+            "VARCHAR(120) NULL",
+            "family name of the guarantor",
+        ),
+        (
+            "guarantor_mobile",
+            "VARCHAR(20) NULL",
+            "11-digit Philippine mobile for the guarantor",
+        ),
+        (
             "source",
             "VARCHAR(10) NULL",
             "walk_in or online. Backfilled by migrate_customer_management",

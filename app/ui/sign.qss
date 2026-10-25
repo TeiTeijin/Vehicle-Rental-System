@@ -141,6 +141,21 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
 }
 #navSearch:focus { border: 1px solid @gold; background: @surface; }
 
+#notifButton {
+    background: transparent;
+    border: 1px solid @line;
+    border-radius: 20px;
+    padding: 0;
+}
+#notifButton:hover {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+}
+#notifButton[unread="true"] {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+}
+
 #authButton {
     background: @bg_dark;
     border: 1px solid @bg_dark;
@@ -154,12 +169,72 @@ QLineEdit[state="ok"]    { border: 1px solid @success; }
 #authButton[authenticated="true"] {
     background: @panel_tan_soft;
     border: 1px solid @line_strong;
+    border-radius: 20px;
     color: @text_dark;
-    /* A square-ish chip around the account avatar, not a text button. */
-    padding: 0 4px;
+    /* A perfect circle around the account avatar, not a text button. */
+    padding: 0;
+}
+#authButton[authenticated="true"]:hover {
+    background: @surface;
+    border-color: @gold;
 }
 
-/* ---- account menu ---- */
+/* ---- account popup (app/ui/account_popup.py) ---- */
+#accountPopup { background: transparent; }
+#accountPanel {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 20px;
+}
+#accountAvatar {
+    background: @panel_tan_soft;
+    border: 1px solid @line_strong;
+    border-radius: 24px;
+}
+#accountName { color: @text_dark; font-size: 12pt; font-weight: 700; }
+#accountEmail { color: @text_muted; font-size: 9pt; }
+#accountClose {
+    background: transparent;
+    border: none;
+    border-radius: 14px;
+    padding: 2px;
+}
+#accountClose:hover { background: @panel_tan_soft; }
+#accountDivider { background: @line; }
+#accountSection {
+    color: @text_muted;
+    font-size: 8pt;
+    font-weight: 700;
+    padding-top: 2px;
+}
+#accountAction {
+    background: @surface_soft;
+    border: 1px solid @line;
+    border-radius: 14px;
+}
+#accountAction:hover {
+    background: @panel_tan_soft;
+    border-color: @line_strong;
+}
+#accountAction[danger="true"] {
+    background: #FDF7F5;
+    border-color: #F0DDD7;
+}
+#accountAction[danger="true"]:hover {
+    background: @danger_soft;
+    border-color: #E5B8AD;
+}
+#accountActionIcon {
+    background: @panel_tan_soft;
+    border-radius: 18px;
+}
+#accountActionIcon[danger="true"] { background: @danger_soft; }
+#accountActionTitle { color: @text_dark; font-size: 10pt; font-weight: 700; }
+#accountActionTitle[danger="true"] { color: @danger; }
+#accountActionSubtitle { color: @text_muted; font-size: 9pt; }
+#accountActionArrow { background: transparent; }
+
+/* ---- native menus kept for any older popup ---- */
 QMenu {
     background: @surface;
     border: 1px solid @line;
@@ -179,6 +254,68 @@ QMenu::separator {
     background: @line;
     margin: 6px 8px;
 }
+
+/* ---- notifications (app/ui/notifications.py) ---- */
+#notificationPopup { background: transparent; }
+#notificationPanel {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 18px;
+}
+#notificationTitle { color: @text_dark; font-size: 15pt; font-weight: 700; }
+#notificationSubtitle { color: @text_muted; font-size: 9pt; }
+#notificationCount {
+    background: @panel_tan_soft;
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 2px 8px;
+    color: @text_dark;
+    font-size: 8pt;
+    font-weight: 700;
+}
+#notificationClose {
+    background: transparent;
+    border: none;
+    border-radius: 14px;
+    padding: 0;
+}
+#notificationClose:hover { background: @panel_tan_soft; }
+#notificationDivider { background: @line; border: none; }
+
+#notificationItem {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+}
+#notificationItem:hover {
+    background: @surface_soft;
+    border: 1px solid @line;
+}
+#notificationItem[unread="true"] {
+    background: @panel_tan_soft;
+    border: 1px solid @line;
+}
+#notificationIcon {
+    background: @surface_soft;
+    border: 1px solid @line;
+    border-radius: 17px;
+}
+#notificationIcon[kind="pickup"] { background: @amber_soft; border-color: #e8d7b5; }
+#notificationIcon[kind="pending"] { background: @amber_soft; border-color: #e8d7b5; }
+#notificationIcon[kind="success"] { background: @green_soft; border-color: #cfe3d3; }
+#notificationIcon[kind="ongoing"] { background: @panel_tan_soft; border-color: @line_strong; }
+#notificationIcon[kind="completed"] { background: @surface_soft; border-color: @line; }
+#notificationItemTitle { color: @text_dark; font-size: 10pt; font-weight: 700; }
+#notificationItemBody { color: @text_muted; font-size: 9pt; }
+#notificationItemMeta { color: @muted_soft; font-size: 8pt; }
+
+#notificationEmptyIcon {
+    background: @green_soft;
+    border: 1px solid #cfe3d3;
+    border-radius: 22px;
+}
+#notificationEmptyTitle { color: @text_dark; font-size: 11pt; font-weight: 700; }
+#notificationEmptyBody { color: @text_muted; font-size: 9pt; }
 
 /* ---- account information (app/ui/profile.py) ---- */
 #profileHeader {
@@ -396,6 +533,14 @@ QMenu::separator {
 #overlaySubtitle { color: @text_muted; font-size: 10pt; }
 #overlayNote { color: @text_muted; font-size: 9pt; }
 
+/* ---- password reset ---- */
+#successBanner {
+    background: @green_soft;
+    border: 1px solid #CFE3D3;
+    border-radius: 10px;
+}
+#successTitle { color: @green; font-size: 8pt; font-weight: 700; }
+
 /* ---- payment method radios ---- */
 #methodCard {
     background: @surface;
@@ -404,9 +549,52 @@ QMenu::separator {
     padding: 12px 14px;
 }
 #methodCard:hover { border-color: @line_strong; }
-#methodCard[selected="true"] { border: 1px solid @gold; background: @panel_tan_soft; }
+/* Selected methods go dark, matching the checkout guide. The child labels
+   carry their own `selected` property because Qt does not reliably re-polish
+   descendants when only the parent's dynamic property changes. */
+#methodCard[selected="true"] {
+    border: 1px solid @bg_dark;
+    background: @bg_dark;
+}
+#methodCard[selected="true"]:hover { border-color: @bg_dark; }
 #methodTitle { color: @text_dark; font-size: 11pt; font-weight: 700; }
+#methodTitle[selected="true"] { color: @text_on_dark; }
 #methodNote { color: @text_muted; font-size: 9pt; }
+#methodNote[selected="true"] { color: @text_on_dark_muted; }
+#methodLogo {
+    background: #FFFFFF;
+    border: 1px solid @line;
+    border-radius: 8px;
+}
+#methodLogo[selected="true"] { border-color: #3B362C; }
+#gcashQr {
+    background: #FFFFFF;
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 6px;
+}
+#gcashQr:hover { border-color: @gold; }
+
+/* ---- fixed-size GCash QR preview ---- */
+#qrFullscreen { background: #17140F; }
+#qrFullscreenTitle { color: #FFFFFF; font-size: 22pt; font-weight: 700; }
+#qrFullscreenSubtitle { color: rgba(255, 255, 255, 175); font-size: 10pt; }
+#qrFullscreenClose {
+    background: rgba(255, 255, 255, 18);
+    border: 1px solid rgba(255, 255, 255, 40);
+    border-radius: 19px;
+}
+#qrFullscreenClose:hover {
+    background: rgba(255, 255, 255, 34);
+    border-color: rgba(255, 255, 255, 70);
+}
+#qrFullscreenCard {
+    background: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 18px;
+}
+#qrFullscreenImage { background: #FFFFFF; }
+#qrFullscreenFooter { color: rgba(255, 255, 255, 150); font-size: 9pt; }
 
 /* ---- booking summary bar ---- */
 #summaryBar {
