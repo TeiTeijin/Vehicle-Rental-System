@@ -2739,6 +2739,51 @@ class TestCustomersPage:
         assert page.clear_button.property("corner") == "topRight"
         assert page.add_button.property("corner") == "bottomLeft"
 
+    def test_customer_search_outside_cap(self, branch):
+        from app.staff import prefs
+        from app.staff.pages.customers import CustomerFilter, _customer_rows
+
+        _built, context = branch
+        limit = prefs.rows_limit(100)
+        with context.session() as session:
+            for index in range(limit + 20):
+                session.add(
+                    Users(
+                        full_name=f"Cap Test {index}",
+                        email=f"cap{index}@example.com",
+                        phone=f"0917{index:07d}",
+                        password_hash="x",
+                        address="1 Cap Street",
+                        license_number=f"CAP{index:06d}",
+                        license_expiry=TODAY + timedelta(days=365),
+                        role="customer",
+                        birthdate=date(1995, 1, 1),
+                        source="walk_in",
+                        is_active=True,
+                        created_at=datetime(2026, 10, 25, 12, index % 60),
+                    )
+                )
+            session.add(
+                Users(
+                    full_name="Zulu Target",
+                    email="zulu@example.com",
+                    phone="09170000000",
+                    password_hash="x",
+                    address="1 Target Street",
+                    license_number="ZULU000001",
+                    license_expiry=TODAY + timedelta(days=365),
+                    role="customer",
+                    birthdate=date(1990, 1, 1),
+                    source="walk_in",
+                    is_active=True,
+                    created_at=datetime(2020, 1, 1, 9, 0),
+                )
+            )
+
+        found = _customer_rows(context, CustomerFilter(search="Zulu Target"))
+        assert [row[0] for row in found] == ["Zulu Target"]
+        assert len(_customer_rows(context, CustomerFilter())) <= limit
+
     def test_search_narrows_to_the_named_customer(self, shell, branch):
         from app.staff.pages.customers import CustomersPage
 

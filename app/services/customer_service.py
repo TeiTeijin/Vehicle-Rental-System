@@ -392,55 +392,63 @@ def outstanding_for(session: Session, customer: Users):
     return payment_service.money(total, field="balance")
 
 
-def outstanding_by_customer(session: Session) -> dict[int, Decimal]:
+def outstanding_by_customer(
+    session: Session, user_ids: list[int] | None = None
+) -> dict[int, Decimal]:
     """Every customer's balance in three grouped queries.
 
     The page previously called `outstanding_for` once per customer, which
     turned one list load into a booking, penalty, and payment query per row.
     The arithmetic is the same as `booking_balance`: rental total plus
-    penalties minus paid rental/applied-deposit money.
+    penalties minus paid rental/applied-deposit money. Pass `user_ids` to
+    scope the grouped queries to the customers on the visible page.
     """
     from sqlalchemy import func, select
 
     from app.models import Booking, Payment, Penalty
     from app.services import payment_service
 
-    rental = dict(
-        session.execute(
-            select(
-                Booking.user_id,
-                func.coalesce(func.sum(Booking.total_cost), 0),
-            )
-            .where(Booking.status.in_(BALANCE_STATUSES))
-            .group_by(Booking.user_id)
-        ).all()
+    if user_ids is not None and not user_ids:
+        return {}
+
+    rental_stmt = (
+        select(
+            Booking.user_id,
+            func.coalesce(func.sum(Booking.total_cost), 0),
+        )
+        .where(Booking.status.in_(BALANCE_STATUSES))
+        .group_by(Booking.user_id)
     )
-    penalties = dict(
-        session.execute(
-            select(
-                Booking.user_id,
-                func.coalesce(func.sum(Penalty.amount), 0),
-            )
-            .join(Booking, Penalty.booking_id == Booking.booking_id)
-            .where(Booking.status.in_(BALANCE_STATUSES))
-            .group_by(Booking.user_id)
-        ).all()
+    penalties_stmt = (
+        select(
+            Booking.user_id,
+            func.coalesce(func.sum(Penalty.amount), 0),
+        )
+        .join(Booking, Penalty.booking_id == Booking.booking_id)
+        .where(Booking.status.in_(BALANCE_STATUSES))
+        .group_by(Booking.user_id)
     )
-    paid = dict(
-        session.execute(
-            select(
-                Booking.user_id,
-                func.coalesce(func.sum(Payment.amount), 0),
-            )
-            .join(Booking, Payment.booking_id == Booking.booking_id)
-            .where(
-                Booking.status.in_(BALANCE_STATUSES),
-                Payment.status == "paid",
-                Payment.kind.in_(("rental", "deposit_applied")),
-            )
-            .group_by(Booking.user_id)
-        ).all()
+    paid_stmt = (
+        select(
+            Booking.user_id,
+            func.coalesce(func.sum(Payment.amount), 0),
+        )
+        .join(Booking, Payment.booking_id == Booking.booking_id)
+        .where(
+            Booking.status.in_(BALANCE_STATUSES),
+            Payment.status == "paid",
+            Payment.kind.in_(("rental", "deposit_applied")),
+        )
+        .group_by(Booking.user_id)
     )
+    if user_ids is not None:
+        rental_stmt = rental_stmt.where(Booking.user_id.in_(user_ids))
+        penalties_stmt = penalties_stmt.where(Booking.user_id.in_(user_ids))
+        paid_stmt = paid_stmt.where(Booking.user_id.in_(user_ids))
+
+    rental = dict(session.execute(rental_stmt).all())
+    penalties = dict(session.execute(penalties_stmt).all())
+    paid = dict(session.execute(paid_stmt).all())
     return {
         user_id: payment_service.money(
             rental.get(user_id, 0)
@@ -452,17 +460,24 @@ def outstanding_by_customer(session: Session) -> dict[int, Decimal]:
     }
 
 
-def open_bookings_by_customer(session: Session) -> dict[int, bool]:
+def open_bookings_by_customer(
+    session: Session, user_ids: list[int] | None = None
+) -> dict[int, bool]:
     """Customer ids with at least one pending/confirmed/ongoing booking."""
     from sqlalchemy import select
 
     from app.models import Booking
 
-    ids = session.execute(
+    if user_ids is not None and not user_ids:
+        return {}
+    stmt = (
         select(Booking.user_id)
         .where(Booking.status.in_(OPEN_STATUSES))
         .distinct()
-    ).scalars()
+    )
+    if user_ids is not None:
+        stmt = stmt.where(Booking.user_id.in_(user_ids))
+    ids = session.execute(stmt).scalars()
     return {user_id: True for user_id in ids}
 
 

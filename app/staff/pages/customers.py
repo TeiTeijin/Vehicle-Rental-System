@@ -18,13 +18,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
-from app.models import Booking, Users
+from app.models import Booking, Payment, Penalty, Users
 from app.services import customer_service, payment_service, settings_service
 from app.services.booking_service import check_licence
 from app.services.errors import ServiceError
-from app.staff import theme
+from app.staff import prefs, theme
 from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
@@ -103,6 +103,7 @@ def _matches_customer(
 
 def _customer_rows(context, filtr: CustomerFilter):
     today = date.today()
+    limit = prefs.rows_limit(100)
 
     with context.reading() as session:
         soon = today + timedelta(
@@ -110,21 +111,106 @@ def _customer_rows(context, filtr: CustomerFilter):
                 session, "licence_expiring_days"
             )
         )
-        owed_by_customer = customer_service.outstanding_by_customer(session)
-        open_by_customer = customer_service.open_bookings_by_customer(session)
-        rental_counts = dict(
-            session.execute(
-                select(Booking.user_id, func.count(Booking.booking_id)).group_by(
-                    Booking.user_id
+        stmt = select(Users).where(Users.role == "customer")
+        if filtr.licence == "missing":
+            stmt = stmt.where(Users.license_expiry.is_(None))
+        elif filtr.licence == "expired":
+            stmt = stmt.where(Users.license_expiry < today)
+        elif filtr.licence == "expiring":
+            stmt = stmt.where(
+                Users.license_expiry >= today,
+                Users.license_expiry <= soon,
+            )
+        elif filtr.licence == "valid":
+            stmt = stmt.where(Users.license_expiry > soon)
+        if filtr.blocked_only:
+            stmt = stmt.where(
+                or_(
+                    Users.license_expiry.is_(None),
+                    Users.license_expiry < today,
                 )
-            ).all()
-        )
+            )
+        if filtr.flagged_only:
+            stmt = stmt.where(
+                Users.flag_reason.is_not(None),
+                func.trim(Users.flag_reason) != "",
+            )
+        if filtr.has_active:
+            stmt = stmt.where(
+                Users.bookings.any(
+                    Booking.status.in_(customer_service.OPEN_STATUSES)
+                )
+            )
+        needle = filtr.search.strip().lower()
+        if needle:
+            pattern = f"%{needle}%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(Users.full_name).like(pattern),
+                    func.lower(Users.email).like(pattern),
+                    func.lower(Users.phone).like(pattern),
+                    func.lower(Users.license_number).like(pattern),
+                )
+            )
+        if filtr.has_balance:
+            rental_total = (
+                select(func.coalesce(func.sum(Booking.total_cost), 0))
+                .where(
+                    Booking.user_id == Users.user_id,
+                    Booking.status.in_(customer_service.BALANCE_STATUSES),
+                )
+                .correlate(Users)
+                .scalar_subquery()
+            )
+            penalty_total = (
+                select(func.coalesce(func.sum(Penalty.amount), 0))
+                .join(Booking, Penalty.booking_id == Booking.booking_id)
+                .where(
+                    Booking.user_id == Users.user_id,
+                    Booking.status.in_(customer_service.BALANCE_STATUSES),
+                )
+                .correlate(Users)
+                .scalar_subquery()
+            )
+            paid_total = (
+                select(func.coalesce(func.sum(Payment.amount), 0))
+                .join(Booking, Payment.booking_id == Booking.booking_id)
+                .where(
+                    Booking.user_id == Users.user_id,
+                    Booking.status.in_(customer_service.BALANCE_STATUSES),
+                    Payment.status == "paid",
+                    Payment.kind.in_(("rental", "deposit_applied")),
+                )
+                .correlate(Users)
+                .scalar_subquery()
+            )
+            stmt = stmt.where(
+                rental_total + penalty_total - paid_total > ZERO
+            )
 
         customers = session.execute(
-            select(Users)
-            .where(Users.role == "customer")
-            .order_by(Users.created_at.desc(), Users.user_id.desc())
+            stmt.order_by(Users.created_at.desc(), Users.user_id.desc()).limit(
+                limit
+            )
         ).scalars().all()
+        customer_ids = [customer.user_id for customer in customers]
+        owed_by_customer = customer_service.outstanding_by_customer(
+            session, customer_ids
+        )
+        open_by_customer = customer_service.open_bookings_by_customer(
+            session, customer_ids
+        )
+        rental_counts = (
+            dict(
+                session.execute(
+                    select(Booking.user_id, func.count(Booking.booking_id))
+                    .where(Booking.user_id.in_(customer_ids))
+                    .group_by(Booking.user_id)
+                ).all()
+            )
+            if customer_ids
+            else {}
+        )
 
         rows = []
         for customer in customers:
@@ -144,10 +230,6 @@ def _customer_rows(context, filtr: CustomerFilter):
                 blocked = "-"
 
             owed = owed_by_customer.get(customer.user_id, ZERO)
-            has_open = open_by_customer.get(customer.user_id, False)
-            if not _matches_customer(customer, bucket, blocked, owed, has_open, filtr):
-                continue
-
             rows.append(
                 (
                     customer.full_name,
@@ -374,7 +456,10 @@ class CustomersPage(StaffPage):
         self.table._sync_stack()
         self._done_gen = gen
         self._hide_skeleton()
-        self.count_caption.setText(f"Showing {len(rows)} customers.")
+        limit = prefs.rows_limit(100)
+        self.count_caption.setText(
+            f"Latest {limit} customers (showing {len(rows)})."
+        )
         self._refresh_actions()
 
     def _on_rows_failed(self, gen: int, exc: BaseException) -> None:

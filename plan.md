@@ -15,7 +15,7 @@
 - Branch: `staff-audit-remediation`; remote: `origin/staff-audit-remediation`.
 - Canonical plan path: `plan.md`.
 - Baseline: 20/20 staff audit tasks complete; full Linux suite 1101 passed, 1 skipped.
-- Performance work: **5/11 tasks complete**.
+- Performance work: **6/11 tasks complete**.
 - Live counter demo: paused at booking `#26527`; do not resume until the performance work is signed off.
 - Branch must not be merged into `main` until the user approves.
 - After each task: update its checkbox and this snapshot, run the targeted tests, commit, and `git push origin staff-audit-remediation`.
@@ -424,11 +424,11 @@ git push origin staff-audit-remediation
 - Consumes: `_customer_rows`, `CustomerFilter`, `customer_service.outstanding_by_customer`.
 - Produces: customer search and filtering in SQL, a capped page, and no per-keystroke full-list rebuild.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add a test with more than the configured customer limit and a search term that matches only an older row outside the first page. Assert the matching customer is still returned.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "customer_search_outside" -v
@@ -436,11 +436,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: FAIL because the page filters the already-capped Python list.
 
-- [ ] **Step 3: Move filters to SQL and cap the result**
+- [x] **Step 3: Move filters to SQL and cap the result**
 
 Apply the search, licence bucket, active, balance, and flag filters to the SQL query before `.limit(cap)`. Keep the existing aggregate balance queries scoped to the returned customer IDs where possible. Cache the `licence_expiring_days` settings lookup for the page load.
 
-- [ ] **Step 4: Run the customer tests**
+- [x] **Step 4: Run the customer tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -k "customer" -v
@@ -448,7 +448,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_staff_pages.py -
 
 Expected: PASS; the existing customer N+1 test remains under 20 queries.
 
-- [ ] **Step 5: Update the plan, commit, and push**
+- [x] **Step 5: Update the plan, commit, and push**
 
 ```bash
 git add plan.md app/staff/pages/customers.py tests/test_staff_pages.py
@@ -723,7 +723,7 @@ Do not merge into `main`. Report the before/after table and ask the user whether
 - [x] Task 3: Payments aggregate + cap
 - [x] Task 4: Outstanding aggregate + cap
 - [x] Task 5: Explicit caps
-- [ ] Task 6: Customers SQL filters + cap
+- [x] Task 6: Customers SQL filters + cap
 - [ ] Task 7: Dashboard async
 - [ ] Task 8: Reports batched
 - [ ] Task 9: Composite indexes
