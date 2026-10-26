@@ -1037,7 +1037,7 @@ class FleetDetailsPanel(_StepBase):
     def _refresh_stats_text(self) -> None:
         stats = self._data["stats"]
         self._stats_caption.setText(
-            f"Rented {stats['times_rented']}× · revenue {pesos(stats['total_revenue'])} · "
+            f"All-time: Rented {stats['times_rented']}× · revenue {pesos(stats['total_revenue'])} · "
             f"maintenance {pesos(stats['maintenance_cost'])}."
         )
         if stats["utilization"] is None:

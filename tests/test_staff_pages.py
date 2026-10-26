@@ -2351,6 +2351,7 @@ class TestFleetPage:
         ]
         joined = "\n".join(texts)
         assert "Utilization" in joined
+        assert "All-time" in panel._stats_caption.text()
         assert "Rented" in panel._stats_caption.text()
         panel.deleteLater()
 

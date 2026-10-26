@@ -640,8 +640,10 @@ def vehicle_stats(
     from_date: date | None = None,
     to_date: date | None = None,
 ) -> dict:
-    """Times rented, revenue, and utilization over a trailing window.
+    """Utilization over a trailing window; lifetime rented count and revenue.
 
+    ``times_rented``, ``total_revenue`` and ``maintenance_cost`` are lifetime
+    totals. ``rented_days``/``utilization`` are clipped to the selected window.
     Utilization = rented days ÷ days available, where available excludes
     maintenance and retired days. Rental occupancy is half-open (a returned
     vehicle frees its return day), clipped to the window so a booking that
