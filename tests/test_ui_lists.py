@@ -1,4 +1,4 @@
-"""Warm list-page pass for Fleet, Customers, and Maintenance.
+"""Warm list-page pass for Fleet, Customers, Maintenance, and Payments.
 
 These tests pin the presentation contract added by the staff-UI pass
 without weakening the existing behaviour suites in
@@ -18,10 +18,18 @@ from sqlalchemy import create_engine
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
 from app.database import Base  # noqa: E402
-from app.models import Maintenance_Record, Users, Vehicle, Vehicle_Category  # noqa: E402
+from app.models import (  # noqa: E402
+    Booking,
+    Maintenance_Record,
+    Payment,
+    Users,
+    Vehicle,
+    Vehicle_Category,
+)
 from app.staff.context import (  # noqa: E402
     DatabaseSelection,
     DatabaseTarget,
@@ -36,8 +44,10 @@ from app.staff.pages.customers import (  # noqa: E402
 )
 from app.staff.pages.fleet import FleetPage  # noqa: E402
 from app.staff.pages.maintenance import MaintenancePage  # noqa: E402
+from app.staff.pages.payments import PaymentsPage  # noqa: E402
 from app.staff.shell import StaffShell  # noqa: E402
 from app.staff.tables import LoadState  # noqa: E402
+from app.staff.ui_kit import SelectionBar, WarmHost, WarmPanel  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
 
 TODAY = date.today()
@@ -123,6 +133,47 @@ class _Branch:
             )
             self.retired_car = self._car(
                 session, category, "RET-001", status="retired"
+            )
+
+            # One settled-in-part booking gives the Payments page a ledger row
+            # and an outstanding row without touching the Fleet list.
+            self.rental = Booking(
+                user_id=self.customer.user_id,
+                vehicle_id=self.free_car.vehicle_id,
+                start_date=TODAY - timedelta(days=7),
+                end_date=TODAY - timedelta(days=4),
+                total_cost=Decimal("5000.00"),
+                status="completed",
+                created_by=self.counter.user_id,
+                created_at=datetime(2026, 1, 2, 9, 0),
+            )
+            session.add(self.rental)
+            session.flush()
+            session.add_all(
+                [
+                    Payment(
+                        booking_id=self.rental.booking_id,
+                        amount=Decimal("2000.00"),
+                        method="cash",
+                        kind="rental",
+                        status="paid",
+                        paid_at=datetime(2026, 1, 2, 10, 0),
+                        recorded_by=self.counter.user_id,
+                        reference_no="OR-1001",
+                        created_at=datetime(2026, 1, 2, 10, 0),
+                    ),
+                    Payment(
+                        booking_id=self.rental.booking_id,
+                        amount=Decimal("1000.00"),
+                        method="gcash",
+                        kind="deposit",
+                        status="paid",
+                        paid_at=datetime(2026, 1, 2, 10, 5),
+                        recorded_by=self.counter.user_id,
+                        reference_no="GC-1002",
+                        created_at=datetime(2026, 1, 2, 10, 5),
+                    ),
+                ]
             )
 
             session.add_all(
@@ -303,6 +354,32 @@ def maintenance_page(shell, branch):
     page = MaintenancePage(shell)
     page.refresh()
     _wait_for_maintenance(page)
+    return page
+
+
+def _wait_for_payments(page, timeout_ms: int = 15000) -> None:
+    timer = getattr(page, "_search_timer", None)
+    if timer is not None and timer.isActive():
+        timer.stop()
+        page._apply_filters()
+    page._pool.waitForDone(timeout_ms)
+    deadline = time.monotonic() + timeout_ms / 1000
+    controllers = (page._takings_async, page._outstanding_async)
+    while (
+        any(c.done_gen != c.load_gen for c in controllers)
+        and time.monotonic() < deadline
+    ):
+        QTest.qWait(5)
+    assert all(c.done_gen == c.load_gen for c in controllers), (
+        "payments reload never landed"
+    )
+
+
+@pytest.fixture
+def payments_page(shell, branch):
+    page = PaymentsPage(shell)
+    page.refresh()
+    _wait_for_payments(page)
     return page
 
 
@@ -555,3 +632,130 @@ def test_maintenance_both_tables_are_warm(maintenance_page):
     assert page.due._table.property("variant") == "warm"
     assert page.table.state is LoadState.LOADED
     assert page.due.state in (LoadState.LOADED, LoadState.EMPTY)
+
+
+# --------------------------------------------------------------------------
+# Payments
+# --------------------------------------------------------------------------
+
+
+def test_payments_page_uses_the_reference_warm_recipe(payments_page):
+    page = payments_page
+    assert page.body.itemAt(0).widget() is page._tools_panel
+    assert isinstance(page._tools_panel, WarmHost)
+    assert _panel_variant(page._tools_panel) == "warmHost"
+    assert isinstance(page.filter_card, WarmPanel)
+    assert _panel_variant(page.filter_card) == "warm"
+    assert _panel_variant(page._takings_panel) == "warm"
+    assert _panel_variant(page._outstanding_panel) == "warm"
+    assert isinstance(page.selection_bar, SelectionBar)
+    assert page.body.spacing() == CARD_GUTTER
+    # Reference proportions: the payments card is taller than outstanding.
+    assert page.body.stretch(page.body.indexOf(page._takings_panel)) == 6
+    assert page.body.stretch(page.body.indexOf(page._outstanding_panel)) == 5
+    # Both cards are visible with their own range footer.
+    assert page.takings_caption.text().startswith("Latest ")
+    assert page.outstanding_caption.text().startswith("Largest ")
+    assert page.takings_footer_count.text().endswith(
+        f"of {page._takings_cap}"
+    )
+    assert page.outstanding_footer_count.text().endswith(
+        f"of {page._outstanding_cap}"
+    )
+    assert page.takings_load_more.text() == "Load more"
+    assert page.outstanding_load_more.text() == "Load more"
+
+
+def test_payments_kind_chips_sync_the_hidden_combo(payments_page):
+    page = payments_page
+    assert page.kind_combo.isHidden()
+    assert {
+        "all",
+        "rental",
+        "deposit",
+        "deposit_applied",
+    } <= set(page.kind_chips.buttons)
+
+    page.kind_chips.buttons["rental"].click()
+    _wait_for_payments(page)
+    assert page.kind_combo.currentText() == "Rental"
+    assert {
+        page.takings.cell_text(r, 5)
+        for r in range(page.takings.row_count())
+    } == {"Rental"}
+
+    page.kind_combo.setCurrentText("Deposit")
+    _wait_for_payments(page)
+    assert page.kind_chips.selected == "deposit"
+    assert {
+        page.takings.cell_text(r, 5)
+        for r in range(page.takings.row_count())
+    } == {"Deposit"}
+
+    page.kind_chips.buttons["all"].click()
+    _wait_for_payments(page)
+    assert page.kind_combo.currentIndex() == 0
+
+
+def test_payments_tables_use_the_warm_variant_and_chips(payments_page):
+    from app.staff.tables import ChipCell, TableChip
+
+    page = payments_page
+    for table in (page.takings, page.outstanding):
+        assert table._table.property("variant") == "warm"
+        assert table._table.alternatingRowColors() is False
+        assert table._table.wordWrap() is True
+        assert table._table.verticalHeader().defaultSectionSize() == 56
+        assert table._table.horizontalHeader().objectName() == "warmHeader"
+
+    takings_row = 0
+    amount = page.takings.table.item(takings_row, 3)
+    assert amount is not None
+    assert amount.textAlignment() & Qt.AlignmentFlag.AlignRight
+    kind_host = page.takings.table.cellWidget(takings_row, 5)
+    assert isinstance(kind_host, ChipCell)
+    kind_chip = kind_host.findChild(TableChip)
+    assert kind_chip is not None
+    assert kind_chip.property("tone") == "outline"
+    status_host = page.takings.table.cellWidget(takings_row, 6)
+    assert isinstance(status_host, ChipCell)
+
+    outstanding_row = 0
+    owed = page.outstanding.table.item(outstanding_row, 8)
+    assert owed is not None
+    assert owed.textAlignment() & Qt.AlignmentFlag.AlignRight
+    assert owed.foreground().color().name() == "#9b2c1f"
+    assert isinstance(
+        page.outstanding.table.cellWidget(outstanding_row, 3), ChipCell
+    )
+    # The vehicle cell keeps the reference's two-line name + plate.
+    assert "\n" in page.outstanding.cell_text(outstanding_row, 2)
+
+
+def test_payments_selection_bar_names_the_selected_row(payments_page):
+    page = payments_page
+    assert page.selection_bar.property("active") in (False, 0)
+    assert not page.collect_button.isEnabled()
+    assert not page.view_booking_button.isEnabled()
+
+    page.outstanding.table.selectRow(0)
+    page._refresh_selection()
+    booking_id = page.outstanding.cell_text(0, 0)
+    summary = page.selection_bar.summary_label.text()
+    assert page.selection_bar.property("active") is True
+    assert booking_id in summary
+    assert "Ana Reyes" in summary
+    assert "owed" in summary
+    assert page.collect_button.isEnabled()
+    assert page.view_booking_button.isEnabled()
+    assert page.collect_button.parentWidget() is page.selection_bar
+    assert page.view_booking_button.parentWidget() is page.selection_bar
+
+    # Selecting a payment row clears the other card, so the bar names one row.
+    page.takings.table.selectRow(0)
+    page._refresh_selection()
+    assert page.outstanding.table.selectionModel().hasSelection() is False
+    summary = page.selection_bar.summary_label.text()
+    assert booking_id in summary
+    assert "Ana Reyes" in summary
+    assert "Ref" in summary

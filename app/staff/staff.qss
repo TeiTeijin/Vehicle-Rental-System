@@ -1934,6 +1934,65 @@ QLabel#tableChip[tone="neutral"] {
     color: #5F574C;
 }
 
+/* Ledger kinds are categories, not states: outlined instead of filled. */
+QLabel#tableChip[tone="outline"] {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    color: #171717;
+}
+
+/* The chip's layout host must not catch the blanket QWidget cream. */
+QWidget#tableChipCell {
+    background: transparent;
+    border: none;
+}
+
+/* -- list-card headings and footers ---------------------------------- */
+
+QLabel#warmCardTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#warmCardCaption {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#warmFooterRange {
+    background: transparent;
+    color: #6A645C;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* -- payments tools --------------------------------------------------- */
+
+QLabel#paymentsTakings {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QPushButton#paymentsClear {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 12px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#paymentsClear:hover {
+    background: #F6EEDC;
+}
+
 /* -- modal frame ----------------------------------------------------- */
 
 QWidget#bookingModal,
