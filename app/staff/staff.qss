@@ -1768,6 +1768,14 @@ QFrame#pagePanel[variant="warmHost"] {
     border: none;
 }
 
+/* The data card's own title, used by the Inspections audit. */
+QLabel#warmCardTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 700;
+}
+
 /* -- filter chips ---------------------------------------------------- */
 
 QPushButton#statusFilterChip {
@@ -1931,6 +1939,17 @@ QLabel#tableChip[tone="danger"] {
 
 QLabel#tableChip[tone="neutral"] {
     background: #E6E1D6;
+    color: #5F574C;
+}
+
+/* Inspection handovers: a cool tint for pre-rental, warm paper for post. */
+QLabel#tableChip[tone="pre"] {
+    background: #DDE8F4;
+    color: #2F506E;
+}
+
+QLabel#tableChip[tone="post"] {
+    background: #EFE9DE;
     color: #5F574C;
 }
 
