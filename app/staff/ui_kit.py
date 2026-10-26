@@ -576,3 +576,29 @@ class BookingModal(QWidget):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.footer_layout.addWidget(button)
         return button
+
+
+class ConfirmPanel(BookingModal):
+    """Warm confirmation sheet for destructive or blocking choices."""
+
+    confirmed = Signal()
+    cancelled = Signal()
+
+    def __init__(
+        self,
+        question: str,
+        detail: str = "",
+        *,
+        destructive: bool = False,
+        confirm_text: str = "Yes",
+        keep_text: str = "Keep editing",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__("Please confirm", question, detail, parent=parent)
+        self.setObjectName("confirmPanel")
+        self.keep_button = self.add_back(keep_text)
+        self.confirm_button = self.add_primary(
+            confirm_text, danger=destructive
+        )
+        self.keep_button.clicked.connect(self.cancelled.emit)
+        self.confirm_button.clicked.connect(self.confirmed.emit)

@@ -6,8 +6,9 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt  # noqa: E402
 from PySide6.QtGui import QWheelEvent  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLabel,
@@ -16,7 +17,11 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from app.staff import theme  # noqa: E402
-from app.staff.overlay import OVERLAY_CARD_W, FrostedOverlay  # noqa: E402
+from app.staff.overlay import (  # noqa: E402
+    OVERLAY_CARD_W,
+    WARM_FROST,
+    FrostedOverlay,
+)
 from app.staff.tables import (  # noqa: E402
     ALIGN_LEFT,
     Column,
@@ -26,11 +31,13 @@ from app.staff.tables import (  # noqa: E402
 from app.staff.ui_kit import (  # noqa: E402
     BookingModal,
     ChipGroup,
+    ConfirmPanel,
     MetricTile,
     SelectionBar,
     StatusChipRow,
     WarmPanel,
 )
+from app.staff.widgets import confirm_modal  # noqa: E402
 
 
 def test_chip_row_selects_and_emits_once(qapp):
@@ -184,3 +191,202 @@ def test_chip_group_variants_and_selection(qapp):
     assert group.selected == "half"
     assert group.buttons["half"].property("variant") == "fuel"
     assert group.buttons["half"].isChecked()
+
+
+# -- warm confirmation modal -------------------------------------------------
+
+
+def test_confirm_panel_title_detail_and_destructive_button(qapp):
+    panel = ConfirmPanel(
+        "Discard this rental?",
+        "The customer, dates, and payment choice will be lost.",
+        destructive=True,
+        confirm_text="Discard rental",
+    )
+
+    assert panel.eyebrow_label.text() == "PLEASE CONFIRM"
+    assert panel.title_label.text() == "Discard this rental?"
+    assert panel.subtitle_label.text() == (
+        "The customer, dates, and payment choice will be lost."
+    )
+    assert panel.keep_button.text() == "Keep editing"
+    assert panel.confirm_button.text() == "Discard rental"
+    assert panel.keep_button.objectName() == "modalSecondary"
+    assert panel.confirm_button.objectName() == "modalDanger"
+    assert panel.card.width() == 540
+
+
+def test_confirm_panel_default_button_is_not_destructive(qapp):
+    panel = ConfirmPanel("Remove this vehicle?")
+
+    assert panel.confirm_button.text() == "Yes"
+    assert panel.confirm_button.objectName() == "modalPrimary"
+
+
+def test_confirm_panel_buttons_emit_confirmed_and_cancelled(qapp):
+    panel = ConfirmPanel("Discard this rental?")
+    seen: list[str] = []
+    panel.confirmed.connect(lambda: seen.append("confirmed"))
+    panel.cancelled.connect(lambda: seen.append("cancelled"))
+
+    panel.confirm_button.click()
+    panel.keep_button.click()
+
+    assert seen == ["confirmed", "cancelled"]
+
+
+def _open_window(qapp: QApplication) -> QWidget:
+    window = QWidget()
+    window.resize(900, 700)
+    window.show()
+    qapp.processEvents()
+    return window
+
+
+def _close_window(qapp: QApplication, window: QWidget) -> None:
+    window.close()
+    window.deleteLater()
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def _drive_confirm_modal(
+    qapp: QApplication, window: QWidget, action: str, **kwargs
+) -> tuple[bool, dict]:
+    """Run confirm_modal and act on it from inside its nested event loop.
+
+    The action fires on a zero-delay timer, so the overlay and panel are
+    already on screen. A watchdog closes any overlay left behind if the
+    action never lands, turning a wiring regression into a failure instead
+    of a hung test run.
+    """
+    seen: dict = {}
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    watchdog.setInterval(3000)
+
+    def abort() -> None:
+        seen["timed_out"] = True
+        for overlay in window.findChildren(FrostedOverlay):
+            overlay.hide_overlay()
+
+    watchdog.timeout.connect(abort)
+    watchdog.start()
+
+    def act() -> None:
+        overlay = window.findChild(FrostedOverlay)
+        seen["overlay"] = overlay
+        if overlay is None:
+            return
+        panel = overlay.findChild(ConfirmPanel)
+        seen["shown"] = overlay.isVisible()
+        seen["tint"] = overlay._backdrop_tint
+        seen["card_width"] = panel.card.width()
+        seen["title"] = panel.title_label.text()
+        seen["detail"] = panel.subtitle_label.text()
+        seen["confirm_text"] = panel.confirm_button.text()
+        seen["confirm_object"] = panel.confirm_button.objectName()
+        seen["keep_text"] = panel.keep_button.text()
+        seen["keep_focus"] = qapp.focusWidget() is panel.keep_button
+        if action == "confirm":
+            panel.confirm_button.click()
+        elif action == "keep":
+            panel.keep_button.click()
+        elif action == "escape":
+            QTest.keyClick(panel.keep_button, Qt.Key.Key_Escape)
+        elif action == "outside":
+            QTest.mouseClick(
+                overlay, Qt.MouseButton.LeftButton, pos=QPoint(4, 4)
+            )
+        else:  # pragma: no cover - guards against a typo in a test
+            raise AssertionError(action)
+
+    QTimer.singleShot(0, act)
+    try:
+        result = confirm_modal(window, **kwargs)
+    finally:
+        watchdog.stop()
+    return result, seen
+
+
+def _assert_confirm_modal_cleaned_up(
+    qapp: QApplication, window: QWidget, seen: dict
+) -> None:
+    assert seen.get("timed_out") is not True
+    assert seen["shown"] is True
+    assert seen["keep_focus"] is True
+    assert seen["tint"] == WARM_FROST
+    assert seen["card_width"] == 540
+    overlay = seen["overlay"]
+    assert overlay.isVisible() is False
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert window.findChildren(FrostedOverlay) == []
+
+
+def test_confirm_modal_confirm_returns_true_and_cleans_up(qapp):
+    window = _open_window(qapp)
+    try:
+        result, seen = _drive_confirm_modal(
+            qapp,
+            window,
+            "confirm",
+            question="Discard this rental?",
+            detail="The customer, dates, and payment choice will be lost.",
+            destructive=True,
+            confirm_text="Discard rental",
+        )
+
+        assert result is True
+        assert seen["title"] == "Discard this rental?"
+        assert seen["detail"] == (
+            "The customer, dates, and payment choice will be lost."
+        )
+        assert seen["confirm_text"] == "Discard rental"
+        assert seen["confirm_object"] == "modalDanger"
+        assert seen["keep_text"] == "Keep editing"
+        _assert_confirm_modal_cleaned_up(qapp, window, seen)
+    finally:
+        _close_window(qapp, window)
+
+
+def test_confirm_modal_keep_returns_false_and_cleans_up(qapp):
+    window = _open_window(qapp)
+    try:
+        result, seen = _drive_confirm_modal(
+            qapp,
+            window,
+            "keep",
+            question="Discard this rental?",
+            destructive=True,
+            confirm_text="Discard rental",
+        )
+
+        assert result is False
+        _assert_confirm_modal_cleaned_up(qapp, window, seen)
+    finally:
+        _close_window(qapp, window)
+
+
+def test_confirm_modal_escape_returns_false_and_cleans_up(qapp):
+    window = _open_window(qapp)
+    try:
+        result, seen = _drive_confirm_modal(
+            qapp, window, "escape", question="Discard this rental?"
+        )
+
+        assert result is False
+        _assert_confirm_modal_cleaned_up(qapp, window, seen)
+    finally:
+        _close_window(qapp, window)
+
+
+def test_confirm_modal_outside_click_returns_false_and_cleans_up(qapp):
+    window = _open_window(qapp)
+    try:
+        result, seen = _drive_confirm_modal(
+            qapp, window, "outside", question="Discard this rental?"
+        )
+
+        assert result is False
+        _assert_confirm_modal_cleaned_up(qapp, window, seen)
+    finally:
+        _close_window(qapp, window)

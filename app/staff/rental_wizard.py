@@ -65,7 +65,7 @@ from app.staff.rental_ui import (
     StatusChip,
     VehicleSummary,
 )
-from app.staff.widgets import confirm
+from app.staff.widgets import confirm_modal
 from app.utils.money import money, pesos
 
 
@@ -461,15 +461,27 @@ class SchedulePanel(ModalStep):
         self.day_strip = DayStrip(self.content_host)
         left.addWidget(self.day_strip)
 
-        legend = QHBoxLayout()
-        legend.setContentsMargins(0, 0, 0, 0)
+        # A cream strip gives the legend text (especially "Your dates") its
+        # own background instead of sitting bare on the white sheet.
+        self.legend_host = QFrame(self.content_host)
+        self.legend_host.setObjectName("wizardLegend")
+        legend = QHBoxLayout(self.legend_host)
+        legend.setContentsMargins(10, 6, 10, 6)
         legend.setSpacing(14)
-        legend.addWidget(_legend_item("Your dates", MODAL_INK, self.content_host))
-        legend.addWidget(_legend_item("Confirmed booking", "#9CC5A7", self.content_host))
-        legend.addWidget(_legend_item("Pending booking", "#EACF9F", self.content_host))
-        legend.addWidget(_legend_item("Free", MODAL_SURFACE, self.content_host))
+        legend.addWidget(
+            _legend_item("Your dates", MODAL_INK, self.legend_host)
+        )
+        legend.addWidget(
+            _legend_item("Confirmed booking", "#9CC5A7", self.legend_host)
+        )
+        legend.addWidget(
+            _legend_item("Pending booking", "#EACF9F", self.legend_host)
+        )
+        legend.addWidget(
+            _legend_item("Free", MODAL_SURFACE, self.legend_host)
+        )
         legend.addStretch(1)
-        left.addLayout(legend)
+        left.addWidget(self.legend_host)
 
         self.conflict_banner = NoticeBar("", parent=self.content_host)
         self.conflict_label = self.conflict_banner.label
@@ -1742,11 +1754,12 @@ class RentalWizard(QObject):
             return None, detail
 
     def _on_cancel(self) -> None:
-        if not confirm(
+        if not confirm_modal(
             self._overlay,
             "Discard this rental?",
             detail="The customer, dates, and payment choice will be lost.",
             destructive=True,
+            confirm_text="Discard rental",
         ):
             return
         self._overlay.set_dismissible(True)

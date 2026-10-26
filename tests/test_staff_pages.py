@@ -5969,7 +5969,7 @@ class TestVehicleDetailsDialog:
         # Frosted glass (v9): the dim is scoped to the overlay itself so it
         # can never cascade onto the white card.
         assert "VehicleDetailsOverlay" in overlay.styleSheet()
-        assert "rgba" in overlay.styleSheet()
+        assert "rgba(32, 22, 16, 180)" in overlay.styleSheet()
         overlay.hide_overlay()
 
     def test_overlay_backdrop_is_frosted_and_click_through(
@@ -7025,7 +7025,7 @@ class TestRentalWizard:
 
         from app.staff import rental_wizard
 
-        monkeypatch.setattr(rental_wizard, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(rental_wizard, "confirm_modal", lambda *a, **k: True)
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             assert page.selected_vehicle_id is not None
@@ -7068,7 +7068,7 @@ class TestRentalWizard:
             calls.append((question, kwargs))
             return True
 
-        monkeypatch.setattr(rental_wizard, "confirm", _confirm)
+        monkeypatch.setattr(rental_wizard, "confirm_modal", _confirm)
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             wizard = page._wizard
@@ -7088,6 +7088,7 @@ class TestRentalWizard:
                 "The customer, dates, and payment choice will be lost."
             )
             assert calls[0][1]["destructive"] is True
+            assert calls[0][1]["confirm_text"] == "Discard rental"
         finally:
             overlay.set_dismissible(True)
             overlay.hide_overlay()
@@ -7099,7 +7100,7 @@ class TestRentalWizard:
 
         from app.staff import rental_wizard
 
-        monkeypatch.setattr(rental_wizard, "confirm", lambda *a, **k: False)
+        monkeypatch.setattr(rental_wizard, "confirm_modal", lambda *a, **k: False)
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             wizard = page._wizard
@@ -7239,6 +7240,25 @@ class TestRentalModalRedesign:
             )
             assert step.day_strip.tiles
             assert "October" in step.day_strip.month_labels
+        finally:
+            overlay.hide_overlay()
+
+    def test_schedule_legend_sits_on_a_cream_strip(self, qapp, shell, branch):
+        from PySide6.QtWidgets import QLabel
+
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            step = page._wizard._current
+            assert step.legend_host.objectName() == "wizardLegend"
+            assert step.legend_host.isVisible() is True
+            labels = {
+                label.text() for label in step.legend_host.findChildren(QLabel)
+            }
+            assert "Your dates" in labels
+            block = theme.load_stylesheet().split(
+                "QFrame#wizardLegend {", 1
+            )[1].split("}", 1)[0]
+            assert "background: #F1E8D8" in block
         finally:
             overlay.hide_overlay()
 

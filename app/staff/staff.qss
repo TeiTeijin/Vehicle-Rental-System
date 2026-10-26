@@ -1462,6 +1462,12 @@ QLabel#legendChip {
     border-radius: 2px;
 }
 
+QFrame#wizardLegend {
+    background: #F1E8D8;
+    border: none;
+    border-radius: 8px;
+}
+
 /* -- notices / result bars ------------------------------------------- */
 
 QFrame#modalNotice {

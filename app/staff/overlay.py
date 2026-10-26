@@ -9,7 +9,7 @@ Content swaps via `set_content()`; the backdrop renders once per opening
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -32,16 +32,32 @@ BACKDROP_DIM = 110
 BACKDROP_DOWNSCALE = 4
 BACKDROP_RERENDER_MS = 120
 
+#: Dark warm frost sampled from the counter references. The wizard and its
+#: confirmation use this so the cream page never shows through as a pale band.
+WARM_FROST = QColor(32, 22, 16, 180)
+
 
 class FrostedOverlay(QWidget):
     """Window-embedded modal glass with swappable card content."""
 
+    #: Emitted whenever the overlay is dismissed (button, Esc, outside click).
+    closed = Signal()
+
     def __init__(
-        self, window: QWidget, *, card_width: int = OVERLAY_CARD_W
+        self,
+        window: QWidget,
+        *,
+        card_width: int = OVERLAY_CARD_W,
+        backdrop_tint: QColor | None = None,
     ) -> None:
         super().__init__(window)
         self._window = window
         self._card_width = int(card_width or OVERLAY_CARD_W)
+        self._backdrop_tint = (
+            QColor(backdrop_tint)
+            if backdrop_tint is not None
+            else QColor(23, 23, 23, BACKDROP_DIM)
+        )
         #: False while a wizard owns the overlay: Escape and outside clicks
         #: must not throw away a half-filled rental.
         self._dismissible = True
@@ -50,9 +66,10 @@ class FrostedOverlay(QWidget):
         # ever cascades onto descendants. The blurred snapshot carries its
         # own baked-in dim and covers this; this fill is the fallback when
         # the grab fails.
+        tint = self._backdrop_tint
         self.setStyleSheet(
-            "FrostedOverlay { background: rgba(23, 23, 23, 110);"
-            " border: none; }"
+            f"FrostedOverlay {{ background: rgba({tint.red()}, {tint.green()},"
+            f" {tint.blue()}, {tint.alpha()}); border: none; }}"
         )
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -166,7 +183,7 @@ class FrostedOverlay(QWidget):
             full.setDevicePixelRatio(dpr)
             painter = QPainter(full)
             try:
-                painter.fillRect(full.rect(), QColor(23, 23, 23, BACKDROP_DIM))
+                painter.fillRect(full.rect(), self._backdrop_tint)
             finally:
                 painter.end()
             self.backdrop.setPixmap(full)
@@ -195,10 +212,13 @@ class FrostedOverlay(QWidget):
         self.setFocus()
 
     def hide_overlay(self) -> None:
+        was_visible = self.isVisible()
         self._window.removeEventFilter(self)
         self._blur_timer.stop()
         self.backdrop.clear()
         self.hide()
+        if was_visible:
+            self.closed.emit()
 
     def _fit(self) -> None:
         self.setGeometry(self._window.rect())
