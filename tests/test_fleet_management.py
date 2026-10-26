@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from app.database import Base  # noqa: E402
 from app.models import Booking, Maintenance_Record, Vehicle, Vehicle_Category  # noqa: E402
 from app.services import fleet_service  # noqa: E402
-from app.services.errors import StateError  # noqa: E402
+from app.services.errors import StateError, ValidationError  # noqa: E402
 from app.staff.context import (  # noqa: E402
     DatabaseSelection,
     DatabaseTarget,
@@ -132,6 +132,71 @@ class TestStatusPolicy:
         assert fleet_service.is_rentable(Vehicle(status="reserved")) is False
         assert fleet_service.is_rentable(Vehicle(status="maintenance")) is False
         assert fleet_service.is_rentable(Vehicle(status="retired")) is False
+
+
+class TestVehicleChoices:
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("transmission", "CVT"),
+            ("fuel_type", "Gasoline"),
+            ("body_style", "Motorcycle"),
+            ("vehicle_class", "sedan"),
+        ],
+    )
+    def test_add_vehicle_rejects_unknown_choice(self, ctx, field, value):
+        context, _car_id = ctx
+        with context.session() as session:
+            with pytest.raises(ValidationError) as exc:
+                fleet_service.add_vehicle(
+                    session,
+                    category_name="Car",
+                    make="Honda",
+                    model="Civic",
+                    year=2024,
+                    plate_number="BAD-001",
+                    daily_rate=Decimal("1500.00"),
+                    **{field: value},
+                )
+        assert exc.value.field == field
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("transmission", "CVT"),
+            ("fuel_type", "Gasoline"),
+            ("body_style", "Motorcycle"),
+            ("vehicle_class", "sedan"),
+        ],
+    )
+    def test_update_vehicle_rejects_unknown_choice(self, ctx, field, value):
+        context, car_id = ctx
+        with context.session() as session:
+            car = session.get(Vehicle, car_id)
+            with pytest.raises(ValidationError) as exc:
+                fleet_service.update_vehicle(session, car, **{field: value})
+        assert exc.value.field == field
+
+    def test_add_vehicle_accepts_supported_choices(self, ctx):
+        context, _car_id = ctx
+        with context.session() as session:
+            car = fleet_service.add_vehicle(
+                session,
+                category_name="Car",
+                make="Honda",
+                model="Civic",
+                year=2024,
+                plate_number="GOOD-01",
+                daily_rate=Decimal("1500.00"),
+                transmission="Automatic",
+                fuel_type="Petrol",
+                body_style="Sedan",
+                vehicle_class="medium",
+            )
+            assert car.transmission == "Automatic"
+            assert car.fuel_type == "Petrol"
+            assert car.body_style == "Sedan"
+            assert car.vehicle_class == "medium"
 
 
 class TestBulkRate:

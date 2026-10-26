@@ -49,6 +49,18 @@ TRANSMISSIONS: tuple[str, ...] = ("Automatic", "Manual")
 #: demo fleet but is a legal value, so it is offered.
 FUEL_TYPES: tuple[str, ...] = ("Petrol", "Diesel", "Electric", "Hybrid")
 
+#: Every body style the column's enum accepts. The staff add/edit form does
+#: not offer this field yet, but imports and direct service calls can set it.
+BODY_STYLES: tuple[str, ...] = (
+    "SUV",
+    "Sedan",
+    "Hatchback",
+    "MPV",
+    "Pickup",
+    "Underbone",
+    "Scooter",
+)
+
 #: Passenger counts, as offered in the popover. A count of 0 or 1 is not a thing
 #: a rental fleet has, so the list is the real spread rather than 1..N.
 SEAT_COUNTS: tuple[int, ...] = (2, 4, 5, 6, 7)

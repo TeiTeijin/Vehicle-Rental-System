@@ -42,6 +42,43 @@ class TestReceiptContent:
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         assert "PHP 12,500.00" in lines(session, booking)
 
+    def test_counter_receipt_calls_the_single_charge_rental_total(
+        self, session, customer, vehicle, staff
+    ):
+        booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
+        text = lines(session, booking)
+        assert "Rental total" in text
+        assert "Base rental" not in text
+
+    def test_online_receipt_shows_the_same_breakdown_as_checkout(
+        self, session, customer, vehicle, staff, booking_factory
+    ):
+        booking = booking_factory(
+            customer,
+            vehicle,
+            channel="online",
+            total_cost="15758.40",
+            subtotal="12400.00",
+            insurance_fee="1250.00",
+            service_fee="420.00",
+            vat="1688.40",
+            total="15758.40",
+            payment_method="cash",
+            reference_code="RW-TEST01",
+        )
+        text = lines(session, booking)
+        assert "Rental\nPHP 12,400.00" in text
+        assert "Insurance\nPHP 1,250.00" in text
+        assert "Service fee\nPHP 420.00" in text
+        assert "VAT (12%)\nPHP 1,688.40" in text
+        assert "Base rental" not in text
+        assert amounts(session, booking) == [
+            "PHP 12,400.00",
+            "PHP 1,250.00",
+            "PHP 420.00",
+            "PHP 1,688.40",
+        ]
+
     def test_reports_an_unpaid_booking_as_outstanding(self, session, customer, vehicle, staff):
         booking = booking_service.create_booking(session, customer, vehicle, D1, D6)
         text = lines(session, booking)
