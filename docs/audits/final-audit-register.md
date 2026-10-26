@@ -5,6 +5,7 @@
 - **Plan:** `docs/plans/2026-10-25-final-audit.md`
 - **Started:** 2026-10-25
 - **Environment:** Windows 11, Python 3.13.5 (`.venv`), PySide6 6.11.2, SQLAlchemy 2.0.54, pytest 9.1.1
+- **Final verification host:** Linux, Python 3.14.8 (`.venv`), same dependency versions
 - **Test database:** throwaway in-memory SQLite via `tests/conftest.py`; no live MySQL is used.
 - **GUI tests:** `QT_QPA_PLATFORM=offscreen`
 
@@ -46,7 +47,7 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 | X6 | Shared | Media/photos → customer and staff surfaces | `app/ui/vehicle_details.py`, `vehicle_photo.py`, `app/staff/vehicle_cards.py` | `media_service`, `vehicle_photos`, `carimages_client`, `image_cache`, `api_cache` | `VEHICLE_MEDIA` | Customer, staff | No crash/hang on API failure; cache fallback; variant keys distinct; no traversal; no customer/staff data in metadata | `test_media_warning.py`, `test_media_resilience.py`, `test_security_hardening.py`, `scripts/test_image_cache.py` | Task 15 fleet media: cache keys/variants verified in Task 6; graceful no-API behavior covered. Task 22: 19 offline resilience tests; API failure keeps last-known rows and the UI falls back to placeholder/error; credentials only go to allowlisted API hosts; API/GLB keys are digest-disambiguated; old keys are invalidated, counted, and cleared; metadata has no customer/staff fields; concurrent cache read/write errors no longer delete a valid entry; F-024–F-029 fixed. | Pass | - | F-024–F-029 fixed |
 | X7 | Shared | Booking state → customer notifications | `app/services/notification_service.py`, `app/ui/notifications.py` | `notification_service`, `booking_service` | `BOOKING`, `PAYMENT` | Customer, staff | Status changes produce correct customer-visible notifications; no cross-customer leak | `test_customer_notifications.py`, `test_booking_service.py` | Task 8: notifications derived only from the customer's own bookings; no cross-customer leak | Pass | — | — |
 | X8 | Security | Roles/authorization/PII/branch scope | All auth/customer/profile/payment/booking/media/backup paths | `auth_service`, `customer_service`, `profile_service`, `payment_service`, `backup_service` | `USERS`, `BOOKING`, `PAYMENT`, `VEHICLE_MEDIA` | Customer, staff, admin, inactive, flagged | Customer/staff boundary enforced; IDOR blocked; inactive/flagged per policy; passwords hashed; temp passwords not plaintext; licence docs/cache paths safe; backups sanitized; errors do not leak internals; Decimal money | `test_security_hardening.py`, `test_customer_flow_audit.py`, `test_staff_login.py`, `test_staff_pages.py`, `test_backup_live_db.py` | Task 8 customer isolation + Task 9 staff role gate + Task 17 document path safety. Task 21: two-customer bookings/payments/notifications/profile isolation test; permission matrix recorded; inactive/flagged policy verified; customer identity cannot render a staff page; docs/cache paths safe; error text generic; counter temporary passwords now unique and hashed; Windows backup snapshots now ACL-restricted; F-022/F-023 fixed. Known limitation: email-only simulated reset until a mail transport exists. | Pass | - | F-022, F-023 fixed
-| X9 | Data | Migration/seed/data integrity | `scripts/migrate_*`, `scripts/init_db.py`, `scripts/seed_*` | migration scripts, `app.database`, models | All tables | System | Documented order produces all model tables/columns on fresh and legacy DBs; idempotent; seeds consistent; no data loss | `tests/test_migrate_*.py`, `test_seed_demo_data.py` | Task 3: full-schema test added; 119 migration tests passed; fresh order 0/0/0 twice; legacy order 0/0/1 (SQLite `license_number` limitation, F-003) Task 24: F-003 deferred as a legacy-SQLite-only limitation (fresh SQLite and MySQL paths are correct; the migration prints instructions).| Pass | — | F-001/F-002 fixed; F-003 deferred (documented) |
+| X9 | Data | Migration/seed/data integrity | `scripts/migrate_*`, `scripts/init_db.py`, `scripts/seed_*` | migration scripts, `app.database`, models | All tables | System | Documented order produces all model tables/columns on fresh and legacy DBs; idempotent; seeds consistent; no data loss | `tests/test_migrate_*.py`, `test_seed_demo_data.py` | Task 3: full-schema test added; 119 migration tests passed; fresh order 0/0/0 twice; legacy order 0/0/1 (SQLite `license_number` limitation, F-003) Task 24: F-003 deferred as a legacy-SQLite-only limitation (fresh SQLite and MySQL paths are correct; the migration prints instructions). Task 25: fresh order 0/0/0 twice; legacy staff/customer 0 twice, guarantor 1 twice with F-003 instructions; sample row survived. | Pass | — | F-001/F-002 fixed; F-003 deferred (documented) |
 
 ## Traceability
 
@@ -226,6 +227,17 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
   - `tests/test_migrate_staff_schema.py::TestResultMatchesModels::test_the_staff_models_work_against_the_migrated_database` — `BOOKING` has no `pickup_dt`.
 - Baseline log: `.superpowers/sdd/2026-10-25-final-audit/baseline.log` (local scratch; not committed).
 - Command: `$env:QT_QPA_PLATFORM='offscreen'; .venv\Scripts\python.exe -m pytest -q`.
+
+## Task 25 notes: final verification and sign-off
+
+- **Full suite:** exit 0; 1289 collected, 1288 passed, 1 skipped (Windows ACL check at `tests/test_security_hardening.py:299`). Log: `/tmp/opencode/task25-full.log`.
+- **Migration suite:** 119 tests passed, exit 0. Log: `/tmp/opencode/task25-migrations.log`.
+- **Fresh SQLite:** `init_db` + documented order twice → all exits 0; 15 tables; `BRANCH` and PSGC tables present; 28 `USERS` columns; idempotent.
+- **Legacy SQLite copy:** staff/customer migrations exit 0 twice; `BRANCH`, PSGC, and online columns present; sample vehicle row survives. Guarantor migration exits 1 twice with the documented F-003 message and leaves data intact.
+- **Golden path:** `tests/test_final_audit_flow.py` 1 passed; online booking → staff confirm → check-in → rental/deposit → checkout/settlement → receipt → customer history → dashboard/report.
+- **UI evidence:** offscreen customer/staff Qt tests are included in the full suite. Interactive manual click-through was not possible on the headless verification host and is recorded as an environmental gap, not as a manual pass.
+- **Constraints:** no live MySQL writes; all checks used throwaway SQLite; no conflict markers; `git diff --check` clean; working tree clean after the sign-off commit.
+- **Decision:** PASS. No open Critical/High findings; F-003 is deferred/documented and legacy-SQLite-only. Merge approval is pending the user.
 
 ## Task 24 notes: remediation and dispositions
 

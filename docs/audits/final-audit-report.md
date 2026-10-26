@@ -4,7 +4,7 @@
 - **Baseline commit:** `b77c101685a766426571fccd41de27f28e597aeb`
 - **Audit plan:** `docs/plans/2026-10-25-final-audit.md`
 - **Register:** `docs/audits/final-audit-register.md`
-- **Report status:** In progress
+- **Report status:** Complete — awaiting user approval
 
 ## Scope
 
@@ -19,14 +19,17 @@ Out of scope: merging to `main`, live MySQL writes, external CarImages availabil
 | Branch | `final-audit` |
 | Baseline commit | `b77c101685a766426571fccd41de27f28e597aeb` |
 | Baseline date | 2026-10-25 |
-| Final commit | Pending |
+| Final code commit | `613a6d3` |
+| Sign-off report | This commit (see `git log -1`) |
 
 ## Environment
 
 | Item | Value |
 |---|---|
-| OS | Windows 11 |
-| Python | 3.13.5 (`.venv`) |
+| Audit device | Windows 11 |
+| Audit device Python | 3.13.5 (`.venv`) |
+| Verification host | Linux (this worktree) |
+| Verification Python | 3.14.8 (`.venv`) |
 | PySide6 | 6.11.2 |
 | SQLAlchemy | 2.0.54 |
 | pytest | 9.1.1 |
@@ -76,6 +79,19 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 - **F-019 (Task 19, High):** `outstanding_total` now sums each booking's rental + penalties − (rental + deposit_applied) and clamps each at zero, so held deposits no longer reduce debt and one booking's overpayment cannot hide another's. Regression tests: `test_a_held_deposit_is_not_a_payment_against_the_bill`, `test_an_overpayment_cannot_hide_another_bookings_debt`.
 - **F-020 (Task 19, Low):** report collections and deposits now filter by `paid_at`, matching the daily rows and every other revenue figure. Regression tests: `test_a_backdated_payment_counts_on_the_day_it_was_paid`, `test_a_backdated_deposit_counts_on_the_day_it_was_paid`.
 - **F-021 (Task 19, Low):** the dashboard's Recent Transactions list now shows only rental and deposit cash rows, not `deposit_applied` ledger adjustments. Regression test: `test_a_deposit_application_is_not_a_cash_transaction`.
+- **F-022 / F-023 (Task 21, High/Critical):** Windows backup snapshots now apply an owner-only ACL, and counter-created customers get unique random temporary passwords stored only as hashes. Regression tests: `test_a_snapshot_is_owner_only`, `test_the_settings_backup_helper_sanitizes_only_the_copy`, `test_counter_created_customers_get_unique_random_temporary_passwords`, `test_adding_a_customer_shows_the_temporary_password`.
+- **F-024–F-029 (Task 22, High/Medium/Low):** media credentials are sent only to allowlisted API hosts; API/GLB cache keys are digest-disambiguated; a failed refresh preserves last-known media; cache paths are contained; CarImages has a live `ping`; transient cache read/write errors no longer delete valid entries. Regression tests are listed in the register (19 offline-resilience tests).
+- **F-030–F-032 (Task 23, Medium/Low):** Bookings/Inspections/Maintenance filter and search in SQL before the row cap, capped lists show their limit, and the customers report uses one grouped lifetime-count query. Regression tests: the `*_outside_the_cap`, `*_latest_limit_is_shown`, and `test_query_count_is_bounded` cases in `tests/test_staff_pages.py` and `tests/test_report_service.py`.
+
+## Final verification (Task 25)
+
+- **Full suite:** `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -rs` → exit 0; 1289 collected, 1288 passed, 1 skipped (`tests/test_security_hardening.py:299`, Windows ACL check). Log: `/tmp/opencode/task25-full.log`.
+- **Migration suite:** `pytest tests/test_migrate_*.py -q` → exit 0, 119 tests. Log: `/tmp/opencode/task25-migrations.log`.
+- **Fresh SQLite:** `scripts.init_db` then the documented order (`migrate_staff_schema` → `migrate_customer_booking` → `migrate_guarantor_profile`) twice → all exits 0. Result: 15 tables, `BRANCH` and both PSGC tables present, `USERS` has 28 columns; second pass is idempotent.
+- **Legacy SQLite copy:** staff and customer migrations exit 0 on both passes; `BRANCH`, PSGC tables, and online-booking columns are present; a sample `VEHICLE` row survives. The guarantor migration exits 1 on both passes with the documented F-003 message (`license_number` still NOT NULL); it leaves the data intact and is repeatable. This is the accepted Low legacy-only limitation.
+- **Golden path:** `tests/test_final_audit_flow.py` → 1 passed. It covers online booking → staff confirm → check-in → rental and deposit payments → checkout/settlement → receipt → customer payment history → dashboard/report. Log: `/tmp/opencode/task25-golden.log`.
+- **UI evidence:** The full suite includes offscreen customer and staff Qt tests (schedule, checkout, payment history, staff pages). Interactive manual click-through was not possible on this headless host; no UI step is claimed as manually verified.
+- **Constraints:** no live MySQL writes (throwaway SQLite only); GUI tests ran with `QT_QPA_PLATFORM=offscreen`; no conflict markers; `git diff --check` clean; working tree clean after the sign-off commit.
 
 ## Deferred and waived items
 
@@ -84,8 +100,12 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 ## Known environmental limitations
 
 - CarImages/media API availability is external; failures are recorded as Environmental and retested when available.
-- Interactive manual UI click-through is limited on this headless host; offscreen Qt tests and service-level flow evidence are used, and any unexercised UI step is recorded as a gap.
+- Interactive manual UI click-through is not available on this headless host. Offscreen Qt tests and the service-level golden path are used instead; no unexercised UI step is claimed as manually verified.
 
 ## Sign-off
 
-**Status:** Pending — do not merge `final-audit` into `main` until this report is complete and the user explicitly approves.
+**Audit result:** PASS — no open Critical or High findings. One Low finding (F-003) is deferred/documented and affects only legacy SQLite; fresh SQLite and the MySQL migration path are correct.
+
+**Merge decision:** Ready for explicit user approval. Do not merge `final-audit` into `main` until the user approves this report.
+
+**Approval:** Pending.

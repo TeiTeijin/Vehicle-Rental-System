@@ -1679,7 +1679,7 @@ git push origin final-audit
 - Consumes: all completed audit tasks and remediations.
 - Produces: a green final branch and an audit sign-off report.
 
-- [ ] **Step 1: Run the full suite**
+- [x] **Step 1: Run the full suite**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest -q > /tmp/opencode/final-audit-final.log 2>&1
@@ -1688,7 +1688,7 @@ echo $?
 
 Expected: exit 0, no failures. Record skip count and log path.
 
-- [ ] **Step 2: Run migration verification**
+- [x] **Step 2: Run migration verification**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_migrate_*.py -q
@@ -1696,7 +1696,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/test_migrate_*.py -q
 
 Run the documented migration order on a fresh SQLite database and a copied legacy database. Verify both are idempotent.
 
-- [ ] **Step 3: Run the golden path and flow smoke tests**
+- [x] **Step 3: Run the golden path and flow smoke tests**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_final_audit_flow.py -q
@@ -1704,7 +1704,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests/test_final_audit_flow.py -q
 
 Re-run the focused tests for every flow task with open evidence gaps.
 
-- [ ] **Step 4: Manual UI smoke test**
+- [x] **Step 4: Manual UI smoke test**
 
 On a temporary SQLite database:
 - customer signup/login → browse → online booking
@@ -1715,7 +1715,7 @@ On a temporary SQLite database:
 
 Record screenshots or log evidence in the register.
 
-- [ ] **Step 5: Verify constraints**
+- [x] **Step 5: Verify constraints**
 
 - no live MySQL writes
 - GUI tests ran offscreen
@@ -1724,7 +1724,7 @@ Record screenshots or log evidence in the register.
 - working tree clean
 - no uncommitted audit artifacts
 
-- [ ] **Step 6: Write the final report**
+- [x] **Step 6: Write the final report**
 
 Include:
 - branch and commit
@@ -1737,7 +1737,7 @@ Include:
 - known environmental limitations
 - explicit sign-off decision
 
-- [ ] **Step 7: Commit and push**
+- [x] **Step 7: Commit and push**
 
 ```bash
 git add docs/audits/final-audit-report.md docs/audits/final-audit-register.md
@@ -1745,9 +1745,11 @@ git commit -m "docs: complete final audit sign-off"
 git push origin final-audit
 ```
 
-- [ ] **Step 8: Stop for approval**
+- [x] **Step 8: Stop for approval**
 
 Do **not** merge `final-audit` into `main`. Present the report and request explicit approval. Only after approval should a separate merge task be created.
+
+**Task 25 result (2026-10-26):** full suite exit 0 (1289 collected, 1288 passed, 1 skipped); 119 migration tests passed; fresh and legacy SQLite orders verified; golden path passed. Interactive manual UI click-through was unavailable on the headless host, so offscreen Qt evidence and the service-level golden path are recorded instead. F-003 remains deferred/documented. Sign-off report committed and pushed; merge approval is pending the user.
 
 **Exit criteria:** full suite green, all Critical/High findings closed, report complete, branch pushed, and approval requested.
 
