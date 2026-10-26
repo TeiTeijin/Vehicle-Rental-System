@@ -7783,7 +7783,9 @@ class TestRentalModalRedesign:
         finally:
             overlay.hide_overlay()
 
-    def test_schedule_legend_sits_on_a_cream_strip(self, qapp, shell, branch):
+    def test_schedule_legend_sits_on_a_transparent_strip(
+        self, qapp, shell, branch
+    ):
         from PySide6.QtWidgets import QLabel
 
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
@@ -7798,10 +7800,22 @@ class TestRentalModalRedesign:
                 label.text() for label in step.legend_host.findChildren(QLabel)
             }
             assert "Your dates" in labels
+            # No cream strip: the legend sits directly on the white sheet and
+            # each item host inherits the transparent wizardStep recipe.
+            chips = [
+                label
+                for label in step.legend_host.findChildren(QLabel)
+                if label.objectName() == "legendChip"
+            ]
+            assert chips
+            assert all(
+                chip.parent().objectName() == "wizardStep" for chip in chips
+            )
             block = theme.load_stylesheet().split(
                 "QFrame#wizardLegend {", 1
             )[1].split("}", 1)[0]
-            assert "background: #F1E8D8" in block
+            assert "background: transparent" in block
+            assert "border-radius: 8px" in block
         finally:
             overlay.hide_overlay()
 

@@ -1462,8 +1462,10 @@ QLabel#legendChip {
     border-radius: 2px;
 }
 
+/* The legend sits on the white sheet; the frame is a rounded outline with no
+   cream fill. The colour swatches inside keep their own backgrounds. */
 QFrame#wizardLegend {
-    background: #F1E8D8;
+    background: transparent;
     border: none;
     border-radius: 8px;
 }

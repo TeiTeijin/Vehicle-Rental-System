@@ -220,6 +220,9 @@ def make_choice_button(text: str, parent: QWidget) -> QPushButton:
 
 def _legend_item(text: str, colour: str, parent: QWidget) -> QWidget:
     host = QWidget(parent)
+    # The blanket QWidget cream would paint a box behind every legend item;
+    # the step's transparent recipe keeps the white sheet showing through.
+    host.setObjectName("wizardStep")
     row = QHBoxLayout(host)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(5)
@@ -239,6 +242,9 @@ def _date_cell(
     parent: QWidget, label: str, initial: QDate, minimum: QDate
 ) -> tuple[QWidget, QDateEdit]:
     host = QWidget(parent)
+    # Date cells are bare hosts on the white sheet, so they need the same
+    # transparent recipe as the step root instead of the blanket cream.
+    host.setObjectName("wizardStep")
     lay = QVBoxLayout(host)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(4)
@@ -461,8 +467,8 @@ class SchedulePanel(ModalStep):
         self.day_strip = DayStrip(self.content_host)
         left.addWidget(self.day_strip)
 
-        # A cream strip gives the legend text (especially "Your dates") its
-        # own background instead of sitting bare on the white sheet.
+        # The legend is a rounded outline only: the white sheet shows through
+        # so the items read as part of the step rather than a cream strip.
         self.legend_host = QFrame(self.content_host)
         self.legend_host.setObjectName("wizardLegend")
         legend = QHBoxLayout(self.legend_host)
