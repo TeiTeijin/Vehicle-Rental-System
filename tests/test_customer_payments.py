@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 from contextlib import nullcontext
+from decimal import Decimal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from app.services import payment_service
+from app.services import booking_service, payment_service
 from app.ui import payments as payments_ui
 from app.ui import theme
 from app.ui.session import Identity
@@ -45,6 +46,33 @@ def test_history_is_scoped_to_the_customer(
 
     assert [row.reference_no for row in rows] == ["MINE-ONLY"]
     assert rows[0].booking.user_id == customer.user_id
+
+
+def test_customer_payment_history_labels_applied_deposit(
+    session, customer, vehicle, booking_factory
+):
+    booking = booking_factory(customer, vehicle)
+    payment_service.record_payment(
+        session, booking, "2000.00", "cash", kind="deposit"
+    )
+    booking_service.apply_penalty(
+        session,
+        booking,
+        penalty_type="damage",
+        amount=Decimal("500.00"),
+        description="Scratch",
+    )
+    payment_service.settle_deposit(session, booking)
+
+    applied = next(
+        payment for payment in booking.payments if payment.kind == "deposit_applied"
+    )
+    row = payments_ui._row_for(applied)
+
+    assert "Deposit applied" in row.details
+    assert "Cash at the counter" not in row.details
+    assert "no cash" in row.note.lower()
+    assert row.when.startswith("Applied")
 
 
 def test_a_customer_without_payments_has_an_empty_history(

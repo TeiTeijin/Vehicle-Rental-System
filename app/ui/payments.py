@@ -54,6 +54,7 @@ STATUS_TONES = {
 KIND_LABELS = {
     "rental": "Rental payment",
     "deposit": "Security deposit",
+    "deposit_applied": "Deposit applied",
 }
 
 STATUS_NOTES = {
@@ -80,6 +81,8 @@ class Row:
 
 
 def _method_label(payment: Payment) -> str:
+    if payment.kind == "deposit_applied":
+        return "Applied to penalties"
     method = payment.method
     if method == "card":
         last4 = payment.booking.card_last4 if payment.booking else None
@@ -95,7 +98,7 @@ def _when_label(payment: Payment) -> str:
     stamp = payment.paid_at or payment.created_at
     if stamp is None:
         return "Date unavailable"
-    lead = {
+    lead = "Applied" if payment.kind == "deposit_applied" else {
         "paid": "Paid",
         "refunded": "Paid",
         "failed": "Attempted",
@@ -109,6 +112,8 @@ def _note(payment: Payment) -> str:
         return STATUS_NOTES[payment.status]
     if payment.kind == "deposit":
         return "Refundable deposit held against damage or late return."
+    if payment.kind == "deposit_applied":
+        return "Security deposit applied to penalties; no cash changed hands."
     return ""
 
 
