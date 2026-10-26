@@ -89,9 +89,32 @@ def receipt_rows(session, booking: Booking) -> list[Row]:
         Row("", "blank"),
 
         Row("Charges", "heading"),
-        Row("Base rental", "line"),
-        Row(pesos(balance.rental_cost), "amount"),
     ]
+    breakdown = (
+        booking.subtotal,
+        booking.insurance_fee,
+        booking.service_fee,
+        booking.vat,
+    )
+    if all(value is not None for value in breakdown):
+        # Online bookings store the same lines the checkout showed. Print
+        # them separately so "Rental" is the subtotal, not the grand total.
+        rows += [
+            Row("Rental", "line"),
+            Row(pesos(booking.subtotal), "amount"),
+            Row("Insurance", "line"),
+            Row(pesos(booking.insurance_fee), "amount"),
+            Row("Service fee", "line"),
+            Row(pesos(booking.service_fee), "amount"),
+            Row("VAT (12%)", "line"),
+            Row(pesos(booking.vat), "amount"),
+        ]
+    else:
+        # Counter bookings only have the grand total; label it honestly.
+        rows += [
+            Row("Rental total", "line"),
+            Row(pesos(balance.rental_cost), "amount"),
+        ]
     for penalty in booking.penalties:
         rows.append(Row(f"Penalty ({penalty.penalty_type.replace('_', ' ').title()})", "line"))
         rows.append(Row(pesos(penalty.amount), "amount"))

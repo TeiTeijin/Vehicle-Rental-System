@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session, joinedload
 from app.domain.rental_calculator import RentalCalculator
 from app.models import Maintenance_Record, Vehicle, Vehicle_Category
 from app.services.errors import ConflictError, NotFoundError, StateError, ValidationError
+from app.services.vehicle_service import (
+    BODY_STYLES,
+    FUEL_TYPES,
+    TRANSMISSIONS,
+    VEHICLE_CLASSES,
+)
 from app.utils.money import money
 
 #: Every value the column's enum accepts. `retired` is terminal storage:
@@ -48,6 +54,26 @@ RENTED_DAY_STATUSES = ("confirmed", "ongoing", "completed")
 #: Maintenance statuses that mean the vehicle is in the shop.
 #: Shared with maintenance_service so the two tabs never disagree.
 BLOCKING_MAINTENANCE_STATUSES = ("scheduled", "in_progress")
+
+#: Vehicle columns backed by a SQLAlchemy Enum. SQLite stores these as plain
+#: strings, so the database will happily accept a bad label and only fail
+#: later when the ORM reads the row back. Validate at the service boundary.
+_ENUM_CHOICES: dict[str, tuple[str, ...]] = {
+    "transmission": TRANSMISSIONS,
+    "fuel_type": FUEL_TYPES,
+    "body_style": BODY_STYLES,
+    "vehicle_class": VEHICLE_CLASSES,
+}
+
+
+def _validate_choice(field: str, value: str | None) -> None:
+    allowed = _ENUM_CHOICES[field]
+    if value is not None and value not in allowed:
+        raise ValidationError(
+            f"{field.replace('_', ' ').capitalize()} must be one of: "
+            f"{', '.join(allowed)}.",
+            field=field,
+        )
 
 
 # --------------------------------------------------------------------------
@@ -220,6 +246,13 @@ def add_vehicle(
         raise ValidationError("Daily rate must be greater than zero.", field="daily_rate")
     if mileage is not None and mileage < 0:
         raise ValidationError("Mileage cannot be negative.", field="mileage")
+    for field, value in (
+        ("transmission", transmission),
+        ("fuel_type", fuel_type),
+        ("body_style", body_style),
+        ("vehicle_class", vehicle_class),
+    ):
+        _validate_choice(field, value)
 
     existing = session.execute(
         select(Vehicle).where(Vehicle.plate_number == plate)
@@ -306,6 +339,8 @@ def update_vehicle(session: Session, vehicle: Vehicle, **changes) -> Vehicle:
             )
 
     for field, value in changes.items():
+        if field in _ENUM_CHOICES:
+            _validate_choice(field, value)
         if not hasattr(vehicle, field):
             raise ValidationError(f"Unknown vehicle field: {field}", field=field)
         setattr(vehicle, field, value)
