@@ -1,62 +1,75 @@
 """Check-details view for the staff New Rental page.
 
-Built on the dashboard `Card` so a vehicle popup reads as part of the same
-product: white, 28px radius, 1px outline, painted layered shadow, 26px
-padding, with the dashboard's own `SectionLabel`, status boxes, `MoneyNumber`
-and `Caption` blocks.
+The counter modal is one warm sheet: a header with the vehicle identity, a
+photo/3D gallery on the left, specifications and availability on the right,
+and a footer that keeps Close and Rent this vehicle in reach. The whole card
+is fixed to the window height; only the right-hand column scrolls, exactly
+like the reference.
 
-Layout, top to bottom (no scrolling; the card sizes to content): hero photo
-(white box) + big bold name/rate/status box, spec sheet, availability list +
-date checker, maintenance, then Rent this vehicle + Close.
-
-The content lives in `VehicleDetailsPanel` (a plain widget) so it can be
-shown two ways without duplicating anything:
+The content lives in `VehicleDetailsPanel` so it can be shown two ways:
 
 - `VehicleDetailsDialog`: thin modal-window wrapper (kept for compat).
-- `VehicleDetailsOverlay`: the real presentation — dim + card embedded
+- `VehicleDetailsOverlay`: the real presentation -- dim + card embedded
   inside the staff window itself. No new OS window is ever opened.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QDate, QEvent, QRectF, Qt, Signal, QTimer
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPixmap
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import (
+    QDate,
+    QEvent,
+    QObject,
+    QPointF,
+    QRectF,
+    QRunnable,
+    QSize,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QDateEdit,
     QDialog,
-    QFormLayout,
     QFrame,
     QGraphicsBlurEffect,
     QGraphicsPixmapItem,
     QGraphicsScene,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedLayout,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from app.models import Booking, Maintenance_Record, Vehicle
-from app.services import booking_service, image_cache
+from app.services import booking_service, image_cache, vehicle_photos
 from app.services.errors import ConflictError
 from app.staff import icons, theme
-from app.staff.cards import (
-    Caption,
-    Card,
-    MoneyNumber,
-    Pill,
-    SectionLabel,
+from app.staff.cards import Caption, Card, MoneyNumber, Pill, SectionLabel
+from app.staff.rental_ui import (
+    MODAL_MUTED,
+    MODAL_RADIUS,
+    MODAL_SURFACE,
+    MODAL_WIDTH,
+    SpecTile,
+    StatusChip,
 )
+from app.staff.workers import emit_safely, media_pool
 
-
-#: Photo banner height inside the details view: tall enough that real photos
-#: are never cropped at the top.
+#: Hero height inside the details gallery.
 PHOTO_H = 300
-
-#: Width the hero photo is cropped for (overlay card inner width, roughly).
-PHOTO_W = 600
 
 #: Placeholder text for columns the row leaves NULL.
 DASH = "\u2014"
@@ -65,10 +78,9 @@ DASH = "\u2014"
 ACTIVE_BOOKING_STATES = ("pending", "confirmed", "ongoing")
 
 #: Overlay card width; the dim fills the whole window around it.
-OVERLAY_CARD_W = 640
+OVERLAY_CARD_W = MODAL_WIDTH
 
 #: Frosted-glass backdrop: blur radius applied to the frozen page snapshot.
-#: Medium strength; single constant so the look is tunable in one place.
 BACKDROP_BLUR_RADIUS = 12
 
 #: Dim baked over the blurred snapshot (same ink as DimOverlay).
@@ -81,37 +93,178 @@ BACKDROP_DOWNSCALE = 4
 #: Debounce for re-rendering the backdrop on window resizes while open.
 BACKDROP_RERENDER_MS = 120
 
+#: Left gallery width; the right column gets the rest of the 900px sheet.
+GALLERY_WIDTH = 380
 
-def _hero_pixmap(make: str, model: str, year: int, width: int) -> QPixmap:
-    """Best cached photo, centre-cropped to the banner; silhouette fallback."""
+#: Gallery tabs, in reading order. "3d" opens the WebEngine viewer.
+GALLERY_VIEWS = vehicle_photos.VIEWS
+GALLERY_LABELS = {
+    "front": "Front",
+    "left": "Left Side",
+    "right": "Right Side",
+    "3d": "3D",
+}
+
+try:  # pragma: no cover - the import is exercised by the real staff app
+    from PySide6.QtWebEngineCore import QWebEngineSettings
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except ImportError:  # pragma: no cover - Qt built without WebEngine
+    QWebEngineSettings = None
+    QWebEngineView = None
+
+
+#: OrbitControls gives drag-to-rotate and wheel zoom; the reset hook restores
+#: the framed camera. Auto-rotate can be toggled from the Qt controls.
+MODAL_THREE_HTML = """<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;background:#EFE6D5;overflow:hidden;font-family:Inter,sans-serif}
+  #note{position:absolute;inset:auto 8px 8px 8px;font:11px sans-serif;color:#6B5E4F;text-align:center}
+</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+</head><body><div id="note">Loading 3D\u2026</div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const note = document.getElementById('note');
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.1, 100);
+cam.position.set(3.2, 1.8, 4.2);
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+} catch (err) {
+  note.textContent = '3D preview is unavailable on this display.';
+  throw err;
+}
+renderer.setClearColor(0xEFE6D5, 1);
+renderer.setSize(innerWidth, innerHeight);
+renderer.domElement.style.cursor = 'grab';
+document.body.appendChild(renderer.domElement);
+const ctl = new OrbitControls(cam, renderer.domElement);
+ctl.enableDamping = true;
+ctl.dampingFactor = 0.07;
+ctl.autoRotate = true;
+ctl.autoRotateSpeed = 1.25;
+ctl.minDistance = 0.4;
+window.addEventListener('error', () => {
+  note.textContent = '3D preview is unavailable on this display.';
+});
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8A8175, 1.8));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(4, 6, 3); scene.add(sun);
+new GLTFLoader().load("__URL__",
+  g => {scene.add(g.scene);
+    const b = new THREE.Box3().setFromObject(g.scene);
+    const sphere = b.getBoundingSphere(new THREE.Sphere());
+    ctl.target.copy(sphere.center);
+    const dir = cam.position.clone().sub(sphere.center).normalize();
+    cam.position.copy(sphere.center).addScaledVector(dir, sphere.radius * 2.35);
+    ctl.update();
+    ctl.saveState();
+    note.textContent = '';},
+  undefined,
+  e => {note.textContent = '3D preview failed to load.';});
+window.__setAutoRotate = on => { ctl.autoRotate = !!on; };
+window.__resetView = () => { ctl.reset(); };
+(function tick(){requestAnimationFrame(tick); ctl.update();
+  renderer.render(scene, cam);})();
+addEventListener('resize', () => {cam.aspect = innerWidth/innerHeight;
+  cam.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);});
+</script></body></html>"""
+
+
+def _decode(data: bytes) -> QImage | None:
+    image = QImage()
+    if image.loadFromData(data):
+        return image
+    return None
+
+
+def _fit_image(image: QImage, width: int, height: int) -> QPixmap:
+    scaled = image.scaled(
+        max(1, width),
+        max(1, height),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    return QPixmap.fromImage(scaled)
+
+
+class _ScaledImage(QLabel):
+    """Photo label that keeps the bytes and rescales on every resize."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._image: QImage | None = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def set_image(self, image: QImage | None) -> None:
+        self._image = image
+        self._paint()
+
+    def clear_image(self) -> None:
+        self._image = None
+        self.setPixmap(QPixmap())
+        self.setText("")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._paint()
+
+    def _paint(self) -> None:
+        if self._image is None:
+            return
+        width = max(1, self.width() - 8)
+        height = max(1, self.height() - 8)
+        scaled = self._image.scaled(
+            width,
+            height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.setPixmap(QPixmap.fromImage(scaled))
+
+
+def _cube_pixmap(size: int = 26) -> QPixmap:
+    """A small wireframe cube for the 3D tab, drawn in ink."""
+    scale = 2
+    pm = QPixmap(size * scale, size * scale)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
     try:
-        cached = image_cache.load(make, model, year)
-        payload = getattr(cached, "data", None)
-    except Exception:  # noqa: BLE001
-        payload = None
-    if payload:
-        image = QImage()
-        if image.loadFromData(payload):
-            scaled = image.scaled(
-                width,
-                PHOTO_H,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            x = max(0, (scaled.width() - width) // 2)
-            y = max(0, (scaled.height() - PHOTO_H) // 2)
-            cropped = scaled.copy(x, y, width, PHOTO_H)
-            return QPixmap.fromImage(cropped)
-    try:
-        return icons.pixmap("vehicle", theme.MUTED, 64)
-    except Exception:  # noqa: BLE001
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        return pixmap
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = painter.pen()
+        pen.setColor(QColor("#171717"))
+        pen.setWidthF(1.5 * scale)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        s = float(size * scale)
+        top = [
+            QPointF(s * 0.50, s * 0.14),
+            QPointF(s * 0.82, s * 0.34),
+            QPointF(s * 0.50, s * 0.54),
+            QPointF(s * 0.18, s * 0.34),
+        ]
+        painter.drawPolygon(top)
+        painter.drawLine(top[3], QPointF(s * 0.18, s * 0.72))
+        painter.drawLine(top[1], QPointF(s * 0.82, s * 0.72))
+        painter.drawLine(top[2], QPointF(s * 0.50, s * 0.90))
+        painter.drawLine(QPointF(s * 0.18, s * 0.72), QPointF(s * 0.50, s * 0.90))
+        painter.drawLine(QPointF(s * 0.82, s * 0.72), QPointF(s * 0.50, s * 0.90))
+    finally:
+        painter.end()
+    return pm.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
 def _status_box(status: str, parent: QWidget) -> Pill:
-    """Status badge as a box (radius 8), never a pill."""
+    """Status badge as a box (radius 8), never a stadium."""
     return Pill(
         theme.status_label(status),
         parent=parent,
@@ -120,6 +273,390 @@ def _status_box(status: str, parent: QWidget) -> Pill:
         dot_colour=theme.STATUS_COLOURS.get(status, theme.MUTED),
         radius=8,
     )
+
+
+# -- media workers ------------------------------------------------------------
+
+
+class _MediaSignals(QObject):
+    photo_ready = Signal(str, bytes)
+    photo_failed = Signal(str)
+    model_ready = Signal(str)
+    model_failed = Signal()
+
+
+class _PhotoJob(QRunnable):
+    def __init__(self, ref, view: str, signals: _MediaSignals) -> None:
+        super().__init__()
+        self._ref = ref
+        self._view = view
+        self._signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            data = vehicle_photos.photo_bytes(self._ref, self._view)
+        except Exception:  # noqa: BLE001 - a photo never breaks the modal
+            data = None
+        if data:
+            emit_safely(self._signals.photo_ready, self._view, data)
+        else:
+            emit_safely(self._signals.photo_failed, self._view)
+
+
+class _ModelJob(QRunnable):
+    def __init__(self, ref, signals: _MediaSignals) -> None:
+        super().__init__()
+        self._ref = ref
+        self._signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            path = vehicle_photos.model_glb_path(self._ref)
+        except Exception:  # noqa: BLE001
+            path = None
+        if path is None:
+            emit_safely(self._signals.model_failed)
+        else:
+            emit_safely(self._signals.model_ready, str(path))
+
+
+# -- gallery ------------------------------------------------------------------
+
+
+class Gallery(QWidget):
+    """Photo views plus the interactive 3D tab.
+
+    Only the active photo is fetched over the network; thumbnails use the
+    shared on-disk cache. The 3D viewer is created lazily on the first click,
+    because a WebEngine per modal is heavy.
+    """
+
+    def __init__(
+        self,
+        ref,
+        make: str,
+        model: str,
+        year: int,
+        *,
+        autoload: bool = True,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("modalGallery")
+        self.views = GALLERY_VIEWS
+        self.view_buttons: dict[str, QToolButton] = {}
+        self._ref = ref
+        self._make = make
+        self._model = model
+        self._year = year
+        self._current = "front"
+        self._photos: dict[str, QImage] = {}
+        self._model_path: str | None = None
+        self._model_requested = False
+        self._web_view = None
+        self._autoload = autoload
+        self._signals = _MediaSignals(self)
+        self._signals.photo_ready.connect(self._on_photo_ready)
+        self._signals.photo_failed.connect(self._on_photo_failed)
+        self._signals.model_ready.connect(self._on_model_ready)
+        self._signals.model_failed.connect(self._on_model_failed)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(10)
+
+        self.hero = QFrame(self)
+        self.hero.setObjectName("galleryHero")
+        self.hero.setMinimumHeight(PHOTO_H)
+        self.hero.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        hero_layout = QVBoxLayout(self.hero)
+        hero_layout.setContentsMargins(10, 10, 10, 8)
+        hero_layout.setSpacing(6)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
+        self.badge = QLabel("Photo", self.hero)
+        self.badge.setObjectName("galleryBadge")
+        controls.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+        controls.addStretch(1)
+        self.auto_button = QPushButton("Auto-rotate", self.hero)
+        self.auto_button.setObjectName("viewerControl")
+        self.auto_button.setCheckable(True)
+        self.auto_button.setChecked(True)
+        self.auto_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.auto_button.toggled.connect(self._toggle_auto_rotate)
+        self.auto_button.hide()
+        self.reset_button = QPushButton("Reset", self.hero)
+        self.reset_button.setObjectName("viewerControlLight")
+        self.reset_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reset_button.clicked.connect(self._reset_view)
+        controls.addWidget(self.auto_button, 0, Qt.AlignmentFlag.AlignTop)
+        controls.addWidget(self.reset_button, 0, Qt.AlignmentFlag.AlignTop)
+        self.reset_button.hide()
+        self.badge.hide()
+        hero_layout.addLayout(controls)
+
+        self._stage = QWidget(self.hero)
+        self._stage.setObjectName("galleryStage")
+        self._stack = QStackedLayout(self._stage)
+        self._stack.setContentsMargins(0, 0, 0, 0)
+        self.image_label = _ScaledImage(self._stage)
+        self.image_label.setObjectName("galleryImage")
+        self.image_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
+        self._stack.addWidget(self.image_label)
+        hero_layout.addWidget(self._stage, 1)
+
+        self.hint = QLabel("Drag to rotate \u00b7 scroll to zoom", self.hero)
+        self.hint.setObjectName("galleryHint")
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint.hide()
+        hero_layout.addWidget(self.hint, 0)
+        outer.addWidget(self.hero)
+
+        tabs = QHBoxLayout()
+        tabs.setContentsMargins(0, 0, 0, 0)
+        tabs.setSpacing(6)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        for view in self.views:
+            button = QToolButton(self)
+            button.setObjectName("galleryTab")
+            button.setText(GALLERY_LABELS[view])
+            button.setCheckable(True)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            button.setIconSize(QSize(46, 26))
+            button.setFixedHeight(66)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            if view == "3d":
+                button.setIcon(icons.icon("vehicle", MODAL_MUTED, 20))
+                button.setIconSize(QSize(26, 26))
+                # A cube reads more clearly than a car for the 3D tab.
+                button.setIcon(_icon_from_pixmap(_cube_pixmap(26)))
+            else:
+                thumb = self._thumb_pixmap(view)
+                if thumb is not None:
+                    button.setIcon(_icon_from_pixmap(thumb, 46, 26))
+                else:
+                    button.setIcon(icons.icon("vehicle", MODAL_MUTED, 22))
+            button.clicked.connect(lambda _checked=False, v=view: self.set_view(v))
+            self._group.addButton(button)
+            self.view_buttons[view] = button
+            tabs.addWidget(button, 1)
+        outer.addLayout(tabs)
+
+        self.view_buttons["front"].setChecked(True)
+        # The list card has usually already cached the three-quarter shot.
+        # Otherwise fetch it in the background once, unless a test run has no
+        # business reaching the network.
+        if not self._load_cached("front"):
+            if self._autoload and "pytest" not in sys.modules:
+                self.image_label.setText("Loading photo\u2026")
+                self._start_photo("front")
+            else:
+                self.image_label.setText("Select a view to load its photo")
+
+    # -- tabs ----------------------------------------------------------
+
+    def _thumb_pixmap(self, view: str) -> QPixmap | None:
+        data = self._cached_bytes(view)
+        if data is None:
+            return None
+        image = _decode(data)
+        if image is None:
+            return None
+        return _fit_image(image, 46, 26)
+
+    def _cached_bytes(self, view: str) -> bytes | None:
+        try:
+            cached = image_cache.load(self._make, self._model, self._year, view)
+            if cached is None:
+                cached = image_cache.load(
+                    self._make, self._model, self._year, "front34"
+                )
+            return cached.data if cached is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _load_cached(self, view: str) -> bool:
+        data = self._cached_bytes(view)
+        if data is None:
+            return False
+        image = _decode(data)
+        if image is None:
+            return False
+        self._photos[view] = image
+        self.image_label.set_image(image)
+        return True
+
+    def _start_photo(self, view: str) -> None:
+        job = _PhotoJob(self._ref, view, self._signals)
+        media_pool().start(job)
+
+    def set_view(self, view: str) -> None:
+        if view not in self.view_buttons:
+            return
+        self._current = view
+        self.view_buttons[view].setChecked(True)
+        if view == "3d":
+            self._show_3d()
+            return
+        self.badge.hide()
+        self.auto_button.hide()
+        self.reset_button.hide()
+        self.hint.hide()
+        if self._web_view is not None:
+            self._stack.setCurrentWidget(self.image_label)
+        self._show_photo(view)
+
+    def _show_photo(self, view: str) -> None:
+        image = self._photos.get(view)
+        if image is not None:
+            self.image_label.set_image(image)
+            self.image_label.setText("")
+            return
+        if self._load_cached(view):
+            return
+        if self._current == view:
+            self.image_label.clear_image()
+            self.image_label.setText("Loading photo\u2026")
+        self._start_photo(view)
+
+    @Slot(str, bytes)
+    def _on_photo_ready(self, view: str, data: bytes) -> None:
+        image = _decode(data)
+        if image is None:
+            self._on_photo_failed(view)
+            return
+        self._photos[view] = image
+        if view != "3d":
+            button = self.view_buttons.get(view)
+            if button is not None:
+                thumb = _fit_image(image, 46, 26)
+                button.setIcon(_icon_from_pixmap(thumb, 46, 26))
+        if self._current == view:
+            self.image_label.set_image(image)
+            self.image_label.setText("")
+
+    @Slot(str)
+    def _on_photo_failed(self, view: str) -> None:
+        if self._current != view:
+            return
+        self.image_label.clear_image()
+        self.image_label.setText("No photo available for this vehicle")
+
+    # -- 3D ------------------------------------------------------------
+
+    def _show_3d(self) -> None:
+        self.badge.setText("Interactive 3D")
+        self.badge.show()
+        self.auto_button.show()
+        self.reset_button.show()
+        self.hint.show()
+        view = self._ensure_viewer()
+        if view is None:
+            self._stack.setCurrentWidget(self.image_label)
+            self.image_label.clear_image()
+            self.image_label.setText("3D viewer unavailable in this build.")
+            self.auto_button.setEnabled(False)
+            self.reset_button.setEnabled(False)
+            return
+        if self._model_path is None:
+            self._stack.setCurrentWidget(self.image_label)
+            self.image_label.clear_image()
+            self.image_label.setText("Loading the 3D model\u2026")
+            if not self._model_requested:
+                self._model_requested = True
+                media_pool().start(_ModelJob(self._ref, self._signals))
+            return
+        self._stack.setCurrentWidget(view)
+
+    def _ensure_viewer(self):
+        if self._web_view is not None:
+            return self._web_view
+        if QWebEngineView is None:
+            return None
+        view = QWebEngineView(self._stage)
+        view.setObjectName("modelViewer")
+        if QWebEngineSettings is not None:
+            settings = view.settings()
+            settings.setAttribute(
+                QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls,
+                True,
+            )
+            settings.setAttribute(
+                QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
+                True,
+            )
+        view.page().setBackgroundColor(QColor(MODAL_SURFACE))
+        self._stage.layout().addWidget(view)
+        self._web_view = view
+        return view
+
+    @Slot(str)
+    def _on_model_ready(self, path: str) -> None:
+        self._model_path = path
+        view = self._ensure_viewer()
+        if view is None:
+            self._on_model_failed()
+            return
+        source = Path(path)
+        url = QUrl.fromLocalFile(str(source)).toString()
+        url = url.replace("\\", "\\\\").replace('"', '\\"')
+        document = MODAL_THREE_HTML.replace("__URL__", url)
+        view.setHtml(document, QUrl.fromLocalFile(str(source.parent) + "/"))
+        self._stack.setCurrentWidget(view)
+        self.auto_button.setEnabled(True)
+        self.reset_button.setEnabled(True)
+
+    @Slot()
+    def _on_model_failed(self) -> None:
+        self._model_requested = False
+        if self._current != "3d":
+            return
+        self._stack.setCurrentWidget(self.image_label)
+        self.image_label.clear_image()
+        self.image_label.setText(
+            "No 3D model for this vehicle yet.\n"
+            "Use the photo views to inspect the body."
+        )
+        self.auto_button.setEnabled(False)
+        self.reset_button.setEnabled(False)
+
+    def _toggle_auto_rotate(self, checked: bool) -> None:
+        if self._web_view is not None:
+            self._web_view.page().runJavaScript(
+                f"window.__setAutoRotate && window.__setAutoRotate({str(checked).lower()});"
+            )
+
+    def _reset_view(self) -> None:
+        if self._web_view is not None:
+            self._web_view.page().runJavaScript(
+                "window.__resetView && window.__resetView();"
+            )
+        self.auto_button.setChecked(True)
+
+
+def _icon_from_pixmap(
+    pixmap: QPixmap, width: int | None = None, height: int | None = None
+) -> QIcon:
+    if width is not None and height is not None:
+        pixmap = pixmap.scaled(
+            width,
+            height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    return QIcon(pixmap)
 
 
 class VehicleDetailsPanel(QWidget):
@@ -133,17 +670,24 @@ class VehicleDetailsPanel(QWidget):
     rent_requested = Signal(int)
     close_requested = Signal()
 
-    def __init__(self, context, vehicle_id: int, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        context,
+        vehicle_id: int,
+        parent: QWidget | None = None,
+        *,
+        autoload: bool = True,
+    ) -> None:
         super().__init__(parent)
-        # Transparent by QSS: the blanket QWidget cream would otherwise paint
-        # a sharp square behind the rounded Card (radius 8 cutouts).
         self.setObjectName("vehicleDetailsPanel")
         self._context = context
         self._vehicle_id = vehicle_id
+        self._autoload = autoload
         #: Last clean availability check, as (start, end) dates; None until checked.
         self.checked_window: tuple[QDate, QDate] | None = None
 
         self.spec_values: dict[str, str] = {}
+        self.spec_tiles: dict[str, SpecTile] = {}
         self.missing_label = QLabel("", self)
         self.missing_label.setObjectName(theme.OBJ_ERROR)
         self.missing_label.setWordWrap(True)
@@ -151,32 +695,16 @@ class VehicleDetailsPanel(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(12)
+        outer.setSpacing(0)
 
-        self.card = Card(self, radius=8)
+        self.card = Card(self, radius=MODAL_RADIUS)
         self.card.setObjectName("vehicleDetailsCard")
-        outer.addWidget(self.card)
-        body = self.card.body()
-        self.card.layout().addLayout(body)
-        self._body = body
+        self.card.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.card.setMinimumHeight(560)
+        outer.addWidget(self.card, 1)
 
-        # Rent/Close live INSIDE the white card (added at the end of
-        # _build), so no cream dialog background is left showing.
-        buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 0, 0, 0)
-        buttons.setSpacing(8)
-        buttons.addStretch(1)
-        # Literal QSS names, matching InfoDialog: the theme BTN constants
-        # ("btnPrimary"/"btnSecondary") do not match any stylesheet rule.
-        self.close_button = QPushButton("Close", self)
-        self.close_button.setObjectName("secondaryButton")
-        self.close_button.clicked.connect(self.close_requested.emit)
-        self.rent_button = QPushButton("Rent this vehicle", self)
-        self.rent_button.setObjectName("primaryButton")
-        self.rent_button.clicked.connect(self._on_rent)
-        buttons.addWidget(self.close_button)
-        buttons.addWidget(self.rent_button)
-        self._buttons = buttons
         self._build()
 
     # -- data ---------------------------------------------------------------
@@ -194,7 +722,7 @@ class VehicleDetailsPanel(QWidget):
                     Booking.status.in_(ACTIVE_BOOKING_STATES),
                 )
                 .order_by(Booking.start_date)
-                .limit(3)
+                .limit(4)
                 .all()
             )
             booking_rows = [
@@ -233,6 +761,8 @@ class VehicleDetailsPanel(QWidget):
                 "make": vehicle.make or "",
                 "model": vehicle.model or "",
                 "year": int(vehicle.year or 0),
+                "plate": vehicle.plate_number or DASH,
+                "ref": vehicle_photos.ref_for(vehicle),
                 "specs": [
                     ("Plate", vehicle.plate_number or DASH),
                     ("Seats", str(vehicle.seats) if vehicle.seats is not None else DASH),
@@ -261,162 +791,358 @@ class VehicleDetailsPanel(QWidget):
     def _build(self) -> None:
         data = self._read_vehicle()
         if data is None:
-            self.missing_label.setText("That vehicle no longer exists.")
-            self.missing_label.setVisible(True)
-            self._body.addWidget(self.missing_label)
-            self.rent_button.setEnabled(False)
-            self._body.addLayout(self._buttons)
+            self._build_missing()
             return
 
-        self.photo = QLabel(self.card)
-        self.photo.setFixedHeight(PHOTO_H)
-        # Ignored horizontally: the crop is wider than some hosts, and the
-        # label must take the layout width instead of overflowing it.
-        self.photo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Scoped: an unqualified rule would cascade white onto the pixmap's
-        # transparent corners and flatten the silhouette fallback.
-        self.photo.setStyleSheet(
-            "QLabel#vehicleDetailsPhoto { background: #FFFFFF; }"
-        )
-        self.photo.setPixmap(
-            _hero_pixmap(data["make"], data["model"], data["year"], PHOTO_W)
-        )
-        self.photo.setObjectName("vehicleDetailsPhoto")
-        self._body.addWidget(self.photo)
+        self._header(data)
+        self._body(data)
+        self._footer(data)
 
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(8)
-        self.name_label = SectionLabel(data["name"], parent=self.card)
+    def _build_missing(self) -> None:
+        header = QWidget(self.card)
+        lay = QVBoxLayout(header)
+        lay.setContentsMargins(24, 22, 24, 16)
+        lay.setSpacing(8)
+        title = SectionLabel("Vehicle details", parent=header)
+        title.setFontSize(22, QFont.Weight.Bold)
+        lay.addWidget(title)
+        lay.addWidget(self.missing_label)
+        self.card.layout().addWidget(header)
+
+        body = QWidget(self.card)
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(24, 0, 24, 24)
+        self.missing_label.setText("That vehicle no longer exists.")
+        self.missing_label.setVisible(True)
+        body_lay.addWidget(self.missing_label)
+        body_lay.addStretch(1)
+        self.card.layout().addWidget(body, 1)
+
+        self.close_button = QPushButton("Close", self.card)
+        self.close_button.setObjectName("secondaryButton")
+        self.close_button.clicked.connect(self.close_requested.emit)
+        self.rent_button = QPushButton("Rent this vehicle", self.card)
+        self.rent_button.setObjectName("primaryButton")
+        self.rent_button.setEnabled(False)
+        footer = self._footer_host()
+        footer.layout().addStretch(1)
+        footer.layout().addWidget(self.close_button)
+        footer.layout().addWidget(self.rent_button)
+
+    def _header(self, data: dict) -> None:
+        header = QWidget(self.card)
+        header.setObjectName("rentalModalBody")
+        lay = QVBoxLayout(header)
+        lay.setContentsMargins(24, 20, 24, 0)
+        lay.setSpacing(4)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        self.name_label = SectionLabel(data["name"], parent=header)
         self.name_label.setFontSize(22, QFont.Weight.Bold)
-        head.addWidget(self.name_label, 1)
-        head.addWidget(_status_box(data["status"], self.card))
-        self._body.addLayout(head)
+        row.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.plate_chip = QLabel(data["plate"], header)
+        self.plate_chip.setObjectName("plateChip")
+        self.plate_chip.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
+        row.addWidget(self.plate_chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addStretch(1)
+        row.addWidget(_status_box(data["status"], header), 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addLayout(row)
+        self.subtitle_label = Caption(
+            data["subtitle"], parent=header, colour=MODAL_MUTED, size=12
+        )
+        lay.addWidget(self.subtitle_label)
+        lay.addSpacing(10)
+        rule = QFrame(header)
+        rule.setObjectName("modalRule")
+        rule.setFixedHeight(1)
+        lay.addWidget(rule)
+        self.card.layout().addWidget(header)
 
-        self.subtitle_label = Caption(data["subtitle"], parent=self.card)
-        self._body.addWidget(self.subtitle_label)
+    def _body(self, data: dict) -> None:
+        body = QWidget(self.card)
+        body.setObjectName("rentalModalBody")
+        body_lay = QHBoxLayout(body)
+        body_lay.setContentsMargins(24, 18, 24, 16)
+        body_lay.setSpacing(20)
+
+        self.gallery = Gallery(
+            data["ref"],
+            data["make"],
+            data["model"],
+            data["year"],
+            autoload=self._autoload,
+            parent=body,
+        )
+        self.gallery.setFixedWidth(GALLERY_WIDTH)
+        self.gallery.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+        )
+        # Back-compat: older tests (and the outside-click regression) treat
+        # the hero as the photo surface.
+        self.photo = self.gallery.image_label
+        body_lay.addWidget(self.gallery, 1)
+
+        scroll = QScrollArea(body)
+        scroll.setObjectName("modalColumnScroll")
+        scroll.viewport().setObjectName("modalColumnViewport")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet(
+            "QScrollArea#modalColumnScroll { background: transparent; border: none; }"
+            " QScrollArea#modalColumnScroll QWidget#modalColumnViewport {"
+            " background: transparent; border: none; }"
+        )
+        self.column = QWidget(scroll)
+        self.column.setObjectName("modalColumnViewport")
+        column = QVBoxLayout(self.column)
+        column.setContentsMargins(0, 0, 10, 10)
+        column.setSpacing(14)
 
         price_row = QHBoxLayout()
         price_row.setContentsMargins(0, 0, 0, 0)
-        price_row.setSpacing(6)
-        self.price = MoneyNumber(parent=self.card)
-        self.price.set_colours(dim=theme.MUTED, bright=theme.TEXT)
+        price_row.setSpacing(5)
+        self.price = MoneyNumber(
+            parent=self.column,
+            size=34,
+            dim=MODAL_MUTED,
+            bright="#171717",
+            weight=QFont.Weight.DemiBold,
+        )
         self.price.set_amount(data["rate"] or 0)
         price_row.addWidget(self.price)
-        price_row.addWidget(Caption("/ day", parent=self.card))
+        suffix = Caption(
+            "/ day", parent=self.column, colour=MODAL_MUTED, size=13
+        )
+        suffix.setObjectName("detailPriceSuffix")
+        price_row.addWidget(suffix, 0, Qt.AlignmentFlag.AlignBottom)
         price_row.addStretch(1)
-        self._body.addLayout(price_row)
+        column.addLayout(price_row)
 
-        self._body.addWidget(SectionLabel("Specifications", parent=self.card))
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(6)
-        for key, value in data["specs"]:
-            form.addRow(Caption(key, parent=self.card), self._spec_value(value))
-            self.spec_values[key] = value
-        self._body.addLayout(form)
+        column.addWidget(SectionLabel("Specifications", parent=self.column, size=13))
+        specs = QGridLayout()
+        specs.setContentsMargins(0, 0, 0, 0)
+        specs.setHorizontalSpacing(7)
+        specs.setVerticalSpacing(7)
+        spec_map = dict(data["specs"])
+        tile_keys = (
+            "Seats",
+            "Transmission",
+            "Fuel",
+            "Body style",
+            "Mileage",
+            "Engine",
+        )
+        for index, key in enumerate(tile_keys):
+            value = spec_map.get(key, DASH)
+            tile = SpecTile(key, value, self.column)
+            self.spec_tiles[key] = tile
+            specs.addWidget(tile, index // 3, index % 3)
+        for col in range(3):
+            specs.setColumnStretch(col, 1)
+        column.addLayout(specs)
 
-        self._body.addWidget(SectionLabel("Availability", parent=self.card))
-        if not data["bookings"] and data["status"] == "available":
-            self._body.addWidget(
-                Pill(
-                    "Available now",
-                    parent=self.card,
-                    colour=theme.TEXT,
-                    background=theme.SURFACE,
-                    dot_colour=theme.OK,
-                    radius=8,
-                )
-            )
-        elif not data["bookings"]:
-            self._body.addWidget(
-                Caption(
-                    f"Currently {theme.status_label(data['status']).lower()}.",
-                    parent=self.card,
-                )
-            )
+        column.addWidget(
+            SectionLabel("Bookings and maintenance", parent=self.column, size=13)
+        )
+        rows = QWidget(self.column)
+        rows.setObjectName("rentalModalBody")
+        rows_lay = QVBoxLayout(rows)
+        rows_lay.setContentsMargins(0, 0, 0, 0)
+        rows_lay.setSpacing(0)
+        self._availability_rows(rows_lay, data)
+        column.addWidget(rows)
+
+        self._build_checker(column)
+        column.addStretch(1)
+        scroll.setWidget(self.column)
+        body_lay.addWidget(scroll, 1)
+        self.card.layout().addWidget(body, 1)
+
+        self.spec_values = {key: value for key, value in data["specs"]}
+
+    def _availability_rows(self, layout: QVBoxLayout, data: dict) -> None:
+        entries = []
         for row in data["bookings"]:
-            self._body.addWidget(
-                Caption(
-                    f"#{row['ref']} \u00b7 {row['customer']} \u00b7 "
-                    f"{row['start']:%d %b} \u2192 {row['end']:%d %b} \u00b7 "
-                    f"{row['status']}",
-                    parent=self.card,
+            entries.append(
+                (
+                    f"{row['start']:%d %b} \u2192 {row['end']:%d %b}",
+                    f"{row['customer']} \u00b7 #{row['ref']}",
+                    theme.status_label(row["status"]),
+                    "ok" if row["status"] in ("confirmed", "ongoing") else "warn",
                 )
-            )
-
-        self._build_checker()
-
-        self._body.addWidget(SectionLabel("Maintenance", parent=self.card))
-        if not data["maintenance"]:
-            self._body.addWidget(
-                Caption("No maintenance records.", parent=self.card)
             )
         for row in data["maintenance"]:
             end = f" \u2192 {row['end']:%d %b %Y}" if row["end"] else ""
-            self._body.addWidget(
-                Caption(
-                    f"{row['start']:%d %b %Y}{end} \u00b7 "
-                    f"{row['description']} \u00b7 {row['status']}",
-                    parent=self.card,
+            status = (
+                "Maintenance done"
+                if (row["status"] or "").lower() in ("completed", "done")
+                else theme.status_label(row["status"])
+            )
+            entries.append(
+                (
+                    f"{row['start']:%d %b %Y}{end}",
+                    row["description"],
+                    status,
+                    "neutral",
                 )
             )
+        if not entries:
+            layout.addWidget(
+                Caption("No bookings or maintenance on record.", parent=self.column)
+            )
+            return
+        for index, (dates, meta, status, tone) in enumerate(entries):
+            frame = QFrame(self.column)
+            frame.setObjectName("availabilityRow")
+            frame.setProperty("divider", index > 0)
+            row = QHBoxLayout(frame)
+            row.setContentsMargins(0, 7 if index else 0, 0, 7)
+            row.setSpacing(10)
+            text = QVBoxLayout()
+            text.setContentsMargins(0, 4, 0, 4)
+            text.setSpacing(1)
+            date_label = Caption(
+                dates, parent=frame, colour="#171717", size=12,
+                weight=QFont.Weight.DemiBold,
+            )
+            date_label.setObjectName("availabilityDate")
+            meta_label = Caption(meta, parent=frame, colour=MODAL_MUTED, size=11)
+            meta_label.setObjectName("availabilityMeta")
+            text.addWidget(date_label)
+            text.addWidget(meta_label)
+            row.addLayout(text, 1)
+            row.addWidget(StatusChip(status, tone=tone, parent=frame), 0, Qt.AlignmentFlag.AlignVCenter)
+            layout.addWidget(frame)
 
-        self._body.addLayout(self._buttons)
+    def _build_checker(self, column: QVBoxLayout) -> None:
+        self.check_heading = SectionLabel(
+            "Check a period", parent=self.column, size=13
+        )
+        column.addWidget(self.check_heading)
 
-    def _build_checker(self) -> None:
-        # Check shares the heading row: label left, button right.
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(8)
-        self.check_heading = SectionLabel("Check a period", parent=self.card)
-        head.addWidget(self.check_heading, 1)
-        self.check_button = QPushButton("Check", self.card)
-        self.check_button.setObjectName("secondaryButton")
-        self.check_button.clicked.connect(self._on_check)
-        head.addWidget(self.check_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._body.addLayout(head)
-
-        grid = QFormLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(6)
-
+        dates = QHBoxLayout()
+        dates.setContentsMargins(0, 0, 0, 0)
+        dates.setSpacing(8)
         today = QDate.currentDate()
-        self.start_edit = QDateEdit(self.card)
-        self.start_edit.setCalendarPopup(True)
-        self.start_edit.setDisplayFormat("dd MMM yyyy")
-        self.start_edit.setDate(today)
-        # Past days are unclickable in the calendar; hand-typed past dates
-        # are still caught by the validation in _on_check.
-        self.start_edit.setMinimumDate(today)
-        self.end_edit = QDateEdit(self.card)
-        self.end_edit.setCalendarPopup(True)
-        self.end_edit.setDisplayFormat("dd MMM yyyy")
-        self.end_edit.setDate(today.addDays(1))
-        self.end_edit.setMinimumDate(today)
-        # The return cannot precede the pick-up: End's floor follows Start.
-        self.start_edit.dateChanged.connect(self._on_start_changed)
-        grid.addRow(Caption("Start", parent=self.card), self.start_edit)
-        grid.addRow(Caption("End", parent=self.card), self.end_edit)
-        self._body.addLayout(grid)
+        for label, initial, minimum, attr in (
+            ("Start", today, today, "start_edit"),
+            ("End", today.addDays(1), today, "end_edit"),
+        ):
+            cell = QVBoxLayout()
+            cell.setContentsMargins(0, 0, 0, 0)
+            cell.setSpacing(3)
+            caption = Caption(label, parent=self.column, colour=MODAL_MUTED, size=10)
+            cell.addWidget(caption)
+            edit = QDateEdit(self.column)
+            edit.setCalendarPopup(True)
+            edit.setDisplayFormat("dd MMM yyyy")
+            edit.setDate(initial)
+            edit.setMinimumDate(minimum)
+            cell.addWidget(edit)
+            dates.addLayout(cell, 1)
+            setattr(self, attr, edit)
+        column.addLayout(dates)
 
-        self.check_error = QLabel("", self.card)
+        self.start_edit.dateChanged.connect(self._on_start_changed)
+        self.end_edit.dateChanged.connect(self._reset_check)
+        self.check_button = QPushButton("Check availability", self.column)
+        self.check_button.setObjectName("secondaryButton")
+        self.check_button.setMinimumHeight(36)
+        self.check_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.check_button.clicked.connect(self._on_check)
+        column.addWidget(self.check_button)
+
+        self.check_error = QLabel("", self.column)
         self.check_error.setObjectName(theme.OBJ_ERROR)
         self.check_error.setWordWrap(True)
         self.check_error.setVisible(False)
-        self._body.addWidget(self.check_error)
+        column.addWidget(self.check_error)
 
-        self.check_result = QLabel("", self.card)
+        self.check_bar = QFrame(self.column)
+        self.check_bar.setObjectName("resultBar")
+        bar = QHBoxLayout(self.check_bar)
+        bar.setContentsMargins(11, 9, 11, 9)
+        bar.setSpacing(8)
+        glyph = QLabel(self.check_bar)
+        glyph.setObjectName("modalNoticeIcon")
+        glyph.setPixmap(icons.pixmap("check", "#3F6D4E", 15))
+        bar.addWidget(glyph, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.check_result = QLabel("", self.check_bar)
+        self.check_result.setObjectName("resultText")
         self.check_result.setWordWrap(True)
-        self.check_result.setVisible(False)
-        self._body.addWidget(self.check_result)
+        bar.addWidget(self.check_result, 1)
+        self.check_amount = MoneyNumber(
+            parent=self.check_bar,
+            size=13,
+            dim=MODAL_MUTED,
+            bright="#171717",
+            weight=QFont.Weight.DemiBold,
+        )
+        self.check_amount.setVisible(False)
+        bar.addWidget(self.check_amount, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.check_bar.setVisible(False)
+        self.check_error.setVisible(False)
+        column.addWidget(self.check_bar)
+
+    def _footer_host(self) -> QFrame:
+        footer = QFrame(self.card)
+        footer.setObjectName("modalFooter")
+        lay = QHBoxLayout(footer)
+        lay.setContentsMargins(24, 12, 24, 14)
+        lay.setSpacing(8)
+        lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.card.layout().addWidget(footer)
+        return footer
+
+    def _footer(self, data: dict) -> None:
+        footer = self._footer_host()
+        lay = footer.layout()
+        rate_label = Caption(
+            "Daily rate", parent=footer, colour=MODAL_MUTED, size=11
+        )
+        lay.addWidget(rate_label)
+        self.footer_rate = MoneyNumber(
+            parent=footer,
+            size=14,
+            dim=MODAL_MUTED,
+            bright="#171717",
+            weight=QFont.Weight.DemiBold,
+        )
+        self.footer_rate.set_amount(data["rate"] or 0)
+        lay.addWidget(self.footer_rate)
+        lay.addStretch(1)
+
+        self.close_button = QPushButton("Close", footer)
+        self.close_button.setObjectName("secondaryButton")
+        self.close_button.setMinimumHeight(38)
+        self.close_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_button.clicked.connect(self.close_requested.emit)
+        self.rent_button = QPushButton("Rent this vehicle", footer)
+        self.rent_button.setObjectName("primaryButton")
+        self.rent_button.setMinimumHeight(38)
+        self.rent_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rent_button.clicked.connect(self._on_rent)
+        lay.addWidget(self.close_button)
+        lay.addWidget(self.rent_button)
 
     def _on_start_changed(self, day: QDate) -> None:
-        # The return cannot precede the pick-up; keep the calendar honest.
         self.end_edit.setMinimumDate(day)
         if self.end_edit.date() < day:
             self.end_edit.setDate(day)
+        self._reset_check()
+
+    def _reset_check(self) -> None:
+        self.checked_window = None
+        self.check_bar.setVisible(False)
+        self.check_result.setVisible(False)
+        self.check_amount.setVisible(False)
+        self.check_error.setVisible(False)
 
     def _on_check(self) -> None:
         from app.domain.rental_calculator import RentalCalculator
@@ -433,13 +1159,12 @@ class VehicleDetailsPanel(QWidget):
             self.checked_window = None
             self.check_error.setText(error)
             self.check_error.setVisible(True)
+            self.check_bar.setVisible(False)
             self.check_result.setVisible(False)
             return
         self.check_error.setVisible(False)
 
         start_py, end_py = start.toPython(), end.toPython()
-        # The same rules the booking service will apply: half-open dates,
-        # rented/reserved judged by overlap, maintenance/retired always blocked.
         try:
             with self._context.reading() as session:
                 vehicle = session.get(Vehicle, self._vehicle_id)
@@ -448,27 +1173,34 @@ class VehicleDetailsPanel(QWidget):
                 booking_service.assert_available(
                     session, vehicle, start_py, end_py
                 )
+                rate = vehicle.daily_rate or 0
         except ConflictError as exc:
-            # No prefill: the wizard must not silently reuse clashing dates.
             self.checked_window = None
             self.check_result.setText(f"Not available \u2014 {exc}")
-            self.check_result.setStyleSheet(f"color: {theme.DANGER};")
             self.check_result.setVisible(True)
+            self.check_bar.setProperty("tone", "danger")
+            self._polish(self.check_bar)
+            self.check_amount.setVisible(False)
+            self.check_bar.setVisible(True)
             return
 
         days = RentalCalculator.rental_days(start_py, end_py)
         self.checked_window = (start, end)
         self.check_result.setText(
-            f"Available {start_py:%d %b %Y} \u2192 "
-            f"{end_py:%d %b %Y} ({days} day{'s' if days != 1 else ''})."
+            f"Available for these dates \u00b7 "
+            f"{days} day{'s' if days != 1 else ''}"
         )
-        self.check_result.setStyleSheet(f"color: {theme.OK};")
         self.check_result.setVisible(True)
+        self.check_bar.setProperty("tone", "ok")
+        self._polish(self.check_bar)
+        self.check_amount.set_amount(rate * days)
+        self.check_amount.setVisible(True)
+        self.check_bar.setVisible(True)
 
-    def _spec_value(self, value: str) -> QLabel:
-        label = Caption(value, parent=self.card, colour=theme.TEXT)
-        label.setWordWrap(True)
-        return label
+    @staticmethod
+    def _polish(widget: QWidget) -> None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     def _on_rent(self) -> None:
         self.rent_requested.emit(self._vehicle_id)
@@ -483,7 +1215,7 @@ class VehicleDetailsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Vehicle details")
         self.setModal(True)
-        self.setMinimumWidth(600)
+        self.setMinimumSize(920, 720)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -494,8 +1226,10 @@ class VehicleDetailsDialog(QDialog):
         # vehicle bit is only present when the row still exists.
         panel = self.panel
         self.spec_values = panel.spec_values
+        self.spec_tiles = getattr(panel, "spec_tiles", {})
         self.missing_label = panel.missing_label
         self.photo = getattr(panel, "photo", None)
+        self.gallery = getattr(panel, "gallery", None)
         self.name_label = getattr(panel, "name_label", None)
         self.subtitle_label = getattr(panel, "subtitle_label", None)
         self.price = getattr(panel, "price", None)
@@ -520,41 +1254,33 @@ class VehicleDetailsDialog(QDialog):
 
 class VehicleDetailsOverlay(QWidget):
     """Check details embedded in the staff window: frosted glass holding a
-    centered 8px card.
+    centered 900px card.
 
     Not a window at all (`isWindow()` is False), so nothing new ever opens on
     the taskbar. Covers `window` edge to edge, blocks mouse input behind it,
     and closes on Esc or a click outside the card.
-
-    The backdrop is snapshot frosted glass (v9): on open, the live page is
-    frozen (`window.grab()`), blurred, dimmed, and shown full-window behind
-    the crisp white card. Qt Widgets has no CSS `backdrop-filter`, so the
-    freeze-blur-dim picture is the pure-Qt equivalent. If the snapshot ever
-    fails, the scoped dim alone is the fallback and the modal still works.
     """
 
-    def __init__(self, context, vehicle_id: int, window: QWidget) -> None:
+    def __init__(
+        self,
+        context,
+        vehicle_id: int,
+        window: QWidget,
+        *,
+        autoload: bool = True,
+    ) -> None:
         super().__init__(window)
         self._window = window
         #: False while the rental wizard owns this overlay: Escape and
         #: outside clicks must not discard a half-filled rental.
         self._dismissible = True
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # Scoped dim over the whole window: the selector matches only the
-        # overlay itself, so no `background` ever cascades onto descendants
-        # (seen before: an unqualified rule turned the white Card dim). The
-        # blurred snapshot in `backdrop` carries its own baked-in dim and
-        # covers this; this fill is the fallback when the grab fails.
         self.setStyleSheet(
             "VehicleDetailsOverlay { background: rgba(23, 23, 23, 110);"
             " border: none; }"
         )
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        # Frosted-glass picture, behind everything else. Mouse-transparent so
-        # outside-click-to-close (handled by our own mousePressEvent) keeps
-        # working: children get first shot at clicks, and a full-window
-        # label would otherwise eat them all.
         self.backdrop = QLabel(self)
         self.backdrop.setObjectName("vehicleDetailsBackdrop")
         self.backdrop.setAttribute(
@@ -580,9 +1306,7 @@ class VehicleDetailsOverlay(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # Scoped like the overlay dim: an unqualified rule would cascade
-        # transparency onto the card itself.
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll.setStyleSheet(
             "QScrollArea#vehicleDetailsScroll { background: transparent;"
             " border: none; }"
@@ -592,31 +1316,21 @@ class VehicleDetailsOverlay(QWidget):
         self.scroll.setFixedWidth(OVERLAY_CARD_W)
         middle.addWidget(self.scroll)
         middle.addStretch(1)
-        # No stretches around `middle`: they split the height three ways and
-        # left the card visibly short. The scroll takes the full height; the
-        # max-height cap in _fit() bounds it on short windows.
         outer.addLayout(middle, 1)
 
-        self.panel = VehicleDetailsPanel(context, vehicle_id, self.scroll)
+        self.panel = VehicleDetailsPanel(
+            context, vehicle_id, self.scroll, autoload=autoload
+        )
         self.scroll.setWidget(self.panel)
         self.backdrop.lower()
         self.hide()
 
     def set_dismissible(self, flag: bool) -> None:
-        """Allow or refuse Escape/outside-click closing.
-
-        Defaults to True. The rental wizard turns this off so a stray click
-        cannot discard the form, then back on before hiding.
-        """
+        """Allow or refuse Escape/outside-click closing."""
         self._dismissible = bool(flag)
 
     def _render_backdrop(self) -> bool:
-        """Freeze, blur and dim the live page into the backdrop label.
-
-        Returns True when a frosted picture is showing; False when the grab
-        failed and the plain scoped dim is carrying the modal instead. Never
-        raises: a backdrop must never break the modal.
-        """
+        """Freeze, blur and dim the live page into the backdrop label."""
         try:
             window = self._window
             if window is None or window.size().isEmpty():
@@ -671,7 +1385,6 @@ class VehicleDetailsOverlay(QWidget):
             return False
 
     def _render_soon(self) -> None:
-        """Debounced re-render for window resizes while open."""
         if not self._blur_timer.isActive():
             self._blur_timer.start()
         else:
@@ -703,10 +1416,6 @@ class VehicleDetailsOverlay(QWidget):
         self.scroll.setMaximumHeight(max(320, self._window.height() - 96))
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming
-        # Never crash on teardown-time events: Qt can deliver stragglers
-        # (e.g. a resize posted before deleteLater) after either side is
-        # half-destroyed, and an exception here would surface inside
-        # whatever call happens to pump the loop next.
         try:
             is_window_resize = (
                 watched is self._window and event.type() == QEvent.Type.Resize
@@ -733,9 +1442,8 @@ class VehicleDetailsOverlay(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
         # Outside-click-to-close only: presses inside the card column do
-        # nothing at all (most card children ignore mouse presses, so those
-        # propagate up here -- closing on them was the bug). The scroll is
-        # the stable frame: wizard steps swap panels, never the scroll.
+        # nothing at all. The scroll is the stable frame: wizard steps swap
+        # panels, never the scroll.
         if (
             self._dismissible
             and event.button() == Qt.MouseButton.LeftButton

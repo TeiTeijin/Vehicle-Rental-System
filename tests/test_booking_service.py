@@ -25,6 +25,7 @@ TODAY = date(2026, 9, 10)
 D1 = date(2026, 9, 1)
 D2 = date(2026, 9, 2)
 D3 = date(2026, 9, 3)
+D4 = date(2026, 9, 4)
 D5 = date(2026, 9, 5)
 D6 = date(2026, 9, 6)
 D7 = date(2026, 9, 7)
@@ -219,6 +220,25 @@ class TestCreateBooking:
         assert booking_service.is_reserved_between(session, vehicle, D1, D6) is True
         with pytest.raises(ValueError):
             booking_service.is_reserved_between(session, vehicle, D8, D6)
+
+    def test_availability_states_returns_one_state_per_day(
+        self, session, customer, vehicle, booking_factory
+    ):
+        booking_factory(customer, vehicle, D1, D3, status="pending")
+        booking_factory(customer, vehicle, D3, D5, status="confirmed")
+
+        states = booking_service.availability_states(
+            session, vehicle, D1, D6
+        )
+
+        assert states == {
+            D1: "pending",
+            D2: "pending",
+            D3: "confirmed",
+            D4: "confirmed",
+            D5: "free",
+            D6: "free",
+        }
 
 
 class TestBookingRefusals:

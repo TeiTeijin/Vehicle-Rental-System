@@ -639,7 +639,7 @@ QFrame[class="card"] {
 /* Check-details card: the same card recipe at an 8px radius (ID wins over
    the class rule above; the painted shadow follows Card's own radius). */
 QFrame#vehicleDetailsCard {
-    border-radius: 8px;
+    border-radius: 18px;
     border: 1px solid #D8CCBB;
     background: transparent;
 }
@@ -1135,3 +1135,610 @@ QCalendarWidget QAbstractItemView {
     selection-color: #1A1A1A;
 }
 
+
+/* ===================================================================
+   COUNTER RENTAL MODAL (Vehicle details + Scheduling/Customer/Payment/Done)
+   Scoped to #vehicleDetailsCard so the rest of the staff app keeps its
+   existing 8px controls. The reference is a warm paper card: 18px radius,
+   white sheet, ink primary, cream recap.
+   =================================================================== */
+
+QFrame#vehicleDetailsCard {
+    background: transparent;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton,
+QFrame#vehicleDetailsCard QPushButton#secondaryButton {
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 16px;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton {
+    background: #171717;
+    border: 1px solid #171717;
+    color: #FFFFFF;
+    font-weight: 600;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton:hover {
+    background: #2A2A2A;
+    border-color: #2A2A2A;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton:disabled {
+    background: #D7CCBA;
+    border-color: #D7CCBA;
+    color: #FFFFFF;
+}
+
+QFrame#vehicleDetailsCard QPushButton#secondaryButton {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    color: #171717;
+}
+
+QFrame#vehicleDetailsCard QPushButton#secondaryButton:hover {
+    background: #F7F1E7;
+    border-color: #C6B8A3;
+}
+
+QFrame#vehicleDetailsCard QPushButton#secondaryButton:disabled {
+    background: #F4EFE5;
+    border-color: #E4DACA;
+    color: #B8AD9C;
+}
+
+QPushButton#modalCancel {
+    background: transparent;
+    border: none;
+    color: #9B2C1F;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 2px;
+    text-align: left;
+}
+
+QPushButton#modalCancel:hover {
+    color: #7F2117;
+    text-decoration: underline;
+}
+
+QPushButton#linkButton {
+    background: transparent;
+    border: none;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 0;
+    text-align: left;
+}
+
+QPushButton#linkButton:hover {
+    color: #6B5E4F;
+    text-decoration: underline;
+}
+
+QFrame#modalFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #E8DFD1;
+}
+
+QLabel#modalTitle {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#modalSubtitle {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QLabel#modalHint {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QFrame#modalRule,
+QFrame#recapRule {
+    background: #E7DDCE;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QWidget#rentalModalBody,
+QWidget#modalGallery,
+QWidget#galleryStage {
+    background: transparent;
+    border: none;
+}
+
+/* -- progress rail -------------------------------------------------- */
+
+QFrame#stepChip {
+    background: #EEEAE1;
+    border: 1px solid transparent;
+    border-radius: 15px;
+}
+
+QFrame#stepChip[state="current"] {
+    background: #171717;
+    border-color: #171717;
+}
+
+QFrame#stepChip[state="done"] {
+    background: #E4F1E4;
+    border-color: #E4F1E4;
+}
+
+QLabel#stepDot {
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    background: #E1D8C9;
+    color: #6B5E4F;
+}
+
+QLabel#stepDot[state="current"] {
+    background: transparent;
+    color: #FFFFFF;
+}
+
+QLabel#stepDot[state="done"] {
+    background: #4F7A5B;
+    color: #FFFFFF;
+}
+
+QLabel#stepName {
+    background: transparent;
+}
+
+/* -- recap column --------------------------------------------------- */
+
+QFrame#modalRecap {
+    background: #EFE6D5;
+    border: 1px solid #E7DBC7;
+    border-radius: 14px;
+}
+
+QLabel#recapTitle {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#recapValue {
+    background: transparent;
+    color: #171717;
+}
+
+/* -- vehicle row ----------------------------------------------------- */
+
+QFrame#modalVehicleRow {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+}
+
+QLabel#modalVehicleThumb {
+    background: #EEEAE1;
+    border-radius: 7px;
+}
+
+QLabel#modalVehicleName {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#modalVehicleMeta {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+/* -- status chips ---------------------------------------------------- */
+
+QLabel#statusChip {
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 9px;
+    background: #EEEAE1;
+    color: #6B5E4F;
+}
+
+QLabel#statusChip[tone="ok"] {
+    background: #DCEEDC;
+    color: #3F6D4E;
+}
+
+QLabel#statusChip[tone="warn"] {
+    background: #F6E6C8;
+    color: #8A6523;
+}
+
+QLabel#statusChip[tone="danger"] {
+    background: #F6E0DB;
+    color: #9B2C1F;
+}
+
+QLabel#statusChip[tone="neutral"] {
+    background: #EEEAE1;
+    color: #6B5E4F;
+}
+
+QLabel#plateChip {
+    background: #EEEAE1;
+    border-radius: 6px;
+    color: #6B5E4F;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+}
+
+/* -- spec / meta tiles ---------------------------------------------- */
+
+QFrame#modalSpecTile,
+QFrame#modalMetaTile {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 8px;
+}
+
+QLabel#specLabel,
+QLabel#metaLabel {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QLabel#specValue,
+QLabel#metaValue {
+    background: transparent;
+    color: #171717;
+}
+
+/* -- availability list ---------------------------------------------- */
+
+QFrame#availabilityRow {
+    background: transparent;
+    border: none;
+}
+
+QFrame#availabilityRow[divider="true"] {
+    border-top: 1px solid #ECE3D5;
+}
+
+QLabel#availabilityDate {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#availabilityMeta {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+/* -- day strip ------------------------------------------------------- */
+
+QLabel#dayStripMonth {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QFrame#dayTile {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 8px;
+}
+
+QFrame#dayTile[state="selected"] {
+    background: #171717;
+}
+
+QFrame#dayTile[state="confirmed"] {
+    background: #D7E9DA;
+}
+
+QFrame#dayTile[state="pending"] {
+    background: #F6E5C6;
+}
+
+QFrame#dayTile[state="free"] {
+    background: #EEEAE1;
+}
+
+QLabel#dayWeekday {
+    background: transparent;
+    font-size: 8px;
+}
+
+QLabel#dayNumber {
+    background: transparent;
+    font-size: 12px;
+}
+
+QLabel#legendChip {
+    border-radius: 2px;
+}
+
+/* -- notices / result bars ------------------------------------------- */
+
+QFrame#modalNotice {
+    background: #F7E9CE;
+    border: 1px solid #EEDDBB;
+    border-radius: 8px;
+}
+
+QFrame#modalNotice[tone="danger"] {
+    background: #F6E0DB;
+    border-color: #EBC9C0;
+}
+
+QLabel#modalNoticeText {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#modalNoticeIcon {
+    background: transparent;
+}
+
+QFrame#resultBar {
+    background: #E4F1E4;
+    border: 1px solid #CFE3D1;
+    border-radius: 8px;
+}
+
+QFrame#resultBar[tone="danger"] {
+    background: #F6E0DB;
+    border-color: #EBC9C0;
+}
+
+QFrame#resultBar[tone="warn"] {
+    background: #F7E9CE;
+    border-color: #EEDDBB;
+}
+
+QLabel#resultText {
+    background: transparent;
+    color: #171717;
+}
+
+/* -- customer -------------------------------------------------------- */
+
+QFrame#customerCard {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 12px;
+}
+
+QLabel#customerAvatar {
+    background: #EFE6D5;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#customerName {
+    background: transparent;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QLabel#customerLicence {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+/* -- payment --------------------------------------------------------- */
+
+QFrame#paymentOption {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+}
+
+QFrame#paymentOption[selected="true"] {
+    border: 1px solid #171717;
+}
+
+QRadioButton#paymentRadio {
+    background: transparent;
+    spacing: 0;
+}
+
+QRadioButton#paymentRadio::indicator {
+    width: 17px;
+    height: 17px;
+    border-radius: 9px;
+    border: 1px solid #B6A791;
+    background: #FFFFFF;
+}
+
+QRadioButton#paymentRadio::indicator:checked {
+    background: #171717;
+    border: 5px solid #FFFFFF;
+}
+
+QLabel#paymentTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#paymentSub {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 11px;
+}
+
+QToolButton#methodChoice {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 6px;
+}
+
+QToolButton#methodChoice:hover {
+    border-color: #B8A68A;
+    background: #FFFDF9;
+}
+
+QToolButton#methodChoice:checked {
+    border: 1px solid #171717;
+    background: #FFFFFF;
+}
+
+/* -- done ------------------------------------------------------------ */
+
+QFrame#balanceBox {
+    background: #F7E9CE;
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#summaryCard {
+    background: #FFFFFF;
+    border: 1px solid #E3D8C8;
+    border-radius: 10px;
+}
+
+QFrame#doneCheck {
+    background: #DCEEDC;
+    border: none;
+    border-radius: 12px;
+}
+
+QLabel#doneCheckGlyph {
+    background: transparent;
+    color: #4F7A5B;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+QFrame#receiptRow {
+    background: #FFFFFF;
+    border: 1px solid #E3D8C8;
+    border-radius: 10px;
+}
+
+QLabel#receiptIcon {
+    background: #EEEAE1;
+    border-radius: 7px;
+    color: #6B5E4F;
+}
+
+QLabel#receiptName {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#receiptNote {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 11px;
+}
+
+/* -- gallery --------------------------------------------------------- */
+
+QFrame#galleryHero {
+    background: #EFE6D5;
+    border: none;
+    border-radius: 12px;
+}
+
+QFrame#galleryHero QLabel#galleryImage {
+    background: transparent;
+}
+
+QLabel#galleryHint {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 10px;
+}
+
+QToolButton#galleryTab {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 3px;
+}
+
+QToolButton#galleryTab:hover {
+    background: #FFFDF9;
+    border-color: #B8A68A;
+}
+
+QToolButton#galleryTab:checked {
+    border: 1px solid #171717;
+    background: #FFFFFF;
+}
+
+QPushButton#viewerControl {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 7px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 10px;
+}
+
+QPushButton#viewerControl:hover {
+    background: #F7F1E7;
+}
+
+QPushButton#viewerControl:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+QPushButton#viewerControlLight {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 7px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 10px;
+}
+
+QLabel#galleryBadge {
+    background: #FFFFFF;
+    border: 1px solid #E7DBC7;
+    border-radius: 8px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 9px;
+}
+
+/* -- detail right column -------------------------------------------- */
+
+QScrollArea#modalColumnScroll,
+QScrollArea#modalColumnScroll QWidget#modalColumnViewport {
+    background: transparent;
+    border: none;
+}
+
+QLabel#detailPriceSuffix {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QPushButton#checkAvailability {
+    min-height: 36px;
+}

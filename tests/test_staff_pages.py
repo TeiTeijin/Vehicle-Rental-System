@@ -5925,17 +5925,17 @@ class TestVehicleDetailsDialog:
         assert isinstance(page._wizard._current, SchedulePanel)
         overlay.hide_overlay()
 
-    def test_photo_box_is_white_and_tall(self, qapp, branch):
+    def test_photo_box_is_a_tall_gallery(self, qapp, branch):
         from app.staff.vehicle_details import PHOTO_H
 
         _built, context = branch
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
         assert PHOTO_H == 300
-        assert "FFFFFF" in dialog.photo.styleSheet()
-        assert dialog.photo.height() == PHOTO_H
+        assert dialog.gallery.hero.objectName() == "galleryHero"
+        assert dialog.gallery.hero.minimumHeight() == PHOTO_H
 
-    def test_check_button_shares_the_heading_row(self, qapp, branch):
+    def test_check_availability_sits_under_the_date_fields(self, qapp, branch):
         _built, context = branch
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
@@ -5943,15 +5943,12 @@ class TestVehicleDetailsDialog:
         qapp_process(dialog)
         assert dialog.panel.check_button.isVisible() is True
         assert (
-            abs(
-                dialog.panel.check_button.mapToGlobal(
-                    dialog.panel.check_button.rect().center()
-                ).y()
-                - dialog.panel.check_heading.mapToGlobal(
-                    dialog.panel.check_heading.rect().center()
-                ).y()
-            )
-            < dialog.panel.check_button.height()
+            dialog.panel.check_button.mapToGlobal(
+                dialog.panel.check_button.rect().center()
+            ).y()
+            > dialog.panel.check_heading.mapToGlobal(
+                dialog.panel.check_heading.rect().center()
+            ).y()
         )
 
     def test_action_buttons_live_inside_the_card(self, qapp, branch):
@@ -5959,8 +5956,8 @@ class TestVehicleDetailsDialog:
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
         card = dialog.panel.card
-        assert dialog.panel.rent_button.parent() is card
-        assert dialog.panel.close_button.parent() is card
+        assert card.isAncestorOf(dialog.panel.rent_button)
+        assert card.isAncestorOf(dialog.panel.close_button)
 
     def test_overlay_has_scoped_dim_backdrop(self, qapp, shell, branch):
         _built, context = branch
@@ -6001,7 +5998,7 @@ class TestVehicleDetailsDialog:
         assert overlay.backdrop.geometry().width() > 0
         # Card stays crisp and round on top of the frosted glass.
         assert overlay.panel.card.objectName() == "vehicleDetailsCard"
-        assert overlay.panel.card._radius == 8.0
+        assert overlay.panel.card._radius == 18.0
         # Hiding frees the frozen frame.
         overlay.hide_overlay()
         assert overlay.backdrop.pixmap() is None or overlay.backdrop.pixmap().isNull()
@@ -6012,11 +6009,11 @@ class TestVehicleDetailsDialog:
         dialog = self._dialog(context, vid)
         assert "transparent" in dialog.price.styleSheet()
 
-    def test_details_card_uses_8px_corners(self, qapp, branch):
+    def test_details_card_uses_18px_corners(self, qapp, branch):
         _built, context = branch
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
-        assert dialog.panel.card._radius == 8.0
+        assert dialog.panel.card._radius == 18.0
         assert dialog.panel.card.objectName() == "vehicleDetailsCard"
 
     def test_card_corners_are_truly_round_not_square(self, qapp):
@@ -6168,7 +6165,7 @@ class TestVehicleDetailsDialog:
         dialog.end_edit.setDate(today.addDays(9))
         dialog.check_button.click()
         assert dialog.check_error.isHidden() is True
-        assert "(1 day)" in dialog.check_result.text()
+        assert "1 day" in dialog.check_result.text()
         assert dialog.checked_window is not None
 
     def _booked_vehicle(self, branch):
@@ -6198,7 +6195,7 @@ class TestVehicleDetailsDialog:
         dialog.check_button.click()
         assert dialog.check_error.isHidden() is True
         assert "Available" in dialog.check_result.text()
-        assert "(1 day)" in dialog.check_result.text()
+        assert "1 day" in dialog.check_result.text()
         assert dialog.checked_window is not None
 
     def test_a_clashing_window_names_the_booking(self, qapp, branch):
@@ -6539,7 +6536,7 @@ class TestRentalWizard:
             assert wizard.state.deposit == Decimal("2500.00")
             assert wizard.state.default_method == "gcash"
             assert wizard.state.default_channel == "online"
-            assert "3,000.00" in pay_step.min_button.text()  # 500 fee + 2,500 deposit
+            assert "3,000.00" in pay_step.due_now.amount_text  # 500 fee + 2,500 deposit
             fee_captions = [
                 label.text()
                 for label in pay_step.findChildren(QLabel)
@@ -6807,7 +6804,7 @@ class TestRentalWizard:
             pay_step.pay_button.click()
             qapp_process(page)
             done = wizard._current
-            assert "booked" in done._body.itemAt(1).widget().text()
+            assert "booked" in done.title_label.text()
             assert os.listdir(tmp_path), "expected a receipt PDF"
         finally:
             receipt_service.RECEIPTS_DIR = old_dir
@@ -6888,7 +6885,7 @@ class TestRentalWizard:
         finally:
             overlay.hide_overlay()
 
-    def test_wizard_has_no_stadium_shapes(self, qapp, shell, branch):
+    def test_wizard_buttons_use_the_modal_styles(self, qapp, shell, branch):
         from PySide6.QtWidgets import QPushButton
 
         from app.staff import rental_wizard
@@ -6896,21 +6893,23 @@ class TestRentalWizard:
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             assert "999" not in open(rental_wizard.__file__, encoding="utf-8").read()
+            allowed = {
+                "primaryButton",
+                "secondaryButton",
+                "wizardChoice",
+                "linkButton",
+                "modalCancel",
+                "viewerControl",
+                "viewerControlLight",
+                "",
+            }
             for button in overlay.findChildren(QPushButton):
-                assert button.objectName() in (
-                    "primaryButton",
-                    "secondaryButton",
-                    "wizardChoice",
-                    "",
-                )
+                assert button.objectName() in allowed
         finally:
             overlay.hide_overlay()
 
-    def test_wizard_steps_use_compact_density(self, qapp, shell, branch):
-        from PySide6.QtWidgets import QSizePolicy
-
-        from app.staff import rental_wizard
-        from app.staff.cards import SectionLabel
+    def test_wizard_steps_use_the_modal_sheet(self, qapp, shell, branch):
+        from app.staff.rental_ui import MODAL_PADDING
         from app.staff.rental_wizard import SchedulePanel
 
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
@@ -6919,49 +6918,28 @@ class TestRentalWizard:
             assert isinstance(step, SchedulePanel)
             margins = step._body.contentsMargins()
             assert (margins.left(), margins.top()) == (
-                rental_wizard.WIZARD_PADDING,
-                rental_wizard.WIZARD_PADDING,
+                MODAL_PADDING,
+                MODAL_PADDING,
             )
-            assert step._body.spacing() == rental_wizard.WIZARD_SPACING
-            # Step titles are section-head size, not hero size.
-            titles = [
-                w
-                for w in step.findChildren(SectionLabel)
-                if w.text() == "When is it out?"
-            ]
-            assert titles
-            assert titles[0].font().pixelSize() == 16
+            assert step.title_label.text() == "When is it out?"
+            assert step.title_label.font().pixelSize() == 26
+            assert step.recap.isVisible() is True
         finally:
             overlay.hide_overlay()
 
-    def test_wizard_card_hugs_content_and_centers(self, qapp, shell, branch):
-        from PySide6.QtWidgets import QSizePolicy, QSpacerItem
-
+    def test_wizard_card_is_900_wide_with_a_sticky_footer(self, qapp, shell, branch):
+        from app.staff.rental_ui import MODAL_WIDTH
         from app.staff.rental_wizard import SchedulePanel
 
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             step = page._wizard._current
             assert isinstance(step, SchedulePanel)
-            # Hug: the shared Card is Expanding, the wizard opts back out.
-            assert (
-                step.card.sizePolicy().verticalPolicy()
-                == QSizePolicy.Policy.Preferred
-            )
-            # Center: one stretch above the card, one below.
-            outer = step.layout()
-            stretches = [
-                outer.itemAt(i)
-                for i in range(outer.count())
-                if isinstance(outer.itemAt(i), QSpacerItem)
-            ]
-            assert len(stretches) == 2
-            # No ballooning: short content stays far shorter than the view.
             qapp_process(page)
-            assert (
-                step.card.height()
-                < overlay.scroll.viewport().height() // 2
-            )
+            assert step.card.maximumWidth() == MODAL_WIDTH
+            assert overlay.scroll.width() == MODAL_WIDTH
+            assert step.footer.isVisible() is True
+            assert step.footer.geometry().bottom() <= step.card.rect().bottom()
         finally:
             overlay.hide_overlay()
 
@@ -7218,3 +7196,224 @@ class TestRentalWizard:
                 assert created is None
         finally:
             step.deleteLater()
+
+class TestRentalModalRedesign:
+    """The warm 900px counter modal: progress, day strip, recap, summary."""
+
+    def _open_wizard(self, qapp, shell, branch, plate="HON-900"):
+        from PySide6.QtCore import QDate
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate=plate)
+        page = NewRentalPage(shell)
+        shell.show()
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        vid = next(s.vehicle.vehicle_id for s in page.slots)
+        page._open_vehicle_details(vid)
+        qapp_process(page)
+        overlay = page._details_overlay
+        today = QDate.currentDate()
+        overlay.panel.start_edit.setDate(today.addDays(10))
+        overlay.panel.end_edit.setDate(today.addDays(11))
+        overlay.panel.check_button.click()
+        overlay.panel.rent_button.click()
+        qapp_process(page)
+        return page, overlay, vid
+
+    def test_schedule_panel_has_progress_and_day_strip(
+        self, qapp, shell, branch
+    ):
+        from app.staff.rental_wizard import SchedulePanel
+
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            step = page._wizard._current
+            assert isinstance(step, SchedulePanel)
+            assert step.progress.current == 1
+            assert step.progress.states == (
+                "done",
+                "current",
+                "upcoming",
+                "upcoming",
+            )
+            assert step.day_strip.tiles
+            assert "October" in step.day_strip.month_labels
+        finally:
+            overlay.hide_overlay()
+
+    def test_schedule_panel_warns_about_an_overlapping_booking(
+        self, qapp, shell, branch
+    ):
+        from app.services import booking_service
+
+        built, context = branch
+        page, overlay, vid = self._open_wizard(qapp, shell, branch)
+        try:
+            step = page._wizard._current
+            start = step.start_edit.date().toPython()
+            end = step.end_edit.date().toPython()
+            with context.session() as session:
+                vehicle = session.get(Vehicle, vid)
+                booking_service.create_booking(
+                    session, built.customer, vehicle, start, end
+                )
+            step._refresh_quote()
+            qapp_process(page)
+            assert step.conflict_banner.isVisible() is True
+            assert "already" in step.conflict_label.text().lower()
+            assert step.next_button.isEnabled() is False
+            assert step.day_strip.states[start] == "pending"
+        finally:
+            overlay.hide_overlay()
+
+    def test_payment_summary_splits_due_now_and_due_at_pickup(
+        self, qapp, branch
+    ):
+        from PySide6.QtCore import QDate
+
+        from app.staff.rental_wizard import PaymentPanel, WizardState
+
+        _built, context = branch
+        today = QDate.currentDate()
+        state = WizardState(
+            vehicle_id=1,
+            start=today,
+            end=today.addDays(1),
+            days=1,
+            total=Decimal("5800.00"),
+            deposit=Decimal("3000.00"),
+            scheduling_fee=Decimal("100.00"),
+        )
+        panel = PaymentPanel(context, state)
+        try:
+            assert "3,100.00" in panel.due_now.amount_text
+            assert "5,700.00" in panel.due_at_pickup.amount_text
+            panel.full_button.setChecked(True)
+            panel._refresh_pay_button()
+            assert "8,800.00" in panel.due_now.amount_text
+            assert "0.00" in panel.due_at_pickup.amount_text
+        finally:
+            panel.deleteLater()
+
+    def test_done_panel_has_a_balance_box_and_receipt_row(self, qapp):
+        from app.staff.rental_wizard import DonePanel
+
+        panel = DonePanel(
+            booking_id=363,
+            total=Decimal("5800.00"),
+            paid_amount=Decimal("100.00"),
+            balance=Decimal("5700.00"),
+            deposit=Decimal("3000.00"),
+            receipt_path="receipts/receipt_363.pdf",
+            confirmed=True,
+        )
+        try:
+            assert "5,700.00" in panel.balance_amount.amount_text
+            assert panel.receipt_row is not None
+            assert panel.receipt_name.text() == "receipt_363.pdf"
+            assert panel.print_button.isEnabled() is True
+        finally:
+            panel.deleteLater()
+
+    def test_vehicle_details_is_900_wide_with_gallery_tabs(
+        self, qapp, shell, branch
+    ):
+        from app.staff.vehicle_details import VehicleDetailsOverlay
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-901")
+        with context.reading() as session:
+            vid = (
+                session.query(Vehicle)
+                .filter(Vehicle.plate_number == "HON-901")
+                .one()
+                .vehicle_id
+            )
+        overlay = VehicleDetailsOverlay(context, vid, shell, autoload=False)
+        try:
+            overlay.show_overlay()
+            qapp_process(shell)
+            panel = overlay.panel
+            assert overlay.scroll.width() == 900
+            assert panel.card._radius == 18
+            assert panel.gallery.views == ("front", "left", "right", "3d")
+            assert panel.gallery.view_buttons["3d"].text() == "3D"
+            assert panel.spec_tiles["Seats"].value_label.text() == "—"
+        finally:
+            overlay.hide_overlay()
+            overlay.deleteLater()
+
+    def test_details_3d_tab_exposes_drag_auto_rotate_and_reset(
+        self, qapp, shell, branch
+    ):
+        from app.staff.vehicle_details import MODAL_THREE_HTML, VehicleDetailsOverlay
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-902")
+        with context.reading() as session:
+            vid = (
+                session.query(Vehicle)
+                .filter(Vehicle.plate_number == "HON-902")
+                .one()
+                .vehicle_id
+            )
+        overlay = VehicleDetailsOverlay(context, vid, shell, autoload=False)
+        try:
+            gallery = overlay.panel.gallery
+            assert gallery.auto_button.text() == "Auto-rotate"
+            assert gallery.reset_button.text() == "Reset"
+            assert "Drag to rotate" in gallery.hint.text()
+            assert "OrbitControls" in MODAL_THREE_HTML
+            assert "autoRotate = true" in MODAL_THREE_HTML
+            assert "__resetView" in MODAL_THREE_HTML
+        finally:
+            overlay.deleteLater()
+
+    def test_payment_summary_shows_total_before_due_now(self, qapp, branch):
+        from PySide6.QtCore import QDate
+
+        from app.staff.rental_wizard import PaymentPanel, WizardState
+
+        _built, context = branch
+        today = QDate.currentDate()
+        state = WizardState(
+            vehicle_id=1,
+            start=today,
+            end=today.addDays(1),
+            days=1,
+            total=Decimal("5800.00"),
+            deposit=Decimal("3000.00"),
+            scheduling_fee=Decimal("100.00"),
+        )
+        panel = PaymentPanel(context, state)
+        try:
+            labels = [left.text() for left, _right in panel.recap.rows]
+            assert "Total" in labels
+            total_index = labels.index("Total")
+            assert labels.index("Rental · 1 day\nIncludes ₱100.00 non-refundable fee") < total_index
+            assert panel.due_now.amount_text.endswith("3,100.00")
+        finally:
+            panel.deleteLater()
+
+    def test_customer_step_shows_a_matched_customer_card(
+        self, qapp, shell, branch
+    ):
+        built, context = branch
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            wizard._current._on_continue()
+            qapp_process(page)
+            step = wizard._current
+            step.licence_edit.setText(built.customer.license_number)
+            step.find_button.click()
+            qapp_process(page)
+            assert step.customer_card.isVisible() is True
+            assert step.customer_name.text() == "Ana Reyes"
+            assert "Valid until" in step.validity_chip.text()
+            assert step.next_button.isEnabled() is True
+            assert step.past_rentals_label.text() != ""
+        finally:
+            overlay.hide_overlay()
