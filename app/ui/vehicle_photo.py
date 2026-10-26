@@ -18,7 +18,6 @@ disk cache.
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -52,7 +51,19 @@ PHOTO_RADIUS = 12
 #: How long the fade from skeleton to photo takes, in ms.
 FADE_MS = 220
 
+#: The model-viewer runtime is bundled rather than loaded from Google's CDN:
+#: a page opened from a local file cannot fetch a cross-origin ES module, so
+#: the remote script would leave the 3D tab blank. Shipping the script keeps
+#: the viewer working offline as well.
+ASSETS_DIR = Path(__file__).with_name("assets")
+MODEL_VIEWER_JS = ASSETS_DIR / "model-viewer.min.js"
+
 _POOL: QThreadPool | None = None
+
+
+def _file_url(path: Path) -> str:
+    """A file:// URL Chromium can load from a setHtml() document."""
+    return bytes(QUrl.fromLocalFile(str(path)).toEncoded()).decode("ascii")
 
 
 def _pool() -> QThreadPool:
@@ -357,9 +368,7 @@ MODEL_VIEWER_HTML = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<script type="module"
-  src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js">
-</script>
+<script type="module" src="{viewer_js}"></script>
 <style>
   html, body {{ margin: 0; height: 100%; background: #ffffff; }}
   model-viewer {{ width: 100%; height: 100%; --poster-color: #ffffff; }}
@@ -371,6 +380,21 @@ MODEL_VIEWER_HTML = """<!DOCTYPE html>
   exposure="1" interaction-prompt="none"></model-viewer>
 </body>
 </html>"""
+
+
+def model_viewer_document(glb_path: Path, vehicle) -> str:
+    """The HTML for one vehicle's .glb.
+
+    `src` is substituted without its own quotes: the surrounding attribute
+    quotes in MODEL_VIEWER_HTML are the only pair. Double-quoting the URL
+    (the old json.dumps call) made Chromium parse the path as extra empty
+    attributes, so the tab showed a blank white page.
+    """
+    return MODEL_VIEWER_HTML.format(
+        viewer_js=_file_url(MODEL_VIEWER_JS),
+        src=_file_url(glb_path),
+        alt=html.escape(f"{vehicle.make} {vehicle.model}"),
+    )
 
 
 class VehicleModelView(QWidget):
@@ -438,17 +462,25 @@ class VehicleModelView(QWidget):
     def _on_ready(self, key, payload: bytes) -> None:
         if key != self._key:
             return
+        if not MODEL_VIEWER_JS.is_file():
+            self._message.setText(
+                "The 3D viewer is missing from this installation.\n"
+                "Use the side views to inspect the body."
+            )
+            self._skeleton.set_busy(False)
+            self._stack.setCurrentWidget(self._message)
+            return
         view = self._viewer()
         if view is None:
             self._on_failed(key)
             return
         path = Path(payload.decode("utf-8"))
-        document = MODEL_VIEWER_HTML.format(
-            src=json.dumps(QUrl.fromLocalFile(str(path)).toString()),
-            alt=html.escape(f"{self._vehicle.make} {self._vehicle.model}"),
-        )
-        view.setHtml(document, QUrl.fromLocalFile(str(path.parent) + "/"))
+        document = model_viewer_document(path, self._vehicle)
+        # Show the engine before handing it the document: a QWebEngineView
+        # that is still hidden when setHtml() is called never starts its
+        # renderer, and the tab stays white even though the model exists.
         self._stack.setCurrentWidget(view)
+        view.setHtml(document, QUrl.fromLocalFile(str(path.parent) + "/"))
         self._skeleton.set_busy(False)
 
     @Slot(object)

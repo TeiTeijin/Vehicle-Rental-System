@@ -57,7 +57,7 @@ STATUS_TONES = {
 
 #: What the status actually means for the customer.
 STATUS_NOTES = {
-    "pending": "Reserved - the branch collects payment at pickup.",
+    "pending": "Reserved - payment is collected at pickup.",
     "confirmed": "Paid and confirmed. Bring your licence to the counter.",
     "ongoing": "Out on rent right now.",
     "completed": "Returned. Thank you for renting with us.",
@@ -76,7 +76,6 @@ class Row:
     vehicle_name: str
     meta: str
     window: tuple[datetime, datetime]
-    branch: str
     total: str
     payment: str
     ref: object
@@ -94,7 +93,7 @@ def _payment_label(booking: Booking) -> str:
 
 
 class BookingCard(QFrame):
-    """One booking: reference, when, where, how much -- and the vehicle."""
+    """One booking: reference, when, how much -- and the vehicle."""
 
     open_requested = Signal(int)
 
@@ -137,7 +136,7 @@ class BookingCard(QFrame):
         text.addWidget(
             make_label(f"{moment_text(start)}  \u2192  {moment_text(end)}", "bookingWindow")
         )
-        text.addWidget(make_label(f"{row.branch}  \u00b7  {row.payment}", "bookingMeta"))
+        text.addWidget(make_label(row.payment, "bookingMeta"))
         note = STATUS_NOTES.get(row.status)
         if note:
             text.addWidget(hint_label(note, "amber" if row.status == "pending" else "muted"))
@@ -287,11 +286,6 @@ class BookingsPage(QWidget):
                                 else ""
                             ),
                             window=(start, end),
-                            branch=(
-                                booking.pickup_branch.name
-                                if booking.pickup_branch
-                                else "Branch to be confirmed"
-                            ),
                             total=theme.pesos_text(booking.total or booking.total_cost),
                             payment=_payment_label(booking),
                             ref=vehicle_photos.ref_for(vehicle) if vehicle else None,

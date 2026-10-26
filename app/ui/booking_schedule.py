@@ -1,8 +1,9 @@
-"""Screen 3: when and where the rental starts and ends (step 2 of 3).
+"""Screen 3: when the rental starts and ends (step 2 of 3).
 
 One calendar drives both ends of the rental: click PICKUP or RETURN to say
-which date you are choosing, then pick the day. The two cards carry the time
-and the branch, so a customer never leaves this screen to answer a question.
+which date you are choosing, then pick the day. The two cards carry the
+times; the active branch supplies the hand-over hours and is recorded on the
+booking automatically, so the customer never has to choose one.
 
 Everything is validated by the services, not by the widgets: the times are
 checked against the branch's opening hours (app/services/branch_service.py)
@@ -18,7 +19,6 @@ from datetime import date, datetime, time, timedelta
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -67,12 +67,9 @@ STEP_INDEX = 2
 
 @dataclass(frozen=True)
 class BranchChoice:
-    """A branch as the screen needs it: labels, hours, hand-over times."""
+    """The active branch as the screen needs it: its id and hand-over times."""
 
     branch_id: int
-    name: str
-    address: str
-    hours: str
     slots: tuple[time, ...]
 
 
@@ -101,7 +98,6 @@ class Moment:
     column: QVBoxLayout
     date_label: QLabel
     time_combo: QComboBox
-    branch_combo: QComboBox
 
 
 class BookingSchedulePage(QWidget):
@@ -114,7 +110,7 @@ class BookingSchedulePage(QWidget):
         super().__init__(parent)
         self.setObjectName("page")
         self.draft = draft
-        self._branches: list[BranchChoice] = []
+        self._branch: BranchChoice | None = None
         self._blocked: set[date] = set()
         self._rate = 0
         self._policy = None
@@ -139,9 +135,6 @@ class BookingSchedulePage(QWidget):
         # ----- pickup / return cards -----
         self.pickup = self._moment("Pickup", "pickup")
         self.return_moment = self._moment("Return", "return")
-        self.different_branch = QCheckBox("Return to a different branch")
-        self.different_branch.toggled.connect(self._on_different_branch)
-        self.return_moment.column.addWidget(self.different_branch)
         self.pickup.column.addStretch(1)
 
         cards = QHBoxLayout()
@@ -231,18 +224,9 @@ class BookingSchedulePage(QWidget):
         col.addWidget(make_label("Time", "comboCaption"))
         col.addWidget(time_combo)
 
-        branch_combo = QComboBox()
-        branch_combo.setObjectName("combo")
-        branch_combo.setCursor(Qt.PointingHandCursor)
-        col.addWidget(make_label("Branch", "comboCaption"))
-        col.addWidget(branch_combo)
-
-        moment = Moment(key, card, col, date_label, time_combo, branch_combo)
+        moment = Moment(key, card, col, date_label, time_combo)
         moment.time_combo.currentIndexChanged.connect(
             lambda _index, m=moment: self._on_time_changed(m)
-        )
-        moment.branch_combo.currentIndexChanged.connect(
-            lambda _index, m=moment: self._on_branch_changed(m)
         )
         return moment
 
@@ -310,7 +294,7 @@ class BookingSchedulePage(QWidget):
 
     # ---------- data ----------
     def reload(self) -> None:
-        """(Re)read the vehicle, the branches and the booked days."""
+        """(Re)read the vehicle, the active branch and the booked days."""
         try:
             with SessionLocal() as session:
                 vehicle = session.get(Vehicle, self.draft.vehicle_id)
@@ -323,17 +307,17 @@ class BookingSchedulePage(QWidget):
                 self._motorcycle = pricing.is_motorcycle(vehicle)
                 self._ref = vehicle_photos.ref_for(vehicle)
                 self._specs = vehicle_service.summary_line(vehicle)
-                branches = branch_service.active_branches(session)
-                self._branches = [
+                branch = self._pick_branch(
+                    branch_service.active_branches(session)
+                )
+                self._branch = (
                     BranchChoice(
                         branch_id=branch.branch_id,
-                        name=branch.name,
-                        address=branch.address,
-                        hours=branch.hours_label,
                         slots=tuple(branch_service.time_slots(branch)),
                     )
-                    for branch in branches
-                ]
+                    if branch is not None
+                    else None
+                )
                 self._blocked = booking_service.booked_days(
                     session,
                     vehicle,
@@ -353,29 +337,27 @@ class BookingSchedulePage(QWidget):
         if self._ref is not None:
             self.photo.set_vehicle(self._ref)
 
-        self._fill_combos()
         self._defaults()
         self._sync()
 
-    def _fill_combos(self) -> None:
-        for moment in (self.pickup, self.return_moment):
-            branch_combo = moment.branch_combo
-            branch_combo.blockSignals(True)
-            branch_combo.clear()
-            for choice in self._branches:
-                branch_combo.addItem(f"{choice.name} \u2014 {choice.hours}", choice.branch_id)
-            branch_combo.blockSignals(False)
+    def _pick_branch(self, branches: list[Branch]) -> Branch | None:
+        """Keep a draft's branch when it is still open, else the first one."""
+        for branch in branches:
+            if branch.branch_id == self.draft.pickup_branch_id:
+                return branch
+        return branches[0] if branches else None
 
     def _defaults(self) -> None:
-        """First visit: tomorrow-ish, or the values BACK carried over."""
-        if not self._branches:
+        """First visit: the active branch and tomorrow-ish, or BACK's values."""
+        choice = self._branch
+        if choice is None:
             return
-        first = self._branches[0]
-        if self.draft.pickup_branch_id is None:
-            self.draft.pickup_branch_id = first.branch_id
+        self.draft.pickup_branch_id = choice.branch_id
+        # Branch selection is gone, so both ends are always the same branch.
+        self.draft.return_branch_id = None
         if self.draft.pickup_dt is None:
             day = date.today()
-            self.draft.pickup_dt = datetime.combine(day, self._default_time(first))
+            self.draft.pickup_dt = datetime.combine(day, self._default_time(choice))
         if self.draft.return_dt is None:
             self.draft.return_dt = self.draft.pickup_dt + timedelta(days=2)
 
@@ -397,41 +379,11 @@ class BookingSchedulePage(QWidget):
 
     def _on_day(self, day: date) -> None:
         """A day was clicked: it lands on whichever card has the focus."""
-        current = self._draft_moment(self._focus)
-        clock = current.time() if current else self._default_time(self._branches[0])
-        self._set_moment(self._focus, datetime.combine(day, clock))
-        self._sync()
-
-    def _on_branch_changed(self, moment: Moment) -> None:
-        if self._loading:
+        if self._branch is None:
             return
-        which = moment.key
-        choice = self._choice(moment.branch_combo.currentData())
-        current = self._draft_moment(which)
-        if choice is not None:
-            self._fill_times(moment, choice)
-            # Keep the clock time if the new branch offers it, else clamp to
-            # the nearest slot it does offer: never silently out of hours.
-            clock = current.time() if current else self._default_time(choice)
-            if clock not in choice.slots:
-                clock = min(
-                    choice.slots,
-                    key=lambda slot: abs(_minutes(slot) - _minutes(clock)),
-                )
-            day = current.date() if current else date.today()
-            self._set_moment(which, datetime.combine(day, clock))
-        if which == "return" and self.different_branch.isChecked():
-            self.draft.return_branch_id = moment.branch_combo.currentData()
-        elif which == "pickup" and not self.different_branch.isChecked():
-            # The drop-off branch follows the pickup one while the box is clear.
-            self.draft.return_branch_id = None
-        self._sync()
-
-    def _on_different_branch(self, checked: bool) -> None:
-        self.return_moment.branch_combo.setEnabled(checked)
-        self.draft.return_branch_id = (
-            self.return_moment.branch_combo.currentData() if checked else None
-        )
+        current = self._draft_moment(self._focus)
+        clock = current.time() if current else self._default_time(self._branch)
+        self._set_moment(self._focus, datetime.combine(day, clock))
         self._sync()
 
     def _on_time_changed(self, moment: Moment) -> None:
@@ -462,12 +414,6 @@ class BookingSchedulePage(QWidget):
                 self.draft.return_dt = value + timedelta(days=1)
         else:
             self.draft.return_dt = value
-
-    def _choice(self, branch_id) -> BranchChoice | None:
-        for choice in self._branches:
-            if choice.branch_id == branch_id:
-                return choice
-        return None
 
     def _fill_times(self, moment: Moment, choice: BranchChoice) -> None:
         combo = moment.time_combo
@@ -501,21 +447,16 @@ class BookingSchedulePage(QWidget):
         self.pickup.date_label.setText(day_label(pickup_dt.date()))
         self.return_moment.date_label.setText(day_label(return_dt.date()))
 
-        # Branches and times, without firing the change handlers.
-        pickup_choice = self._choice(self.draft.pickup_branch_id) or (self._branches[0] if self._branches else None)
-        if pickup_choice is not None:
-            self._select_combo(self.pickup.branch_combo, pickup_choice.branch_id)
-            if self.pickup.time_combo.count() != len(pickup_choice.slots):
-                self._fill_times(self.pickup, pickup_choice)
-            self._select_combo(self.pickup.time_combo, pickup_dt.time())
+        # Times come from the active branch, without firing the change handler.
+        if self._branch is not None:
+            for moment, value in (
+                (self.pickup, pickup_dt),
+                (self.return_moment, return_dt),
+            ):
+                if moment.time_combo.count() != len(self._branch.slots):
+                    self._fill_times(moment, self._branch)
+                self._select_combo(moment.time_combo, value.time())
 
-        drop_choice = self._choice(self.draft.return_branch_id) or pickup_choice
-        if drop_choice is not None:
-            self._select_combo(self.return_moment.branch_combo, drop_choice.branch_id)
-            if self.return_moment.time_combo.count() != len(drop_choice.slots):
-                self._fill_times(self.return_moment, drop_choice)
-            self._select_combo(self.return_moment.time_combo, return_dt.time())
-        self.return_moment.branch_combo.setEnabled(self.different_branch.isChecked())
         for name, moment in (("pickup", self.pickup), ("return", self.return_moment)):
             moment.card.setProperty("focused", name == self._focus)
             moment.card.style().unpolish(moment.card)
@@ -586,21 +527,16 @@ class BookingSchedulePage(QWidget):
         pickup_dt, return_dt = self.draft.pickup_dt, self.draft.return_dt
         if pickup_dt is None or return_dt is None:
             return "Pick the pickup and return dates."
-        if not self._branches:
+        if self._branch is None:
             return "No branch is open for bookings right now."
         try:
             with SessionLocal() as session:
                 vehicle = session.get(Vehicle, self.draft.vehicle_id)
                 if vehicle is None:
                     return "That vehicle is no longer in the fleet."
-                pickup_branch = session.get(Branch, self.draft.pickup_branch_id)
-                return_branch = (
-                    session.get(Branch, self.draft.return_branch_id)
-                    if self.draft.return_branch_id
-                    else None
-                )
+                pickup_branch = session.get(Branch, self._branch.branch_id)
                 branch_service.validate_window(
-                    pickup_dt, return_dt, pickup_branch, return_branch
+                    pickup_dt, return_dt, pickup_branch
                 )
                 booking_service.assert_window_free(
                     session, vehicle, pickup_dt, return_dt
@@ -610,10 +546,6 @@ class BookingSchedulePage(QWidget):
         except Exception as exc:  # noqa: BLE001 - the database is remote
             return f"Could not check the calendar: {exc}"
         return None
-
-
-def _minutes(value: time) -> int:
-    return value.hour * 60 + value.minute
 
 
 __all__ = ["BranchChoice", "BookingSchedulePage", "Moment", "STEP_INDEX"]

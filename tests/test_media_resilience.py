@@ -312,3 +312,22 @@ class TestModelPathCollision:
         assert first_path != second_path
         assert first_path.parent == image_cache.CACHE_DIR.resolve()
         assert second_path.parent == image_cache.CACHE_DIR.resolve()
+
+
+class TestModelViewerDocument:
+    def test_glb_src_is_one_quoted_attribute(self, tmp_path):
+        """Regression: json.dumps() double-quoted the src and blanked the tab."""
+        from app.ui import vehicle_photo
+
+        glb = tmp_path / "car model.glb"
+        glb.write_bytes(b"glTF")
+
+        document = vehicle_photo.model_viewer_document(
+            glb, VehicleRef(make="Kia", model="Soluto", year=2026)
+        )
+
+        assert f'src="{vehicle_photo._file_url(glb)}"' in document
+        assert f'src="{vehicle_photo._file_url(vehicle_photo.MODEL_VIEWER_JS)}"' in document
+        assert "ajax.googleapis.com" not in document
+        assert 'src=""' not in document
+        assert vehicle_photo.MODEL_VIEWER_JS.is_file()
