@@ -34,7 +34,7 @@ from app.staff.ui_kit import (
     WarmHost,
     WarmPanel,
 )
-from app.staff.widgets import confirm, toast
+from app.staff.widgets import confirm_modal, toast
 from app.staff.workers import emit_safely, loader_pool, media_pool
 from app.widgets.skeleton import Skeleton
 
@@ -578,7 +578,9 @@ class FleetPage(StaffPage):
 
     # -- overlay panels (no OS windows; same glass as bookings) ---------
 
-    def _overlay_panel(self, panel: QWidget) -> object:
+    def _overlay_panel(
+        self, panel: QWidget, *, card_width: int = 640
+    ) -> object:
         from app.staff.overlay import FrostedOverlay
 
         if self._fleet_overlay is not None:
@@ -586,7 +588,10 @@ class FleetPage(StaffPage):
             self._fleet_overlay.deleteLater()
             self._fleet_overlay = None
         window = self.window()
-        overlay = FrostedOverlay(window if window is not None else self)
+        overlay = FrostedOverlay(
+            window if window is not None else self,
+            card_width=card_width,
+        )
         # No bar widget on the fleet overlay (wheel/keys still scroll).
         overlay.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         overlay.set_content(panel)
@@ -609,7 +614,7 @@ class FleetPage(StaffPage):
         panel = VehicleFormPanel(self.context, None, self)
         panel.submitted.connect(self._on_add_submit)
         panel.cancelled.connect(self._hide_overlay)
-        self._overlay_panel(panel)
+        self._overlay_panel(panel, card_width=900)
         return True
 
     def _warm_media(self, vehicle_id: int, plate: str, *, force: bool = False) -> None:
@@ -661,7 +666,7 @@ class FleetPage(StaffPage):
         panel = VehicleFormPanel(self.context, vehicle_id, self)
         panel.submitted.connect(lambda values: self._on_edit_submit(vehicle_id, values))
         panel.cancelled.connect(self._hide_overlay)
-        self._overlay_panel(panel)
+        self._overlay_panel(panel, card_width=900)
         return True
 
     def _on_edit_submit(self, vehicle_id: int, values: dict) -> None:
@@ -726,7 +731,7 @@ class FleetPage(StaffPage):
         panel.closed.connect(self._hide_overlay)
         panel.edit_requested.connect(lambda _vid: (self._hide_overlay(), self.open_edit()))
         panel.refreshed.connect(lambda message: toast(self, message))
-        self._overlay_panel(panel)
+        self._overlay_panel(panel, card_width=900)
         return True
 
     def open_bulk(self) -> bool:
@@ -780,10 +785,11 @@ class FleetPage(StaffPage):
             toast(self, "That action is for administrators.", "error")
             return
         if self._selected_status() == "retired":
-            if not confirm(
+            if not confirm_modal(
                 self,
                 f"Return {plate} to service?",
                 detail="It becomes bookable again.",
+                confirm_text="Return to service",
                 pref="behavior/confirm_retire",
             ):
                 return
@@ -800,11 +806,12 @@ class FleetPage(StaffPage):
             self._request_load(full=False)
             toast(self, f"{plate} is back in service.")
             return
-        if not confirm(
+        if not confirm_modal(
             self,
             f"Retire {plate}?",
             detail="It leaves the fleet but stays in history. Refused while it holds a booking.",
             destructive=True,
+            confirm_text="Retire vehicle",
             pref="behavior/confirm_retire",
         ):
             return

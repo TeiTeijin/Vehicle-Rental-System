@@ -2333,3 +2333,193 @@ QPushButton#choiceChip[variant="reason"] {
 QPushButton#warmCheck {
     min-height: 30px;
 }
+
+/* ===================================================================
+   FLEET MODALS (Add/Edit vehicle + Vehicle details)
+   The references are a 900px white sheet on the frosted app backdrop:
+   cream preview/spec panels, warm inputs, chip selectors, and an ink
+   primary action in a sticky footer. Scoped by object name so the rest
+   of the staff app keeps its existing control geometry.
+   =================================================================== */
+
+QWidget#fleetModal,
+QWidget#fleetModalHeader,
+QWidget#fleetModalBody,
+QWidget#fleetFieldHost {
+    background: transparent;
+    border: none;
+}
+
+/* Card paints its own rounded white fill; the QSS class rule must not
+   square off the corners behind it. */
+QFrame#fleetModalCard {
+    background: transparent;
+    border: none;
+}
+
+QLabel#fleetEyebrow {
+    background: #ECE6DD;
+    border-radius: 9px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#fleetModalTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+QLabel#fleetModalSubtitle {
+    background: transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#fleetModalRule {
+    background: #EDE5D8;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QFrame#fleetModalFooter {
+    /* Transparent so Card's rounded bottom corners stay visible. */
+    background: transparent;
+    border: none;
+    border-top: 1px solid #EDE5D8;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton,
+QFrame#fleetModalCard QPushButton#secondaryButton {
+    border-radius: 18px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 20px;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton {
+    background: #171717;
+    border: 1px solid #171717;
+    color: #FFFFFF;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton:hover {
+    background: #333333;
+    border-color: #333333;
+}
+
+QFrame#fleetModalCard QPushButton#secondaryButton {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    color: #171717;
+}
+
+QFrame#fleetModalCard QPushButton#secondaryButton:hover {
+    background: #F6EEDC;
+    border-color: #C6B8A3;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton:disabled,
+QFrame#fleetModalCard QPushButton#secondaryButton:disabled {
+    background: #ECE6DD;
+    border-color: #E0D6C9;
+    color: #A79B87;
+}
+
+/* -- cream preview panel -------------------------------------------- */
+
+QFrame#fleetPreview {
+    background: #EFE6D5;
+    border: 1px solid #E7DBC7;
+    border-radius: 14px;
+}
+
+/* -- details panels and rows ---------------------------------------- */
+
+QLabel#fleetHero {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 14px;
+    color: #8A8175;
+    font-size: 13px;
+}
+
+QLabel#fleetThumb {
+    background: #EEEAE1;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #8A8175;
+    font-size: 11px;
+}
+
+QLabel#fleetThumb[selected="true"] {
+    border: 2px solid #171717;
+}
+
+QLabel#fleetViewerPlaceholder {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 14px;
+    color: #8A8175;
+    font-size: 13px;
+}
+
+QFrame#fleetHistoryRow {
+    background: transparent;
+    border: none;
+}
+
+QFrame#fleetRowRule {
+    background: #EFE8DC;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#fleetMetaChip {
+    background: #EDE6D9;
+    border: none;
+    border-radius: 11px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+}
+
+QProgressBar#fleetUtilBar {
+    background: #EDE6D9;
+    border: none;
+    border-radius: 4px;
+}
+
+QProgressBar#fleetUtilBar::chunk {
+    background: #171717;
+    border-radius: 4px;
+}
+
+/* -- track-expiry checkbox ------------------------------------------ */
+
+QCheckBox#fleetCheck {
+    background: transparent;
+    color: #3F3A33;
+    font-size: 12px;
+    spacing: 8px;
+}
+
+QCheckBox#fleetCheck::indicator {
+    width: 16px;
+    height: 16px;
+    background: #FFFFFF;
+    border: 1px solid #CFC3B2;
+    border-radius: 4px;
+}
+
+QCheckBox#fleetCheck::indicator:checked {
+    background: #171717;
+    border-color: #171717;
+}

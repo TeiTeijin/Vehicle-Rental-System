@@ -2278,7 +2278,7 @@ class TestFleetPage:
         import app.staff.pages.fleet as module
 
         monkeypatch.setattr(module, "toast", lambda *a, **k: None)
-        monkeypatch.setattr(module, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(module, "confirm_modal", lambda *a, **k: True)
         built, _context = branch
         page = FleetPage(shell)
         page.refresh()
@@ -2307,6 +2307,115 @@ class TestFleetPage:
             for r in range(page.table.row_count())
         }
         assert by_plate["FREE-001"] == "Available"
+
+    def test_retire_confirmation_uses_the_warm_modal(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.fleet as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        calls = []
+
+        def _confirm(_parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(module, "confirm_modal", _confirm)
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        for row in range(page.table.row_count()):
+            if page.table.cell_text(row, 0) == "FREE-001":
+                page.table.table.selectRow(row)
+                break
+        page._on_retire_button()
+        _wait_for_fleet(page)
+
+        question, options = calls[0]
+        assert question == "Retire FREE-001?"
+        assert options["confirm_text"] == "Retire vehicle"
+        assert options["destructive"] is True
+        assert options["pref"] == "behavior/confirm_retire"
+
+        for row in range(page.table.row_count()):
+            if page.table.cell_text(row, 0) == "FREE-001":
+                page.table.table.selectRow(row)
+                break
+        page._on_retire_button()
+        _wait_for_fleet(page)
+
+        question, options = calls[1]
+        assert question == "Return FREE-001 to service?"
+        assert options["confirm_text"] == "Return to service"
+        assert options["pref"] == "behavior/confirm_retire"
+        assert "destructive" not in options
+
+    def test_add_vehicle_uses_the_900px_warm_sheet(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.fleet as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        assert page.open_add() is True
+        overlay = page._fleet_overlay
+        panel = overlay.scroll.widget()
+
+        assert overlay.scroll.width() == 900
+        assert panel.card.width() == 900
+        assert panel.card.objectName() == "fleetModalCard"
+        assert panel.eyebrow_label.text() == "ADD VEHICLE"
+        assert panel.title_label.text() == "Plate, specs, rate and paperwork"
+        assert "Required" in panel.subtitle_label.text()
+        assert panel._preview.rows["Plate"].text() == "ABC-123"
+        assert panel.footer.isHidden() is False
+
+        panel.plate_edit.setText("NEW-900")
+        panel.category_chips.buttons["Motorcycle"].click()
+        panel.fuel_chips.buttons["Diesel"].click()
+
+        assert panel._preview.rows["Plate"].text() == "NEW-900"
+        assert panel.category_combo.currentText() == "Motorcycle"
+        assert panel.fuel_combo.currentText() == "Diesel"
+        assert panel.category_combo.isHidden() is True
+        assert panel.category_chips.buttons["Motorcycle"].isChecked() is True
+
+    def test_details_panel_uses_the_900px_warm_sheet(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.fleet_panels as panels_mod
+
+        monkeypatch.setattr(
+            panels_mod.media_service, "get_or_fetch_media", lambda *a, **k: []
+        )
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        for row in range(page.table.row_count()):
+            if page.table.cell_text(row, 0) == "FREE-001":
+                page.table.table.selectRow(row)
+                break
+        assert page.open_details() is True
+        overlay = page._fleet_overlay
+        panel = overlay.scroll.widget()
+        panel._pool.waitForDone(15000)
+        qapp_process(panel)
+
+        assert overlay.scroll.width() == 900
+        assert panel.card.width() == 900
+        assert panel.card.objectName() == "fleetModalCard"
+        assert panel.eyebrow_label.text() == f"VEHICLE #{panel._vehicle_id}"
+        assert panel.title_label.text()
+        assert panel.status_host.count() == 1
+        assert panel.edit_button.text() == "Edit"
+        assert panel.close_button.text() == "Close"
+        assert panel._hero.objectName() == "fleetHero"
+        assert panel._viewer_host is not None
+        assert panel._util_bar is not None
+        assert panel._window_buttons[30].isChecked() is True
+        assert panel._body.count() > 5
 
     def test_bulk_rate_preview_and_apply(self, shell, branch, monkeypatch):
         import app.staff.pages.fleet as module
@@ -2350,7 +2459,7 @@ class TestFleetPage:
             and hasattr(panel._body.itemAt(i).widget(), "text")
         ]
         joined = "\n".join(texts)
-        assert "Utilization" in joined
+        assert "UTILIZATION" in joined
         assert "All-time" in panel._stats_caption.text()
         assert "Rented" in panel._stats_caption.text()
         panel.deleteLater()
