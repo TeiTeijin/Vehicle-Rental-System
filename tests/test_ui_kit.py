@@ -214,6 +214,10 @@ def test_confirm_panel_title_detail_and_destructive_button(qapp):
     assert panel.keep_button.objectName() == "modalSecondary"
     assert panel.confirm_button.objectName() == "modalDanger"
     assert panel.card.width() == 540
+    assert panel.objectName() == "confirmPanel"
+    # The renamed host needs its own transparent rule; otherwise the blanket
+    # QWidget cream paints a 540px column behind the sheet.
+    assert "QWidget#confirmPanel" in theme.load_stylesheet()
 
 
 def test_confirm_panel_default_button_is_not_destructive(qapp):

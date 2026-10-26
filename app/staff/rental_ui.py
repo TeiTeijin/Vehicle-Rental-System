@@ -593,6 +593,9 @@ class ModalStep(QWidget):
 
     def __init__(self, context, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # The root host must stay transparent: the blanket QWidget cream would
+        # otherwise paint a 900px cream column over the overlay's dark frost.
+        self.setObjectName("wizardStep")
         self._context = context
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)

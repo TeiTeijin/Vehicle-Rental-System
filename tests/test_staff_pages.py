@@ -7249,6 +7249,9 @@ class TestRentalModalRedesign:
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             step = page._wizard._current
+            # The root must stay transparent; otherwise it paints a cream
+            # 900px column over the overlay's dark frost.
+            assert step.objectName() == "wizardStep"
             assert step.legend_host.objectName() == "wizardLegend"
             assert step.legend_host.isVisible() is True
             labels = {

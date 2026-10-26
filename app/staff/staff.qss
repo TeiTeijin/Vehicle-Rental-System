@@ -1936,7 +1936,8 @@ QLabel#tableChip[tone="neutral"] {
 
 /* -- modal frame ----------------------------------------------------- */
 
-QWidget#bookingModal {
+QWidget#bookingModal,
+QWidget#confirmPanel {
     background: transparent;
 }
 
