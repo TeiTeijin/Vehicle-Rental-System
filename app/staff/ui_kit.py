@@ -323,6 +323,70 @@ class MetricTile(QFrame):
         self.value_label.setText(text)
 
 
+class MetricRow(QWidget):
+    """One row of equal-width report metric tiles."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("reportMetricRow")
+        self.tiles: dict[str, MetricTile] = {}
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(12)
+
+    def add(
+        self,
+        label: str,
+        value: str,
+        *,
+        highlight: bool = False,
+    ) -> MetricTile:
+        tile = MetricTile(
+            label,
+            value,
+            tone="highlight" if highlight else "report",
+            large=True,
+            parent=self,
+        )
+        tile.setProperty("report", "true")
+        tile.setMinimumHeight(76)
+        tile.value_label.setWordWrap(True)
+        self._layout.addWidget(tile)
+        self.tiles[label] = tile
+        return tile
+
+
+class MetricGrid(QWidget):
+    """Stack of :class:`MetricRow`; the first row usually holds the headline."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("reportMetricGrid")
+        self.rows: list[MetricRow] = []
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(8)
+
+    @property
+    def tiles(self) -> dict[str, MetricTile]:
+        return {
+            label: tile
+            for row in self.rows
+            for label, tile in row.tiles.items()
+        }
+
+    def row(self) -> MetricRow:
+        row = MetricRow(self)
+        self.rows.append(row)
+        self._layout.addWidget(row)
+        return row
+
+    def set_value(self, label: str, text: str) -> None:
+        tile = self.tiles.get(label)
+        if tile is not None:
+            tile.set_value(text)
+
+
 class SectionTitle(QLabel):
     """Uppercase 10px section label inside a modal or card."""
 

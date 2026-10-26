@@ -37,8 +37,9 @@ class Column:
     title: str
     align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
     stretch: bool = False
-    #: Warm-table presentation: ``text``, ``status``, ``payment``,
-    #: ``inspection``, ``damage``, ``muted``, ``strong``, or ``money``.
+    #: Warm-table presentation: ``text``, ``status``, ``report_status``,
+    #: ``payment``, ``chip``, ``ratio``, ``inspection``, ``damage``,
+    #: ``muted``, ``strong``, or ``money``.
     kind: str = "text"
     weight: QFont.Weight | None = None
     colour: str | None = None
@@ -86,6 +87,30 @@ def _payment_tone(text: str) -> str:
     if "partial" in lowered:
         return "warn"
     return "neutral"
+
+
+def _chip_tone(text: str) -> str:
+    """Tone for a report chip whose label is already human-readable."""
+    key = (text or "").strip().lower()
+    if key.startswith("overdue") or key.startswith("expired"):
+        return "danger"
+    if key.startswith("expires") or key.startswith("due"):
+        return "warn"
+    if key in ("ok", "valid", "paid", "complete", "completed"):
+        return "ok"
+    return _status_tone(key)
+
+
+def _ratio_tone(text: str) -> str:
+    try:
+        value = float((text or "").replace("%", "").replace(",", ""))
+    except ValueError:
+        return "neutral"
+    if value > 100:
+        return "danger"
+    if value > 50:
+        return "warn"
+    return "ok"
 
 
 class TableChip(QLabel):
@@ -360,25 +385,37 @@ class LoadStateTable(QWidget):
             pill = StatusPill(theme.status_label(value), value)
             self._table.setCellWidget(row, column, pill)
             return QTableWidgetItem("")
-        if warm and column_spec.kind == "status":
-            label = theme.status_label(str(value))
-            chip = TableChip(label, tone=_status_tone(str(value)))
+        if warm and column_spec.kind in (
+            "status", "report_status", "payment", "chip", "ratio"
+        ):
+            raw = "" if value is None else str(value)
+            if column_spec.kind in ("status", "report_status"):
+                text = theme.status_label(raw)
+                if (
+                    column_spec.kind == "report_status"
+                    and raw.strip().lower() in ("ongoing", "in_progress")
+                ):
+                    # The report references paint an active rental blue.
+                    tone = "info"
+                else:
+                    tone = _status_tone(raw)
+            elif column_spec.kind == "payment":
+                text = raw
+                tone = _payment_tone(raw)
+            elif column_spec.kind == "ratio":
+                text = raw
+                tone = _ratio_tone(raw)
+            else:
+                text = raw
+                tone = _chip_tone(raw)
+            chip = TableChip(text, tone=tone)
             self._table.setCellWidget(
                 row, column, ChipCell(chip, align=column_spec.align)
             )
             # ResizeToContents measures the item, not the cell widget. Keep
+            # ResizeToContents measures the item, not the cell widget. Keep
             # the label in the (invisible) item so the chip gets its width;
             # the trailing pad pays for the chip's 10px side padding + border.
-            placeholder = QTableWidgetItem(f"{label}      ")
-            placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
-            placeholder.setTextAlignment(column_spec.align)
-            return placeholder
-        if warm and column_spec.kind == "payment":
-            text = "" if value is None else str(value)
-            chip = TableChip(text, tone=_payment_tone(text))
-            self._table.setCellWidget(
-                row, column, ChipCell(chip, align=column_spec.align)
-            )
             placeholder = QTableWidgetItem(f"{text}      ")
             placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
             placeholder.setTextAlignment(column_spec.align)

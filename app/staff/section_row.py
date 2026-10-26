@@ -39,12 +39,14 @@ def paint_active_row(
     glyph=None,
     glyph_gap: float = 12,
     reserve: float = 24,
+    variant: str = "",
 ) -> None:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     radius = float(SIDEBAR_RADIUS) * HOVER_RADIUS_FACTOR
     height = rect.height()
+    pill = variant == "reportNav"
 
-    if hovered:
+    if hovered and not (pill and active):
         painter.setBrush(QColor(theme.SURFACE))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(rect, radius, radius)
@@ -52,16 +54,19 @@ def paint_active_row(
     if active:
         painter.setBrush(QColor(theme.INK))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(
-            QRectF(
-                ACTIVE_BAR_X,
-                ACTIVE_BAR_INSET,
-                float(NAV_ACTIVE_BAR),
-                height - ACTIVE_BAR_INSET * 2,
-            ),
-            ACTIVE_BAR_RADIUS,
-            ACTIVE_BAR_RADIUS,
-        )
+        if pill:
+            painter.drawRoundedRect(rect, 10, 10)
+        else:
+            painter.drawRoundedRect(
+                QRectF(
+                    ACTIVE_BAR_X,
+                    ACTIVE_BAR_INSET,
+                    float(NAV_ACTIVE_BAR),
+                    height - ACTIVE_BAR_INSET * 2,
+                ),
+                ACTIVE_BAR_RADIUS,
+                ACTIVE_BAR_RADIUS,
+            )
 
     text_left = label_x
     if glyph is not None:
@@ -76,7 +81,7 @@ def paint_active_row(
     font.setPixelSize(LABEL_PX)
     font.setWeight(QFont.Weight.DemiBold if active else QFont.Weight.Medium)
     painter.setFont(font)
-    painter.setPen(QColor(theme.INK))
+    painter.setPen(QColor(theme.PAPER if pill and active else theme.INK))
     # Elide instead of clip: a label wider than its row (fallback fonts,
     # text scaling) fades with "..." rather than losing letters mid-glyph.
     available = max(0.0, float(rect.width()) - text_left - reserve)
@@ -97,6 +102,7 @@ class ActiveRow(QAbstractButton):
         *,
         parent: QWidget | None = None,
         enabled: bool = True,
+        variant: str = "",
     ) -> None:
         super().__init__(parent)
         self._label_text = label
@@ -105,6 +111,9 @@ class ActiveRow(QAbstractButton):
         self._glyph_active = None
         self._glyph_gap = 12.0
         self._reserve = 24.0
+        self._variant = variant
+        if variant:
+            self.setProperty("variant", variant)
 
         self.setCheckable(True)
         self.setAutoExclusive(True)
@@ -155,6 +164,7 @@ class ActiveRow(QAbstractButton):
                 glyph=glyph,
                 glyph_gap=self._glyph_gap,
                 reserve=self._reserve,
+                variant=self._variant,
             )
         finally:
             painter.end()

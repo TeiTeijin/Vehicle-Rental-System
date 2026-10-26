@@ -23,6 +23,7 @@ from app.staff.overlay import (  # noqa: E402
 )
 from app.staff.tables import (  # noqa: E402
     ALIGN_LEFT,
+    ALIGN_RIGHT,
     Column,
     LoadStateTable,
     TableChip,
@@ -31,6 +32,7 @@ from app.staff.ui_kit import (  # noqa: E402
     BookingModal,
     ChipGroup,
     ConfirmPanel,
+    MetricGrid,
     MetricTile,
     SelectionBar,
     StatusChipRow,
@@ -88,6 +90,24 @@ def test_warm_panel_marks_variant(qapp):
     assert panel.objectName() == "pagePanel"
     assert panel.property("variant") == "warm"
     assert panel.body.contentsMargins().left() == 16
+
+
+def test_metric_grid_marks_the_first_tile_as_the_highlight(qapp):
+    grid = MetricGrid()
+    first = grid.row().add("Revenue", "₱ 0.00", highlight=True)
+    row = grid.row()
+    second = row.add("Rental", "₱ 0.00")
+    row.add("Penalties", "₱ 0.00")
+
+    assert first.property("tone") == "highlight"
+    assert second.property("tone") == "report"
+    assert first.property("report") == "true"
+    assert second.property("report") == "true"
+    assert first.minimumHeight() >= 72
+    assert list(grid.tiles) == ["Revenue", "Rental", "Penalties"]
+
+    grid.set_value("Rental", "₱ 25.00")
+    assert grid.tiles["Rental"].value_label.text() == "₱ 25.00"
 
 
 def test_table_chip_is_a_true_pill(qapp):
@@ -160,6 +180,30 @@ def test_inspection_chip_tones_are_scoped_to_the_warm_table(qapp):
     assert 'QLabel#tableChip[tone="pre"]' in css
     assert 'QLabel#tableChip[tone="post"]' in css
     assert "QLabel#warmCardTitle" in css
+
+
+def test_warm_table_renders_chip_and_ratio_columns(qapp):
+    table = LoadStateTable(
+        [
+            Column("Age", ALIGN_LEFT, kind="chip"),
+            Column("Cost vs revenue", ALIGN_RIGHT, kind="ratio"),
+        ],
+        lambda: [("Overdue 178d", "526%"), ("OK", "6%")],
+        variant="warm",
+    )
+
+    assert table.cell_text(0, 0) == "Overdue 178d"
+    assert table.cell_text(0, 1) == "526%"
+    overdue = table._table.cellWidget(0, 0).findChild(TableChip)
+    ratio = table._table.cellWidget(0, 1).findChild(TableChip)
+    assert overdue is not None and overdue.property("tone") == "danger"
+    assert ratio is not None and ratio.property("tone") == "danger"
+    assert table._table.cellWidget(1, 0).findChild(TableChip).property(
+        "tone"
+    ) == "ok"
+    assert table._table.cellWidget(1, 1).findChild(TableChip).property(
+        "tone"
+    ) == "ok"
 
 
 def test_overlay_card_width_override(qapp):
