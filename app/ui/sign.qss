@@ -707,6 +707,23 @@ QComboBox[state="error"] { border: 1px solid @danger; }
 }
 #heroArrow:hover { border-color: @gold; background: @panel_tan_soft; }
 
+/* Browse & filter: the only card between the hero and the type chips. */
+#browseFilterBar {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 16px;
+}
+#browseFilterBar QSpinBox {
+    background: #FFFFFF;
+    border: 1px solid @input_border;
+    border-radius: 2px;
+    padding: 8px 10px;
+    color: @text_dark;
+    font-size: 11pt;
+}
+#browseFilterBar QSpinBox:focus { border: 1px solid @gold; }
+#browseRateLabel { color: @text_muted; font-size: 8pt; font-weight: 700; }
+
 #shelf { background: transparent; }
 #shelfArrow {
     background: @surface;

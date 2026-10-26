@@ -749,6 +749,65 @@ def shop_snapshot(
     ]
 
 
+def shop_makes(snapshot: Sequence[ShopVehicle]) -> list[str]:
+    """Every brand the snapshot holds once, sorted; blanks are not brands."""
+    return sorted(
+        {item.make.strip() for item in snapshot if item.make and item.make.strip()}
+    )
+
+
+def shop_rate_bounds(snapshot: Sequence[ShopVehicle]) -> tuple[Decimal, Decimal]:
+    """The cheapest and dearest daily rate in the snapshot.
+
+    An empty showroom reports ``(0, 0)`` so the browse inputs still have a
+    stable pair of numbers to work with.
+    """
+    rates = [item.rate for item in snapshot]
+    if not rates:
+        return Decimal("0"), Decimal("0")
+    return min(rates), max(rates)
+
+
+def _rate_limit(value: int | Decimal | None) -> Decimal | None:
+    """Normalise a filter bound; ``None`` and ``0`` both mean 'no limit'."""
+    if value is None:
+        return None
+    limit = Decimal(str(value))
+    return None if limit == 0 else limit
+
+
+def filter_shop_snapshot(
+    snapshot: Sequence[ShopVehicle],
+    *,
+    make: str | None = None,
+    min_rate: int | Decimal | None = None,
+    max_rate: int | Decimal | None = None,
+) -> list[ShopVehicle]:
+    """The rows matching a brand and an inclusive daily-rate range.
+
+    The browse bar works over the same in-memory snapshot as the shelves, so
+    this stays a pure list filter: no query, no second round trip.
+    """
+    items = list(snapshot)
+
+    wanted = (make or "").strip()
+    if wanted:
+        wanted_key = wanted.casefold()
+        items = [
+            item
+            for item in items
+            if (item.make or "").strip().casefold() == wanted_key
+        ]
+
+    low = _rate_limit(min_rate)
+    high = _rate_limit(max_rate)
+    if low is not None:
+        items = [item for item in items if item.rate >= low]
+    if high is not None:
+        items = [item for item in items if item.rate <= high]
+    return items
+
+
 def shop_hero(
     snapshot: Sequence[ShopVehicle], limit: int = 5
 ) -> list[ShopVehicle]:

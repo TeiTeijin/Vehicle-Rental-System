@@ -183,6 +183,9 @@ class CatalogPage(QWidget):
         self.title = section_title("")
         self.count_label = hint_label("", tone="muted")
         self.count_label.setWordWrap(False)
+        self.summary = hint_label("", tone="muted")
+        self.summary.setWordWrap(True)
+        self.summary.hide()
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
@@ -211,6 +214,7 @@ class CatalogPage(QWidget):
         body.setContentsMargins(40, 28, 40, 32)
         body.setSpacing(16)
         body.addLayout(header)
+        body.addWidget(self.summary)
         body.addWidget(self.empty)
         body.addLayout(self.grid)
         body.addWidget(self.more_button, 0, Qt.AlignHCenter)
@@ -238,6 +242,7 @@ class CatalogPage(QWidget):
         items: Sequence[vehicle_service.ShopVehicle],
         *,
         empty_text: str,
+        summary: str = "",
     ) -> None:
         """Show a fresh listing, scrolled back to the top."""
         self._items = list(items)
@@ -245,6 +250,8 @@ class CatalogPage(QWidget):
         self._empty_text = empty_text
         self._clear_cards()
         self.title.setText(title)
+        self.summary.setText(summary)
+        self.summary.setVisible(bool(summary))
         self._scroll.verticalScrollBar().setValue(0)
         self._render_page()
 

@@ -3,6 +3,7 @@
 What the customer sees first (app/ui/main_window.py's default tab):
 
     hero carousel    the newest of each make, bookable from the slide itself
+    Browse & filter  one brand plus an inclusive daily-price range
     Browse by type   one chip per body style the catalog actually holds
     shelves          "Best cars for 4 seaters", "Popular cars for road trips",
                      and the rest of vehicle_service.SHOP_SECTIONS
@@ -17,6 +18,8 @@ fetches at once. The hero prefetches its neighbouring slides instead.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -37,11 +40,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QStackedLayout,
     QToolButton,
     QVBoxLayout,
@@ -72,6 +78,12 @@ from app.ui.vehicles import CatalogPage, VehicleCard, card_for
 HERO_STAGE_HEIGHT = 516
 HERO_NAME_TOP = 4
 HERO_PHOTO_TOP = 100
+
+#: On short windows the hero gives vertical room back so the Browse & Filter
+#: bar -- the primary way into the catalog -- is reachable without scrolling.
+#: 1024x768 is the tight target: its customer viewport is only ~696px tall.
+HERO_STAGE_HEIGHT_COMPACT = 380
+HERO_COMPACT_BELOW = 810
 
 #: Every name is set at this size and only shrinks when it would run wide
 #: (the reference's type is one size; the short names simply look shorter).
@@ -147,6 +159,7 @@ class HeroCarousel(QWidget):
         self._index = 0
         self._hovered = False
         self._name_rise: QPropertyAnimation | None = None
+        self._stage_height = HERO_STAGE_HEIGHT
 
         self.eyebrow = make_label("", "heroEyebrow")
         self.eyebrow.setAlignment(Qt.AlignCenter)
@@ -154,7 +167,7 @@ class HeroCarousel(QWidget):
         # The stage positions its two children by hand so they overlap.
         self.stage = QWidget(self)
         self.stage.setObjectName("heroStage")
-        self.stage.setFixedHeight(HERO_STAGE_HEIGHT)
+        self.stage.setFixedHeight(self._stage_height)
 
         self.name = make_label("", "heroName")
         self.name.setParent(self.stage)
@@ -385,7 +398,7 @@ class HeroCarousel(QWidget):
             return
         self._fit_name()
         self.photo.setGeometry(
-            0, HERO_PHOTO_TOP, width, HERO_STAGE_HEIGHT - HERO_PHOTO_TOP
+            0, HERO_PHOTO_TOP, width, self._stage_height - HERO_PHOTO_TOP
         )
         # The name is the backdrop; the car's cutout is the foreground.
         self.name.raise_()
@@ -396,10 +409,19 @@ class HeroCarousel(QWidget):
         centre = (
             self.stage.y()
             + HERO_PHOTO_TOP
-            + (HERO_STAGE_HEIGHT - HERO_PHOTO_TOP) // 2
+            + (self._stage_height - HERO_PHOTO_TOP) // 2
         )
         self.arrow_prev.move(0, centre - 23)
         self.arrow_next.move(self.width() - 46, centre - 23)
+
+    def set_compact(self, compact: bool) -> None:
+        """Shrink the stage on short windows so the filter bar stays above fold."""
+        height = HERO_STAGE_HEIGHT_COMPACT if compact else HERO_STAGE_HEIGHT
+        if height == self._stage_height:
+            return
+        self._stage_height = height
+        self.stage.setFixedHeight(height)
+        self._place_stage()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -660,8 +682,179 @@ class ChipRow(QWidget):
             self._buttons.append(button)
 
 
+#: The price spin boxes stop here; daily rates in this fleet are far below it.
+BROWSE_RATE_MAX = 1_000_000
+
+
+@dataclass(frozen=True)
+class BrowseFilters:
+    """The browse bar's choice, with "all" and "any" normalised to None."""
+
+    make: str | None = None
+    min_rate: int | None = None
+    max_rate: int | None = None
+
+    def describe(self) -> str:
+        """A one-line summary for the catalog header, or '' with no filters."""
+        parts: list[str] = []
+        if self.make:
+            parts.append(self.make)
+        if self.min_rate is not None and self.max_rate is not None:
+            parts.append(f"\u20b1{self.min_rate:,} \u2013 \u20b1{self.max_rate:,} / day")
+        elif self.min_rate is not None:
+            parts.append(f"\u20b1{self.min_rate:,}+ / day")
+        elif self.max_rate is not None:
+            parts.append(f"Up to \u20b1{self.max_rate:,} / day")
+        return " \u00b7 ".join(parts)
+
+
+class BrowseFilterBar(QFrame):
+    """Brand and daily-price controls between the hero and the type chips.
+
+    `browse_requested` carries a :class:`BrowseFilters`; the bar validates the
+    range itself and stays put (with an inline error) when min > max.
+    """
+
+    browse_requested = Signal(object)
+    browse_all_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("browseFilterBar")
+        self.setFrameShape(QFrame.NoFrame)
+
+        self.caption = overline("Browse & filter")
+
+        self.brand_combo = QComboBox()
+        self.brand_combo.setObjectName("browseBrand")
+        self.brand_combo.setMinimumWidth(160)
+        self.brand_combo.setMaximumWidth(240)
+        self.brand_combo.setToolTip("Show vehicles from one brand")
+        self.brand_combo.addItem("All brands", None)
+        self.brand_combo.currentIndexChanged.connect(self._clear_error)
+
+        self.min_rate = self._rate_spin("browseMinRate", "Minimum daily price")
+        self.max_rate = self._rate_spin("browseMaxRate", "Maximum daily price")
+        self.min_caption = make_label("Min / day", "browseRateLabel")
+        self.max_caption = make_label("Max / day", "browseRateLabel")
+
+        self.browse_button = primary_button("Browse vehicles")
+        self.browse_all_button = ghost_button("Browse all vehicles")
+        self.reset_button = ghost_button("Reset")
+
+        self.browse_button.clicked.connect(self._on_browse)
+        self.browse_all_button.clicked.connect(self._on_browse_all)
+        self.reset_button.clicked.connect(self.reset)
+
+        self.error = hint_label("", tone="danger")
+        self.error.hide()
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        controls.addWidget(self.brand_combo, 2, Qt.AlignBottom)
+        controls.addLayout(self._rate_field(self.min_caption, self.min_rate))
+        controls.addLayout(self._rate_field(self.max_caption, self.max_rate))
+        controls.addStretch(1)
+        controls.addWidget(self.reset_button, 0, Qt.AlignBottom)
+        controls.addWidget(self.browse_all_button, 0, Qt.AlignBottom)
+        controls.addWidget(self.browse_button, 0, Qt.AlignBottom)
+
+        col = QVBoxLayout(self)
+        col.setContentsMargins(20, 16, 20, 16)
+        col.setSpacing(8)
+        col.addWidget(self.caption)
+        col.addLayout(controls)
+        col.addWidget(self.error)
+
+    @staticmethod
+    def _rate_field(caption: QLabel, spin: QSpinBox) -> QVBoxLayout:
+        """One labelled price input: the caption names which end it is."""
+        field = QVBoxLayout()
+        field.setContentsMargins(0, 0, 0, 0)
+        field.setSpacing(4)
+        field.addWidget(caption)
+        field.addWidget(spin)
+        return field
+
+    @staticmethod
+    def _rate_spin(object_name: str, tooltip: str) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setObjectName(object_name)
+        spin.setRange(0, BROWSE_RATE_MAX)
+        spin.setSpecialValueText("Any")
+        spin.setPrefix("\u20b1 ")
+        # The "Min / day" and "Max / day" captions carry the unit. Keeping it
+        # out of the value lets "₱ 1,000,000" fit at 1024px.
+        spin.setGroupSeparatorShown(True)
+        spin.setKeyboardTracking(False)
+        spin.setMinimumWidth(128)
+        spin.setToolTip(tooltip)
+        return spin
+
+    # ---------- data ----------
+    def set_makes(self, makes) -> None:
+        """Fill the brand list, keeping 'All brands' and any current choice."""
+        previous = self.brand_combo.currentData()
+        blocked = self.brand_combo.blockSignals(True)
+        try:
+            self.brand_combo.clear()
+            self.brand_combo.addItem("All brands", None)
+            seen: set[str] = set()
+            for make in makes:
+                name = (make or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    self.brand_combo.addItem(name, name)
+            index = self.brand_combo.findData(previous)
+            self.brand_combo.setCurrentIndex(max(0, index))
+        finally:
+            self.brand_combo.blockSignals(blocked)
+
+    def filters(self) -> BrowseFilters:
+        return BrowseFilters(
+            make=self.brand_combo.currentData() or None,
+            min_rate=self.min_rate.value() or None,
+            max_rate=self.max_rate.value() or None,
+        )
+
+    def reset(self) -> None:
+        for widget in (self.brand_combo, self.min_rate, self.max_rate):
+            blocked = widget.blockSignals(True)
+            try:
+                if widget is self.brand_combo:
+                    widget.setCurrentIndex(0)
+                else:
+                    widget.setValue(0)
+            finally:
+                widget.blockSignals(blocked)
+        self._clear_error()
+
+    # ---------- actions ----------
+    def _on_browse(self) -> None:
+        current = self.filters()
+        if (
+            current.min_rate is not None
+            and current.max_rate is not None
+            and current.min_rate > current.max_rate
+        ):
+            self.error.setText("Minimum price can't be higher than the maximum.")
+            self.error.show()
+            return
+        self._clear_error()
+        self.browse_requested.emit(current)
+
+    def _on_browse_all(self) -> None:
+        self._clear_error()
+        self.browse_all_requested.emit()
+
+    def _clear_error(self, *_args) -> None:
+        self.error.clear()
+        self.error.hide()
+
+
 class HomePage(QWidget):
-    """The landing tab: hero, type chips, shelves -- the catalog behind."""
+    """The landing tab: hero, browse filter, type chips, shelves -- catalog behind."""
 
     vehicle_selected = Signal(int)
     book_requested = Signal(int)
@@ -679,6 +872,10 @@ class HomePage(QWidget):
         self.hero.vehicle_selected.connect(self.vehicle_selected)
         self.hero.book_requested.connect(self.book_requested)
 
+        self.browse_filter = BrowseFilterBar()
+        self.browse_filter.browse_requested.connect(self._browse)
+        self.browse_filter.browse_all_requested.connect(self._browse_all)
+
         self.chips = ChipRow()
         self.chips.chip_selected.connect(self._open_chip)
 
@@ -691,6 +888,7 @@ class HomePage(QWidget):
         body.setSpacing(22)
         body.addWidget(self.error)
         body.addWidget(self.hero)
+        body.addWidget(self.browse_filter)
         body.addWidget(self.chips)
         body.addLayout(self.rows_layout)
         body.addStretch(1)
@@ -721,6 +919,7 @@ class HomePage(QWidget):
         self._sweep_timer.timeout.connect(self._sweep)
         self.dashboard.verticalScrollBar().valueChanged.connect(self._schedule_sweep)
 
+        self._sync_compact_hero()
         self.load()
 
     # ---------- data ----------
@@ -738,6 +937,7 @@ class HomePage(QWidget):
 
         self.error.hide()
         self._snapshot = snapshot
+        self.browse_filter.set_makes(vehicle_service.shop_makes(snapshot))
         self.hero.set_vehicles(vehicle_service.shop_hero(snapshot))
         self.chips.set_types(vehicle_service.shop_body_types(snapshot))
         self._build_rows(vehicle_service.shop_sections(snapshot))
@@ -775,6 +975,28 @@ class HomePage(QWidget):
         self._stack.setCurrentWidget(self.dashboard)
         self._schedule_sweep()
 
+    def _browse(self, filters: BrowseFilters) -> None:
+        """The Browse & Filter bar: one brand, an inclusive daily-rate range."""
+        items = vehicle_service.filter_shop_snapshot(
+            self._snapshot,
+            make=filters.make,
+            min_rate=filters.min_rate,
+            max_rate=filters.max_rate,
+        )
+        self._open_listing(
+            "Browse vehicles",
+            items,
+            "No vehicles match these filters. Try another brand or widen the "
+            "price range.",
+            summary=filters.describe(),
+        )
+
+    def _browse_all(self) -> None:
+        """Browse all ignores the controls and opens the whole showroom."""
+        self._open_listing(
+            "All vehicles", self._snapshot, "The showroom is empty right now."
+        )
+
     def _open_section(self, key: str) -> None:
         spec = vehicle_service.shop_section_spec(key)
         if spec is None:
@@ -798,8 +1020,12 @@ class HomePage(QWidget):
             spec.title, items, f"No {spec.title} available right now."
         )
 
-    def _open_listing(self, title: str, items, empty_text: str) -> None:
-        self.catalog.open_listing(title, items, empty_text=empty_text)
+    def _open_listing(
+        self, title: str, items, empty_text: str, *, summary: str = ""
+    ) -> None:
+        self.catalog.open_listing(
+            title, items, empty_text=empty_text, summary=summary
+        )
         self._stack.setCurrentWidget(self.catalog)
 
     # ---------- deferred photos ----------
@@ -819,12 +1045,18 @@ class HomePage(QWidget):
         self._pending = remaining
 
     # ---------- lifecycle ----------
+    def _sync_compact_hero(self) -> None:
+        """Give the filter bar room back when the window is short."""
+        self.hero.set_compact(self.height() < HERO_COMPACT_BELOW)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._sync_compact_hero()
         self._schedule_sweep()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_compact_hero()
         self._schedule_sweep()
 
     def _fail(self, message: str) -> None:
@@ -832,4 +1064,4 @@ class HomePage(QWidget):
         self.error.show()
 
 
-__all__ = ["HomePage"]
+__all__ = ["BrowseFilterBar", "BrowseFilters", "HomePage"]
