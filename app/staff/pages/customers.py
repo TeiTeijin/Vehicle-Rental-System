@@ -675,7 +675,7 @@ class CustomersPage(StaffPage):
     # -- overlay panels (no OS windows; same glass as bookings) ---------
 
     def _overlay_panel(self, panel: QWidget) -> object:
-        from app.staff.overlay import WARM_FROST, FrostedOverlay
+        from app.staff.overlay import FrostedOverlay
 
         if self._customer_overlay is not None:
             self._customer_overlay.hide_overlay()
@@ -688,7 +688,6 @@ class CustomersPage(StaffPage):
         overlay = FrostedOverlay(
             window if window is not None else self,
             card_width=card_width + 16,
-            backdrop_tint=WARM_FROST,
         )
         # The redesigned profile can be taller than a short window, so the
         # sheet scrolls instead of clipping its tabs or notes.

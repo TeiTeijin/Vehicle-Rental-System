@@ -3244,8 +3244,6 @@ class TestCustomersPage:
     def test_customer_form_modal_matches_the_warm_reference(
         self, qapp, shell, branch, monkeypatch
     ):
-        from app.staff.overlay import WARM_FROST
-
         import app.staff.pages.customers as module
 
         monkeypatch.setattr(module, "toast", lambda *a, **k: None)
@@ -3258,7 +3256,7 @@ class TestCustomersPage:
         try:
             qapp_process(page)
             assert overlay.scroll.width() >= 900
-            assert overlay._backdrop_tint == WARM_FROST
+            assert "rgba(23, 23, 23, 110)" in overlay.styleSheet()
             assert panel.card.width() == 900
             assert panel.eyebrow_label.text() == "NEW CUSTOMER"
             assert panel.title_label.text() == (
