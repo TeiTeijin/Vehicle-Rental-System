@@ -1619,7 +1619,7 @@ git push origin final-audit
 - Consumes: all `Finding` rows from Tasks 3–23.
 - Produces: fixed Critical/High findings, regression tests, and a prioritized backlog for Medium/Low.
 
-- [ ] **Step 1: Triage the register**
+- [x] **Step 1: Triage the register**
 
 Sort findings by severity. For each Critical/High, create a remediation row `R-###` with:
 - root cause
@@ -1629,7 +1629,7 @@ Sort findings by severity. For each Critical/High, create a remediation row `R-#
 - files to change
 - regression test name
 
-- [ ] **Step 2: Fix one finding at a time with TDD**
+- [x] **Step 2: Fix one finding at a time with TDD**
 
 For each Critical/High:
 1. Write the failing regression test.
@@ -1639,28 +1639,30 @@ For each Critical/High:
 5. Run the full suite.
 6. Commit and push.
 
-- [ ] **Step 3: Do not batch unrelated fixes**
+- [x] **Step 3: Do not batch unrelated fixes**
 
 Keep each commit scoped to one finding or one tightly related group. Update the register after each fix.
 
-- [ ] **Step 4: Decide Medium/Low disposition**
+- [x] **Step 4: Decide Medium/Low disposition**
 
 For each Medium/Low, record one of:
 - fixed now
 - deferred with owner and reason
 - waived with explicit user approval
 
-- [ ] **Step 5: Re-run the affected flow tasks**
+- [x] **Step 5: Re-run the affected flow tasks**
 
 After a fix, re-run the owning flow task's tests and evidence steps. Mark the finding `Fixed` only when the regression test and flow evidence pass.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add app tests docs/audits/final-audit-register.md docs/audits/final-audit-report.md
 git commit -m "fix: close final audit findings"
 git push origin final-audit
 ```
+
+**Task 24 disposition (2026-10-26):** F-005/F-006 fixed (`ad4e8ab`), F-007 fixed (`c21bc1b`), F-013 fixed (`bb1a169`), F-003 deferred/documented (legacy-SQLite-only). Full suite exit 0 (1289 collected, 1 skipped).
 
 **Exit criteria:** no open Critical/High findings; every fixed finding has a regression test; Medium/Low have a recorded disposition.
 
