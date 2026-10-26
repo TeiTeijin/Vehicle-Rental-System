@@ -505,7 +505,10 @@ class MaintenancePage(StaffPage):
             self._maintenance_overlay.deleteLater()
             self._maintenance_overlay = None
         window = self.window()
-        overlay = FrostedOverlay(window if window is not None else self)
+        overlay = FrostedOverlay(
+            window if window is not None else self,
+            card_width=getattr(panel, "sheet_width", 640),
+        )
         overlay.set_content(panel)
         overlay.show_overlay()
         self._maintenance_overlay = overlay

@@ -555,3 +555,264 @@ def test_maintenance_both_tables_are_warm(maintenance_page):
     assert page.due._table.property("variant") == "warm"
     assert page.table.state is LoadState.LOADED
     assert page.due.state in (LoadState.LOADED, LoadState.EMPTY)
+
+
+# --------------------------------------------------------------------------
+# Maintenance action modals
+# --------------------------------------------------------------------------
+
+
+def test_maintenance_history_modal_is_a_warm_540_sheet(qapp, branch):
+    """History keeps every row and opens on the 540px reference sheet."""
+    from PySide6.QtWidgets import QLabel
+
+    from app.staff.maintenance_panels import HistoryPanel
+    from app.staff.tables import TableChip
+
+    built, context = branch
+    with context.session() as session:
+        session.add(
+            Maintenance_Record(
+                vehicle_id=built.shop_car.vehicle_id,
+                description="Battery replacement",
+                maintenance_type="repair",
+                start_date=TODAY - timedelta(days=30),
+                end_date=TODAY - timedelta(days=29),
+                cost=Decimal("5500.00"),
+                status="completed",
+                shop="Wheels Inc",
+                next_due_date=TODAY + timedelta(days=90),
+                next_due_odometer=71_000,
+            )
+        )
+
+    panel = HistoryPanel(context, built.shop_car.vehicle_id)
+    try:
+        assert panel.sheet_width == 540
+        assert panel.card.width() == 540
+        assert panel.eyebrow_label.text() == "HISTORY"
+        assert built.shop_car.plate_number in panel.title_label.text()
+        assert panel.subtitle_label.text() == (
+            "Every maintenance record for this vehicle"
+        )
+        records = panel.records_tile.findChild(
+            QLabel, "maintenanceMetricValue"
+        )
+        spent = panel.spent_tile.findChild(QLabel, "maintenanceMetricValue")
+        assert records.text() == "2"
+        assert spent.text() == "₱10,000.00"
+        assert all(
+            card.objectName() == "maintenanceRecordCard"
+            for card in panel.cards
+        )
+        texts = [
+            label.text()
+            for card in panel.cards
+            for label in card.findChildren(QLabel)
+        ]
+        assert "Tire / brake" in texts
+        assert "In progress" in texts
+        assert "Repair" in texts
+        assert any("Next due:" in text and "71,000 km" in text for text in texts)
+        assert "Shop: Wheels Inc" in texts
+        chips = [
+            chip
+            for card in panel.cards
+            for chip in card.findChildren(TableChip)
+        ]
+        assert {chip.text() for chip in chips} == {"In progress", "Completed"}
+        assert {chip.property("tone") for chip in chips} == {"warn", "ok"}
+        assert panel.close_button.objectName() == "modalPrimary"
+
+        closed: list[bool] = []
+        panel.closed.connect(lambda: closed.append(True))
+        panel.close_button.click()
+        assert closed == [True]
+    finally:
+        panel.deleteLater()
+
+
+def test_log_maintenance_modal_is_a_warm_900_sheet_and_keeps_contract(
+    qapp, branch
+):
+    """The wide form keeps every field, the amber clash, and the payload."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from app.services import booking_service
+    from app.staff.maintenance_panels import RecordPanel
+
+    built, context = branch
+    with context.session() as session:
+        customer = session.get(Users, built.customer.user_id)
+        car = session.get(Vehicle, built.free_car.vehicle_id)
+        booking = booking_service.create_booking(
+            session, customer, car, TODAY, TODAY + timedelta(days=3)
+        )
+        booking_id = booking.booking_id
+
+    panel = RecordPanel(context)
+    try:
+        assert panel.sheet_width == 900
+        assert panel.card.width() == 900
+        assert panel.eyebrow_label.text() == "Log maintenance"
+        assert panel.title_label.text() == "Put a vehicle in the shop."
+        assert panel.subtitle_label.text() == (
+            "Block the dates so no new booking can land on this vehicle."
+        )
+        assert panel.summary_panel.objectName() == "maintenanceSummary"
+        assert panel.clash_panel.objectName() == "maintenanceNotice"
+        for name in (
+            "vehicle_combo",
+            "type_combo",
+            "status_combo",
+            "start_edit",
+            "open_check",
+            "end_edit",
+            "estimate_edit",
+            "odometer_edit",
+            "shop_edit",
+            "booking_edit",
+            "description_edit",
+            "clash_note",
+        ):
+            assert hasattr(panel, name), name
+
+        index = next(
+            i
+            for i, (vid, _label) in enumerate(panel._vehicles)
+            if vid == built.free_car.vehicle_id
+        )
+        panel.vehicle_combo.setCurrentIndex(index)
+        assert panel.summary_values["type"].text() == "Routine service"
+        assert panel.summary_values["status"].text() == "Scheduled"
+        assert panel.summary_values["ends"].text() == "Open-ended"
+        assert panel.clash_panel.isHidden() is False
+        assert f"#{booking_id}" in panel.clash_note.text()
+
+        panel.status_combo.setCurrentIndex(1)  # In Progress
+        panel.description_edit.setText("Oil change")
+        panel.estimate_edit.setText("3,000.00")
+        panel.odometer_edit.setValue(48_200)
+        panel.shop_edit.setText("Shop")
+        panel.booking_edit.setText("#343")
+
+        submitted: list[dict] = []
+        cancelled: list[bool] = []
+        panel.submitted.connect(submitted.append)
+        panel.cancelled.connect(lambda: cancelled.append(True))
+        panel._on_go()
+
+        assert len(submitted) == 1
+        values = submitted[0]
+        assert values == {
+            "vehicle_id": built.free_car.vehicle_id,
+            "maintenance_type": "routine",
+            "status": "in_progress",
+            "start_date": panel.start_edit.date().toPython(),
+            "end_date": None,
+            "estimate_cost": Decimal("3000.00"),
+            "odometer": 48_200,
+            "shop": "Shop",
+            "booking_id": 343,
+            "description": "Oil change",
+        }
+
+        panel.description_edit.clear()
+        panel._on_go()
+        assert len(submitted) == 1
+        assert panel._error.text() == "Describe the work first."
+        assert panel._error.isHidden() is False
+
+        back = next(
+            button
+            for button in panel.findChildren(QPushButton)
+            if button.text() == "Back"
+        )
+        back.click()
+        assert cancelled == [True]
+    finally:
+        panel.deleteLater()
+
+
+def test_mark_completed_modal_is_a_warm_540_sheet_and_keeps_payload(qapp):
+    from PySide6.QtWidgets import QPushButton
+
+    from app.staff.maintenance_panels import CompletePanel
+
+    panel = CompletePanel(
+        "DEM-201 · Wheel alignment", Decimal("2000.00")
+    )
+    try:
+        assert panel.sheet_width == 540
+        assert panel.card.width() == 540
+        assert panel.eyebrow_label.text() == "MARK COMPLETED"
+        assert panel.title_label.text() == "Close out the job"
+        assert "Quoted ₱2,000.00" in panel.subtitle_label.text()
+        assert panel.cost_edit.text() == "2,000.00"
+        assert panel.next_panel.objectName() == "maintenanceNextPanel"
+        for name in (
+            "end_edit",
+            "cost_edit",
+            "odometer_edit",
+            "due_date_check",
+            "due_date_edit",
+            "due_km_check",
+            "due_km_edit",
+        ):
+            assert hasattr(panel, name), name
+        assert panel.due_date_edit.isEnabled() is False
+        assert panel.due_km_edit.isEnabled() is False
+        panel.due_date_check.setChecked(True)
+        assert panel.due_date_edit.isEnabled() is True
+        panel.odometer_edit.setValue(48_200)
+
+        submitted: list[dict] = []
+        cancelled: list[bool] = []
+        panel.submitted.connect(submitted.append)
+        panel.cancelled.connect(lambda: cancelled.append(True))
+        panel._on_go()
+
+        assert len(submitted) == 1
+        values = submitted[0]
+        assert values["end_date"] == panel.end_edit.date().toPython()
+        assert values["cost"] == Decimal("2000.00")
+        assert values["odometer"] == 48_200
+        assert values["next_due_date"] is not None
+        assert values["next_due_odometer"] is None
+
+        panel.cost_edit.clear()
+        panel._on_go()
+        assert len(submitted) == 1
+        assert "Final cost must be a number" in panel._error.text()
+        assert panel._error.isHidden() is False
+
+        back = next(
+            button
+            for button in panel.findChildren(QPushButton)
+            if button.text() == "Back"
+        )
+        back.click()
+        assert cancelled == [True]
+    finally:
+        panel.deleteLater()
+
+
+def test_maintenance_action_overlays_use_the_reference_widths(maintenance_page):
+    from app.staff.maintenance_panels import HistoryPanel, RecordPanel
+
+    page = maintenance_page
+    row = _select_row(page.table, 3, "Brake pads")
+
+    assert page.open_history() is True
+    assert page._maintenance_overlay.scroll.width() == 540
+    assert isinstance(
+        page._maintenance_overlay.scroll.widget(), HistoryPanel
+    )
+
+    assert page.open_add() is True
+    assert page._maintenance_overlay.scroll.width() == 900
+    assert isinstance(page._maintenance_overlay.scroll.widget(), RecordPanel)
+
+    page.table.table.selectRow(row)
+    assert page.open_complete() is True
+    assert page._maintenance_overlay.scroll.width() == 540

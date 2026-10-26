@@ -2333,3 +2333,267 @@ QPushButton#choiceChip[variant="reason"] {
 QPushButton#warmCheck {
     min-height: 30px;
 }
+
+/* ======================================================================
+   MAINTENANCE ACTION MODALS
+   Warm 540px History / Mark completed sheets and the 900px Log maintenance
+   sheet. Scoped to #maintenanceSheet so the list page, the rental wizard,
+   and every other modal keep their existing measurements.
+   ====================================================================== */
+
+QWidget#maintenanceSheet,
+QWidget#maintenanceSheetHeader,
+QWidget#maintenanceSheetBody,
+QWidget#maintenanceColumn,
+QWidget#maintenanceRightColumn,
+QWidget#maintenanceFieldHost,
+QWidget#maintenanceSummaryRow {
+    background: transparent;
+    border: none;
+}
+
+QFrame#maintenanceCard {
+    background: transparent;
+    border: none;
+    border-radius: 18px;
+}
+
+QLabel#maintenanceEyebrow {
+    background: #F0E6D5;
+    border-radius: 11px;
+    color: #6B5E4F;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 12px;
+}
+
+QLabel#maintenanceEyebrowPlain {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QLabel#maintenanceTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceTitle[large="true"] {
+    font-size: 30px;
+}
+
+QLabel#maintenanceSubtitle {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#maintenanceDivider {
+    background: #EFE8DD;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QFrame#maintenanceFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F1EAE0;
+}
+
+QLabel#maintenanceError {
+    background: #F8E0DC;
+    border-radius: 8px;
+    color: #9B2C1F;
+    font-size: 12px;
+    padding: 8px 12px;
+}
+
+QLabel#maintenanceSectionLabel {
+    background: transparent;
+    color: #7A6F61;
+}
+
+QLabel#maintenanceFieldSuffix,
+QLabel#maintenanceFieldOptional {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+/* -- History metrics and cards --------------------------------------- */
+
+QFrame#maintenanceMetricTile {
+    background: #F3EAD9;
+    border: none;
+    border-radius: 14px;
+}
+
+QLabel#maintenanceMetricLabel {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#maintenanceMetricValue {
+    background: transparent;
+    color: #171717;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QFrame#maintenanceRecordCard {
+    background: #FFFFFF;
+    border: 1px solid #E4D9CA;
+    border-radius: 14px;
+}
+
+QLabel#maintenanceRecordType {
+    background: transparent;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceRecordMeta,
+QLabel#maintenanceRecordDue {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#maintenanceRecordBody {
+    background: transparent;
+    color: #171717;
+    font-size: 14px;
+}
+
+/* -- Log maintenance ------------------------------------------------- */
+
+QWidget#maintenanceSheet QLineEdit#warmInput,
+QWidget#maintenanceSheet QDateEdit#warmInput,
+QWidget#maintenanceSheet QComboBox#warmInput,
+QWidget#maintenanceSheet QSpinBox#warmInput {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 12px;
+    color: #171717;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+QWidget#maintenanceSheet QLineEdit#warmInput:focus,
+QWidget#maintenanceSheet QDateEdit#warmInput:focus,
+QWidget#maintenanceSheet QComboBox#warmInput:focus,
+QWidget#maintenanceSheet QSpinBox#warmInput:focus {
+    border-color: #171717;
+}
+
+QWidget#maintenanceSheet QDateEdit#warmInput::drop-down,
+QWidget#maintenanceSheet QComboBox#warmInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+QLabel#maintenanceEndPlaceholder {
+    background: #F8F1E5;
+    border: 1px dashed #D7C7B0;
+    border-radius: 12px;
+    color: #8B7F70;
+    font-size: 14px;
+    padding: 0 14px;
+}
+QFrame#maintenanceSummary {
+    background: #F3EAD9;
+    border: none;
+    border-radius: 16px;
+}
+
+QLabel#maintenanceSummaryTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceSummaryValue {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QFrame#maintenanceSummaryRule {
+    background: #E9DDCB;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QFrame#maintenanceNotice {
+    background: #FAE7C8;
+    border: none;
+    border-radius: 16px;
+}
+
+QLabel#maintenanceNoticeTitle {
+    background: transparent;
+    color: #5F4413;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceNoticeText {
+    background: transparent;
+    color: #5F4413;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+/* -- Mark completed: optional next service --------------------------- */
+
+QFrame#maintenanceNextPanel {
+    background: #F3EAD9;
+    border: none;
+    border-radius: 16px;
+}
+
+QWidget#maintenanceSheet QDateEdit#nextServiceInput,
+QWidget#maintenanceSheet QSpinBox#nextServiceInput {
+    background: #F8F1E5;
+    border: 1px solid #E3D5C2;
+    border-radius: 12px;
+    color: #171717;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+QWidget#maintenanceSheet QDateEdit#nextServiceInput:disabled,
+QWidget#maintenanceSheet QSpinBox#nextServiceInput:disabled {
+    background: #F8F1E5;
+    border: 1px dashed #D7C7B0;
+    color: #6B5E4F;
+}
+
+QWidget#maintenanceSheet QDateEdit#nextServiceInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+QWidget#maintenanceSheet QSpinBox#nextServiceInput::up-button,
+QWidget#maintenanceSheet QSpinBox#nextServiceInput::down-button {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
