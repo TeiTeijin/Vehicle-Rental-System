@@ -31,6 +31,7 @@ from datetime import datetime
 from decimal import Decimal
 from math import ceil
 
+from app.domain.pricing import PricingPolicy, policy_from_settings
 from app.services.errors import ValidationError
 from app.utils.money import PESO_SIGN, ZERO, money, pesos
 
@@ -146,11 +147,28 @@ def rental_days(pickup_dt: datetime, return_dt: datetime) -> int:
     return measure(pickup_dt, return_dt).billed_days
 
 
-def quote(daily_rate, pickup_dt: datetime, return_dt: datetime) -> Quote:
-    """Price one rental end to end. The only money function the UI calls."""
+def quote(
+    daily_rate,
+    pickup_dt: datetime,
+    return_dt: datetime,
+    *,
+    policy: PricingPolicy | None = None,
+    motorcycle: bool = False,
+) -> Quote:
+    """Price one rental end to end. The only money function the UI calls.
+
+    The online and counter paths must apply the same branch policy: long-term
+    car rentals get the configured discount and motorcycles get the configured
+    multiplier. The fee schedule and VAT stay online-only add-ons.
+    """
     duration = measure(pickup_dt, return_dt)
     rate = money(daily_rate, field="daily_rate")
     subtotal = money(rate * duration.billed_days, field="subtotal")
+    rules = policy or PricingPolicy()
+    if motorcycle:
+        subtotal = money(subtotal * rules.moto_multiplier, field="subtotal")
+    elif duration.billed_days >= rules.long_term_days:
+        subtotal = money(subtotal * rules.long_term_discount, field="subtotal")
     net = money(subtotal + INSURANCE_FEE + SERVICE_FEE, field="net")
     vat = money(net * VAT_RATE, field="vat")
     return Quote(
@@ -161,6 +179,28 @@ def quote(daily_rate, pickup_dt: datetime, return_dt: datetime) -> Quote:
         service_fee=SERVICE_FEE,
         vat=vat,
         total=money(net + vat, field="total"),
+    )
+
+
+def is_motorcycle(vehicle) -> bool:
+    """True when the fleet category is Motorcycle."""
+    category = getattr(vehicle, "category", None)
+    return bool(
+        category is not None
+        and getattr(category, "category_name", None) == "Motorcycle"
+    )
+
+
+def quote_for_vehicle(
+    session, vehicle, pickup_dt: datetime, return_dt: datetime
+) -> Quote:
+    """The online quote for one vehicle, using the branch's live policy."""
+    return quote(
+        vehicle.daily_rate,
+        pickup_dt,
+        return_dt,
+        policy=policy_from_settings(session),
+        motorcycle=is_motorcycle(vehicle),
     )
 
 

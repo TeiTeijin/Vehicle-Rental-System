@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.database import SessionLocal
+from app.domain.pricing import policy_from_settings
 from app.models import Branch, Vehicle
 from app.services import (
     booking_service,
@@ -116,6 +117,8 @@ class BookingSchedulePage(QWidget):
         self._branches: list[BranchChoice] = []
         self._blocked: set[date] = set()
         self._rate = 0
+        self._policy = None
+        self._motorcycle = False
         self._ref = None
         self._name = ""
         self._focus = "pickup"
@@ -316,6 +319,8 @@ class BookingSchedulePage(QWidget):
                     return
                 self._name = vehicle_service.display_name(vehicle)
                 self._rate = vehicle.daily_rate
+                self._policy = policy_from_settings(session)
+                self._motorcycle = pricing.is_motorcycle(vehicle)
                 self._ref = vehicle_photos.ref_for(vehicle)
                 self._specs = vehicle_service.summary_line(vehicle)
                 branches = branch_service.active_branches(session)
@@ -531,7 +536,13 @@ class BookingSchedulePage(QWidget):
             self._clear_rows()
             return
 
-        quote = pricing.quote(self._rate, pickup_dt, return_dt)
+        quote = pricing.quote(
+            self._rate,
+            pickup_dt,
+            return_dt,
+            policy=self._policy,
+            motorcycle=self._motorcycle,
+        )
         self._set_error(None)
         self.duration_label.setText(
             f"{quote.duration.label} \u00b7 {quote.days_label}"

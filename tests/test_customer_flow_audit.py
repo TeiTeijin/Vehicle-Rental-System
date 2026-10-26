@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from decimal import Decimal
 
 import pytest
 
@@ -14,6 +15,7 @@ from app.services import (
     notification_service,
     payment_service,
     profile_service,
+    settings_service,
 )
 from app.services.errors import ConflictError, PermissionDenied
 
@@ -88,6 +90,43 @@ def test_online_booking_works_for_an_eligible_customer(
     assert booking.channel == "online"
     assert booking.user_id == customer.user_id
     assert booking.pickup_branch_id == branch.branch_id
+
+
+def test_online_booking_applies_long_term_discount(
+    session, customer, vehicle, branch
+):
+    settings_service.set_value(session, "long_term_days", "7")
+    settings_service.set_value(session, "long_term_discount", "0.90")
+
+    booking = _book(
+        session,
+        customer,
+        vehicle,
+        branch,
+        pickup_dt=datetime(2026, 9, 1, 10, 0),
+        return_dt=datetime(2026, 9, 8, 10, 0),
+    )
+
+    assert booking.subtotal == Decimal("15750.00")
+    assert booking.total == Decimal("19510.40")
+
+
+def test_online_booking_applies_motorcycle_multiplier(
+    session, customer, moto, branch
+):
+    settings_service.set_value(session, "moto_multiplier", "0.70")
+
+    booking = _book(
+        session,
+        customer,
+        moto,
+        branch,
+        pickup_dt=datetime(2026, 9, 1, 10, 0),
+        return_dt=datetime(2026, 9, 3, 10, 0),
+    )
+
+    assert booking.subtotal == Decimal("3500.00")
+    assert booking.total == Decimal("5790.40")
 
 
 def test_signed_in_customer_sees_the_booking_receipt_and_profile_counts(

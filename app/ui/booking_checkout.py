@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.database import SessionLocal
+from app.domain.pricing import policy_from_settings
 from app.models import Branch, Users, Vehicle
 from app.services import (
     booking_service,
@@ -438,6 +439,8 @@ class BookingCheckoutPage(QWidget):
         self._name = ""
         self._meta = ""
         self._rate = 0
+        self._policy = None
+        self._motorcycle = False
         self._ref = None
         self._pickup_branch = "\u2014"
         self._return_branch = "\u2014"
@@ -770,6 +773,8 @@ class BookingCheckoutPage(QWidget):
                 self._name = vehicle_service.display_name(vehicle)
                 self._meta = vehicle_service.summary_line(vehicle)
                 self._rate = vehicle.daily_rate
+                self._policy = policy_from_settings(session)
+                self._motorcycle = pricing.is_motorcycle(vehicle)
                 self._ref = vehicle_photos.ref_for(vehicle)
 
                 pickup_branch = session.get(Branch, self.draft.pickup_branch_id)
@@ -812,7 +817,13 @@ class BookingCheckoutPage(QWidget):
             self._fail("Pickup and return dates are missing: go back a step.")
             return
         try:
-            self._quote = pricing.quote(self._rate, pickup_dt, return_dt)
+            self._quote = pricing.quote(
+                self._rate,
+                pickup_dt,
+                return_dt,
+                policy=self._policy,
+                motorcycle=self._motorcycle,
+            )
         except ServiceError as exc:
             self._fail(str(exc))
             return
@@ -943,8 +954,8 @@ class BookingCheckoutPage(QWidget):
             if vehicle is None or user is None or pickup_branch is None:
                 raise ServiceError("This booking is missing its vehicle or branch.")
 
-            quote = pricing.quote(
-                vehicle.daily_rate, self.draft.pickup_dt, self.draft.return_dt
+            quote = pricing.quote_for_vehicle(
+                session, vehicle, self.draft.pickup_dt, self.draft.return_dt
             )
             result = card_validation.collect(
                 method,

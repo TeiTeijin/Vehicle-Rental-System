@@ -1186,7 +1186,7 @@ def create_online_booking(
     assert_window_free(session, vehicle, pickup_dt, return_dt)
 
     drop_branch = return_branch or pickup_branch
-    quote = pricing.quote(vehicle.daily_rate, pickup_dt, return_dt)
+    quote = pricing.quote_for_vehicle(session, vehicle, pickup_dt, return_dt)
     prepaid = payment_method in ("card", "gcash")
 
     booking = Booking(
