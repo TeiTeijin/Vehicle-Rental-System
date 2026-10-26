@@ -2278,7 +2278,7 @@ class TestFleetPage:
         import app.staff.pages.fleet as module
 
         monkeypatch.setattr(module, "toast", lambda *a, **k: None)
-        monkeypatch.setattr(module, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(module, "confirm_modal", lambda *a, **k: True)
         built, _context = branch
         page = FleetPage(shell)
         page.refresh()
@@ -2307,6 +2307,115 @@ class TestFleetPage:
             for r in range(page.table.row_count())
         }
         assert by_plate["FREE-001"] == "Available"
+
+    def test_retire_confirmation_uses_the_warm_modal(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.fleet as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        calls = []
+
+        def _confirm(_parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(module, "confirm_modal", _confirm)
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        for row in range(page.table.row_count()):
+            if page.table.cell_text(row, 0) == "FREE-001":
+                page.table.table.selectRow(row)
+                break
+        page._on_retire_button()
+        _wait_for_fleet(page)
+
+        question, options = calls[0]
+        assert question == "Retire FREE-001?"
+        assert options["confirm_text"] == "Retire vehicle"
+        assert options["destructive"] is True
+        assert options["pref"] == "behavior/confirm_retire"
+
+        for row in range(page.table.row_count()):
+            if page.table.cell_text(row, 0) == "FREE-001":
+                page.table.table.selectRow(row)
+                break
+        page._on_retire_button()
+        _wait_for_fleet(page)
+
+        question, options = calls[1]
+        assert question == "Return FREE-001 to service?"
+        assert options["confirm_text"] == "Return to service"
+        assert options["pref"] == "behavior/confirm_retire"
+        assert "destructive" not in options
+
+    def test_add_vehicle_uses_the_900px_warm_sheet(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.fleet as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        assert page.open_add() is True
+        overlay = page._fleet_overlay
+        panel = overlay.scroll.widget()
+
+        assert overlay.scroll.width() == 900
+        assert panel.card.width() == 900
+        assert panel.card.objectName() == "fleetModalCard"
+        assert panel.eyebrow_label.text() == "ADD VEHICLE"
+        assert panel.title_label.text() == "Plate, specs, rate and paperwork"
+        assert "Required" in panel.subtitle_label.text()
+        assert panel._preview.rows["Plate"].text() == "ABC-123"
+        assert panel.footer.isHidden() is False
+
+        panel.plate_edit.setText("NEW-900")
+        panel.category_chips.buttons["Motorcycle"].click()
+        panel.fuel_chips.buttons["Diesel"].click()
+
+        assert panel._preview.rows["Plate"].text() == "NEW-900"
+        assert panel.category_combo.currentText() == "Motorcycle"
+        assert panel.fuel_combo.currentText() == "Diesel"
+        assert panel.category_combo.isHidden() is True
+        assert panel.category_chips.buttons["Motorcycle"].isChecked() is True
+
+    def test_details_panel_uses_the_900px_warm_sheet(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.fleet_panels as panels_mod
+
+        monkeypatch.setattr(
+            panels_mod.media_service, "get_or_fetch_media", lambda *a, **k: []
+        )
+        page = FleetPage(shell)
+        page.refresh()
+        _wait_for_fleet(page)
+        for row in range(page.table.row_count()):
+            if page.table.cell_text(row, 0) == "FREE-001":
+                page.table.table.selectRow(row)
+                break
+        assert page.open_details() is True
+        overlay = page._fleet_overlay
+        panel = overlay.scroll.widget()
+        panel._pool.waitForDone(15000)
+        qapp_process(panel)
+
+        assert overlay.scroll.width() == 900
+        assert panel.card.width() == 900
+        assert panel.card.objectName() == "fleetModalCard"
+        assert panel.eyebrow_label.text() == f"VEHICLE #{panel._vehicle_id}"
+        assert panel.title_label.text()
+        assert panel.status_host.count() == 1
+        assert panel.edit_button.text() == "Edit"
+        assert panel.close_button.text() == "Close"
+        assert panel._hero.objectName() == "fleetHero"
+        assert panel._viewer_host is not None
+        assert panel._util_bar is not None
+        assert panel._window_buttons[30].isChecked() is True
+        assert panel._body.count() > 5
 
     def test_bulk_rate_preview_and_apply(self, shell, branch, monkeypatch):
         import app.staff.pages.fleet as module
@@ -2350,7 +2459,7 @@ class TestFleetPage:
             and hasattr(panel._body.itemAt(i).widget(), "text")
         ]
         joined = "\n".join(texts)
-        assert "Utilization" in joined
+        assert "UTILIZATION" in joined
         assert "All-time" in panel._stats_caption.text()
         assert "Rented" in panel._stats_caption.text()
         panel.deleteLater()
@@ -3047,7 +3156,7 @@ class TestCustomersPage:
         import app.staff.pages.customers as module
 
         monkeypatch.setattr(module, "toast", lambda *a, **k: None)
-        monkeypatch.setattr(module, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(module, "confirm_modal", lambda *a, **k: True)
         page = CustomersPage(shell)
         page.refresh()
         self._select(page, "Soon Lapsed")
@@ -3059,6 +3168,196 @@ class TestCustomersPage:
             for r in range(page.table.row_count())
         }
         assert off["Soon Lapsed"] == "Yes"
+
+    def test_deactivate_uses_the_warm_confirm_modal(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        calls = []
+
+        def _confirm(parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(module, "confirm_modal", _confirm)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Soon Lapsed")
+        page._on_deactivate_button()
+        _wait_for_customers(page)
+
+        assert calls, "the warm confirmation must be shown"
+        question, kwargs = calls[-1]
+        assert question == "Deactivate soon@example.com?"
+        assert kwargs["destructive"] is True
+        assert kwargs["confirm_text"] == "Deactivate customer"
+        assert kwargs["pref"] == "behavior/confirm_deactivate"
+        assert "history" in kwargs["detail"]
+        off = {
+            page.table.cell_text(r, 0): page.table.cell_text(r, 10)
+            for r in range(page.table.row_count())
+        }
+        assert off["Soon Lapsed"] == "Yes"
+
+    def test_reactivate_uses_the_warm_confirm_modal(
+        self, shell, branch, monkeypatch
+    ):
+        from app.services import customer_service
+
+        import app.staff.pages.customers as module
+
+        _built, context = branch
+        with context.session() as session:
+            customer = session.query(Users).filter_by(
+                email="soon@example.com"
+            ).one()
+            customer_service.deactivate_customer(session, customer)
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        calls = []
+
+        def _confirm(parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(module, "confirm_modal", _confirm)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Soon Lapsed")
+        assert page.deactivate_button.text() == "Reactivate"
+        page._on_deactivate_button()
+        _wait_for_customers(page)
+
+        assert calls, "the warm confirmation must be shown"
+        question, kwargs = calls[-1]
+        assert question == "Reactivate soon@example.com?"
+        assert kwargs["confirm_text"] == "Reactivate customer"
+        assert kwargs.get("destructive", False) is False
+        assert kwargs["pref"] == "behavior/confirm_deactivate"
+        off = {
+            page.table.cell_text(r, 0): page.table.cell_text(r, 10)
+            for r in range(page.table.row_count())
+        }
+        assert off["Soon Lapsed"] == "No"
+
+    def test_customer_form_modal_matches_the_warm_reference(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = CustomersPage(shell)
+        page.refresh()
+        _wait_for_customers(page)
+        assert page.open_add() is True
+        overlay = page._customer_overlay
+        panel = overlay.scroll.widget()
+        try:
+            qapp_process(page)
+            assert overlay.scroll.width() >= 900
+            assert "rgba(23, 23, 23, 110)" in overlay.styleSheet()
+            assert panel.card.width() == 900
+            assert panel.eyebrow_label.text() == "NEW CUSTOMER"
+            assert panel.title_label.text() == (
+                "Identity, licence and how to reach them"
+            )
+            assert panel.preview_panel.objectName() == "customerPreview"
+            assert panel.preview_name.text() == "New customer"
+            assert panel.preview_avatar.text() == "NC"
+            assert panel.front_button.objectName() == "docBox"
+            assert panel.back_button.objectName() == "docBox"
+            assert set(panel.source_chips) == {"walk_in", "online"}
+            assert panel.source_combo.isHidden() is True
+            assert panel.source_chips["walk_in"].isChecked() is True
+            assert panel.footer.isVisibleTo(panel) is True
+            assert panel._go.text() == "Save customer"
+            # Every existing input still has its named attribute.
+            for edit in (
+                panel.name_edit,
+                panel.email_edit,
+                panel.phone_edit,
+                panel.address_edit,
+                panel.emergency_edit,
+                panel.licence_edit,
+            ):
+                assert edit.objectName() == "customerInput"
+            panel.name_edit.setText("Maria Santos")
+            assert panel.preview_name.text() == "Maria Santos"
+            assert panel.preview_avatar.text() == "MS"
+        finally:
+            page._hide_overlay()
+
+    def test_customer_profile_modal_has_summary_and_tabs(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from PySide6.QtWidgets import QFrame, QPushButton
+
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Ana Reyes")
+        assert page.open_details() is True
+        overlay = page._customer_overlay
+        details = overlay.scroll.widget()
+        try:
+            qapp_process(page)
+            assert overlay.scroll.width() >= 900
+            assert details.card.width() == 900
+            assert details.tabs.count() == 3
+            assert [
+                details.tabs.tabText(i) for i in range(3)
+            ][:2] == ["Bookings", "Payments"]
+            assert details.tabs.tabText(2).startswith("Incidents")
+            metrics = details.findChildren(QFrame, "customerMetricTile")
+            assert len(metrics) == 4
+            assert details.owed_banner.objectName() == "customerOwedBanner"
+            assert len(details.findChildren(QPushButton, "docBox")) == 2
+            assert details.note_edit.placeholderText().startswith("Add a note")
+            assert details.edit_button.text() == "Edit"
+            assert details.close_button.text() == "Close"
+            assert details.rental_button.text() == "New rental"
+            assert details.footer.isVisibleTo(details) is True
+        finally:
+            page._hide_overlay()
+
+    def test_settle_modal_uses_split_booking_cards(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from app.services import payment_service
+
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Ana Reyes")
+        assert page.open_settle() is True
+        overlay = page._customer_overlay
+        panel = overlay.scroll.widget()
+        try:
+            qapp_process(page)
+            assert overlay.scroll.width() >= 980
+            assert panel.card.width() == 980
+            assert panel._unpaid
+            assert len(panel._buttons_map) == len(panel._unpaid)
+            assert panel.method_combo.isHidden() is True
+            assert set(panel.method_chips) == set(payment_service.METHODS)
+            assert panel.pay_all_button.text().startswith("Pay all")
+            total = sum(owed for _bid, owed in panel._unpaid)
+            panel.amount_edit.setText(f"{total:,.2f}")
+            assert panel.preview.text()
+            assert all(
+                button.coverage_label.text().endswith("paid in full")
+                for button in panel._buttons_map.values()
+            )
+            assert panel.recording_row[0].text() == "Recording now"
+            assert f"{total:,.2f}" in panel.recording_row[1].text()
+            assert panel._go.text().startswith("Record payment · ₱")
+        finally:
+            page._hide_overlay()
 
     def test_settle_cascades_across_bookings(self, shell, branch, monkeypatch):
         import app.staff.pages.customers as module
@@ -3590,9 +3889,94 @@ class TestPaymentsPage:
         bookings = BookingsPage(shell)
         assert page._tools_panel.objectName() == bookings._tools_panel.objectName()
         assert page.body.spacing() == bookings.body.spacing()
-        # Even split: both ledger boxes share the leftover height equally.
-        assert page.body.stretch(page.body.indexOf(page._takings_panel)) == 1
-        assert page.body.stretch(page.body.indexOf(page._outstanding_panel)) == 1
+        # Reference proportions: All payments is the taller card (6:5).
+        assert page.body.stretch(page.body.indexOf(page._takings_panel)) == 6
+        assert page.body.stretch(page.body.indexOf(page._outstanding_panel)) == 5
+
+    def test_view_booking_opens_the_booking_details(self, shell, branch):
+        built, _context = branch
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+        for row in range(page.outstanding.row_count()):
+            if page.outstanding.cell_text(row, 0) == f"#{built.overdue.booking_id}":
+                page.outstanding.table.selectRow(row)
+                break
+        else:  # pragma: no cover - guards the fixture
+            raise AssertionError("overdue booking not outstanding")
+
+        assert page._on_view_booking() is True
+        assert shell.current_page_key == "bookings"
+        bookings = shell._page_widgets["bookings"]
+        assert bookings._booking_overlay is not None
+        from app.staff.booking_panels import BookingDetailsPanel
+
+        panel = bookings._booking_overlay.findChild(BookingDetailsPanel)
+        assert panel is not None
+
+    def test_a_payment_row_enables_collect_and_view(self, shell, branch):
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+        page.takings.table.selectRow(0)
+        assert page.selected_booking_id() is not None
+        assert page.collect_button.isEnabled() is True
+        assert page.view_booking_button.isEnabled() is True
+        summary = page.selection_bar.summary_label.text()
+        assert "Ref" in summary
+        assert page.takings.cell_text(0, 2) in summary
+
+    def test_load_more_grows_each_cards_own_cap(self, shell, branch):
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+
+        outstanding_cap_before = page._outstanding_cap
+        takings_rows = page.takings.row_count()
+        page._takings_cap = takings_rows
+        page._update_takings_footer(takings_rows)
+        assert page.takings_load_more.isHidden() is False
+        page.takings_load_more.click()
+        _wait_for_payments(page)
+        assert page._takings_cap == takings_rows + 50
+        assert page.takings_footer_count.text().endswith(
+            f"of {takings_rows + 50}"
+        )
+        # Still more cap available, so the button stays (reference footers
+        # always offer the next page); it disappears at the hard ceiling.
+        assert page.takings_load_more.isHidden() is False
+        # Outstanding keeps its own cap: growing one card never reloads the
+        # other with the wrong page size.
+        assert page._outstanding_cap == outstanding_cap_before
+
+        outstanding_rows = page.outstanding.row_count()
+        page._outstanding_cap = outstanding_rows
+        page._update_outstanding_footer(outstanding_rows)
+        assert page.outstanding_load_more.isHidden() is False
+        page.outstanding_load_more.click()
+        _wait_for_payments(page)
+        assert page._outstanding_cap == outstanding_rows + 50
+        assert page.outstanding_load_more.isHidden() is False
+        assert page._takings_cap == takings_rows + 50
+        # The ceiling hides the button instead of offering a no-op press.
+        page._outstanding_cap = 500
+        page._update_outstanding_footer(outstanding_rows)
+        assert page.outstanding_load_more.isHidden() is True
+
+    def test_the_page_fits_at_1440x1000(self, shell, branch, qapp):
+        shell._on_signed_in(shell.context.user)
+        shell.resize(1440, 1000)
+        shell.show()
+        assert shell.show_page("payments") is True
+        page = shell._page_widgets["payments"]
+        _wait_for_payments(page)
+        qapp_process(shell)
+        qapp_process(page)
+        assert page.scroll_area.verticalScrollBar().maximum() == 0
+        assert page._takings_panel.isVisible() is True
+        assert page._outstanding_panel.isVisible() is True
+        assert page._outstanding_panel.geometry().bottom() <= page._content.height()
+        assert page.selection_bar.isVisible() is True
 
 
 # --------------------------------------------------------------------------
@@ -4256,7 +4640,11 @@ class TestReportsPage:
         page.refresh()
         _wait_for_reports(page)
         assert page.preset_combo.currentText() == "Last 30 days"
-        assert page.table.row_count() == 30
+        # The warm workspace shows a ten-row page; the report still holds all
+        # thirty daily buckets for Load more and for export.
+        assert page.table.row_count() == 10
+        assert page._panels["revenue"].total_row_count == 30
+        assert "1–10 of 30" in page._panels["revenue"].footer_count.text()
         assert "15,000.00" in page.summary.text()
         assert "= rental" in page.summary.text()
 
@@ -4294,7 +4682,8 @@ class TestReportsPage:
         page.from_edit.setDate(page.from_edit.date().addDays(1))
         assert page.preset_combo.currentText() == "Custom"
         _wait_for_reports(page)
-        assert page.table.row_count() == 29
+        assert page._panels["revenue"].total_row_count == 29
+        assert page.table.row_count() == 10
 
     def test_switching_reports_swaps_table_and_summary(self, shell, branch):
         built, context = branch
@@ -4360,7 +4749,8 @@ class TestReportsPage:
         assert "15,000.00" in revenue.summary.text()
         revenue.channel_combo.setCurrentIndex(2)  # Online
         _wait_for_reports(page)
-        assert revenue.table.row_count() == 30
+        assert revenue.total_row_count == 30
+        assert revenue.table.row_count() == 10
         assert revenue.table.cell_text(0, 3) == "0.00"
         page._pick_report("bookings")
         _wait_for_reports(page)
@@ -4596,6 +4986,156 @@ class TestReportsPage:
                     found += 1
         assert found == 0, f"{found} cream pixels in the report list"
 
+    # -- warm report workspace -----------------------------------------
+
+    def test_reports_shell_is_two_warm_cards_with_one_tool_row(
+        self, shell, branch
+    ):
+        from app.staff.ui_kit import WarmPanel
+
+        page = ReportsPage(shell)
+        assert isinstance(page._tools_panel, WarmPanel)
+        assert isinstance(page._data_panel, WarmPanel)
+        assert page._tools_panel.property("variant") == "warm"
+        assert page._data_panel.property("variant") == "warm"
+        # Preset, From/To, the export note, and both exports share one row.
+        assert page._tools_panel.body.count() == 1
+        assert page.preset_combo.parent() is page._tools_panel
+        assert page.from_edit.parent() is page._tools_panel
+        assert page.to_edit.parent() is page._tools_panel
+        assert page.pdf_button.parent() is page._tools_panel
+        assert page.csv_button.parent() is page._tools_panel
+        assert page.pdf_button.objectName() == "reportExportPdf"
+        assert page.csv_button.objectName() == "reportExportCsv"
+        assert "period" in page.export_hint.text()
+
+    def test_the_report_nav_is_a_single_black_pill(
+        self, shell, branch, qapp
+    ):
+        from PySide6.QtGui import QColor
+
+        from app.staff import theme
+
+        page = ReportsPage(shell)
+        page.setStyleSheet(theme.load_stylesheet())
+        page.show()
+        page.resize(1440, 1000)
+        qapp_process(page)
+
+        assert all(
+            row.property("variant") == "reportNav"
+            for row in page._rows.values()
+        )
+        active = [key for key, row in page._rows.items() if row.is_active()]
+        assert active == ["revenue"]
+
+        page._pick_report("bookings")
+        qapp_process(page)
+        active = [key for key, row in page._rows.items() if row.is_active()]
+        assert active == ["bookings"]
+        # A pill, not the sidebar's 3px bar: sample ink well right of the
+        # label (inside the pill's body, away from the glyphs).
+        image = page._rows["bookings"].grab().toImage()
+        pixel = image.pixelColor(image.width() - 12, image.height() // 2)
+        assert abs(pixel.red() - QColor(theme.INK).red()) <= 8
+        assert abs(pixel.green() - QColor(theme.INK).green()) <= 8
+        assert abs(pixel.blue() - QColor(theme.INK).blue()) <= 8
+        inert = page._rows["revenue"].grab().toImage()
+        inactive = inert.pixelColor(inert.width() - 12, inert.height() // 2)
+        assert inactive.name() != QColor(theme.INK).name()
+
+    def test_every_panel_uses_the_warm_metric_table_and_chart_kit(
+        self, shell, branch
+    ):
+        from app.staff.charts import HandDrawnBars, HandDrawnChart
+        from app.staff.ui_kit import MetricGrid
+
+        first_tiles = {
+            "revenue": "Revenue",
+            "bookings": "Bookings",
+            "performance": "Top model",
+            "maintenance": "Spent",
+            "receivables": "Owed",
+            "customers": "Repeat customers",
+            "staff": "Taken",
+        }
+        chart_keys = {"revenue", "utilization", "performance", "maintenance"}
+        page = ReportsPage(shell)
+        page.refresh()
+        _wait_for_reports(page)
+        for key, first in first_tiles.items():
+            page._pick_report(key)
+            _wait_for_reports(page)
+            panel = page._panels[key]
+            assert isinstance(panel.metrics, MetricGrid)
+            assert list(panel.metric_tiles)[0] == first
+            assert panel.metric_tiles[first].property("tone") == "highlight"
+            assert panel.table._table.property("variant") == "warm"
+            if key in chart_keys:
+                assert panel.chart_card.objectName() == "reportChartCard"
+                assert isinstance(panel.chart, (HandDrawnChart, HandDrawnBars))
+            else:
+                assert not hasattr(panel, "chart")
+
+        page._pick_report("utilization")
+        _wait_for_reports(page)
+        panel = page._panels["utilization"]
+        assert panel.metric_tiles == {}
+        assert panel.table._table.property("variant") == "warm"
+        assert panel.chart_card.objectName() == "reportChartCard"
+        assert isinstance(panel.chart, HandDrawnBars)
+
+    def test_bookings_panel_renders_metric_values_and_status_chips(
+        self, shell, branch
+    ):
+        built, context = branch
+        with context.session() as session:
+            booking = session.get(Booking, built.out_booking.booking_id)
+            booking.created_at = datetime.combine(TODAY, datetime.min.time())
+        page = ReportsPage(shell)
+        page.refresh()
+        _wait_for_reports(page)
+        page._pick_report("bookings")
+        _wait_for_reports(page)
+        panel = page._panels["bookings"]
+
+        assert panel.metric_tiles["Bookings"].value_label.text() == "1"
+        assert panel.metric_tiles["Completed"].value_label.text() == "0"
+        assert panel.metric_tiles["Ongoing"].value_label.text() == "1"
+        assert panel.metric_tiles["Per booking"].value_label.text().startswith("₱")
+        # Bookings carries its status as a warm chip, not plain text; an
+        # active rental uses the reference's blue info tone.
+        from app.staff.tables import TableChip
+
+        chip = panel.table._table.cellWidget(0, 4).findChild(TableChip)
+        assert chip is not None
+        assert chip.property("tone") == "info"
+        assert panel.table.cell_text(0, 4) == "Active"
+
+    def test_reports_show_ten_rows_and_load_more_keeps_the_full_count(
+        self, shell, branch
+    ):
+        page = ReportsPage(shell)
+        page.refresh()
+        _wait_for_reports(page)
+        panel = page._panels["revenue"]
+
+        assert panel.total_row_count == 30
+        assert panel.table.row_count() == 10
+        assert "1–10 of 30" in panel.footer_count.text()
+        assert panel.load_more_button.isHidden() is False
+
+        panel.load_more_button.click()
+        assert panel.table.row_count() == 20
+        assert "1–20 of 30" in panel.footer_count.text()
+
+        # Load more changes presentation only; the export still carries all
+        # 30 buckets from report_service.
+        _title, _summary, _headers, rows = panel.export_data(
+            page._from_date, page._to_date
+        )
+        assert len(rows) == 30
+
 
 # --------------------------------------------------------------------------
 # Async shimmer: every reloaded table shows shimmer synchronously
@@ -4824,6 +5364,8 @@ class TestBookingsPageActions:
     def test_details_panel_shows_reference_branches_and_times(self, shell, branch):
         from datetime import time
 
+        from PySide6.QtWidgets import QLabel
+
         from app.models import Branch as BranchRow
         from app.staff.booking_panels import BookingDetailsPanel
 
@@ -4847,11 +5389,9 @@ class TestBookingsPageActions:
             booking.return_branch_id = counter.branch_id
 
         panel = BookingDetailsPanel(context, built.upcoming.booking_id)
-        texts = [
-            panel._body.itemAt(i).widget().text()
-            for i in range(panel._body.count())
-            if panel._body.itemAt(i).widget() is not None
-        ]
+        # The warm panel nests facts in columns, tiles, and notices; the
+        # contract is that the facts are visible somewhere in the sheet.
+        texts = [label.text() for label in panel.findChildren(QLabel)]
         joined = "\n".join(texts)
         assert "RW-DETAILS42" in joined
         assert "10:00" in joined and "18:00" in joined
@@ -5402,18 +5942,17 @@ class TestBookingsPageActions:
             receipt_service.RECEIPTS_DIR = old_dir
 
     def test_details_panel_builds_sections(self, shell, branch):
+        from PySide6.QtWidgets import QLabel
+
         from app.staff.booking_panels import BookingDetailsPanel
 
         _built, context = branch
         panel = BookingDetailsPanel(context, _built.finished.booking_id)
-        texts = [
-            panel._body.itemAt(i).widget().text()
-            for i in range(panel._body.count())
-            if panel._body.itemAt(i).widget() is not None
-        ]
+        texts = [label.text() for label in panel.findChildren(QLabel)]
         joined = "\n".join(texts)
-        assert "Booking" in joined and "Customer" in joined
-        assert "Money" in joined and "No penalties." in joined
+        lowered = joined.lower()
+        assert "booking" in lowered and "customer" in lowered
+        assert "money" in lowered and "No penalties." in joined
         panel.deleteLater()
 
     def test_extend_panel_previews_old_and_new(self, shell, branch):
@@ -5925,17 +6464,17 @@ class TestVehicleDetailsDialog:
         assert isinstance(page._wizard._current, SchedulePanel)
         overlay.hide_overlay()
 
-    def test_photo_box_is_white_and_tall(self, qapp, branch):
+    def test_photo_box_is_a_tall_gallery(self, qapp, branch):
         from app.staff.vehicle_details import PHOTO_H
 
         _built, context = branch
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
         assert PHOTO_H == 300
-        assert "FFFFFF" in dialog.photo.styleSheet()
-        assert dialog.photo.height() == PHOTO_H
+        assert dialog.gallery.hero.objectName() == "galleryHero"
+        assert dialog.gallery.hero.minimumHeight() == PHOTO_H
 
-    def test_check_button_shares_the_heading_row(self, qapp, branch):
+    def test_check_availability_sits_under_the_date_fields(self, qapp, branch):
         _built, context = branch
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
@@ -5943,15 +6482,12 @@ class TestVehicleDetailsDialog:
         qapp_process(dialog)
         assert dialog.panel.check_button.isVisible() is True
         assert (
-            abs(
-                dialog.panel.check_button.mapToGlobal(
-                    dialog.panel.check_button.rect().center()
-                ).y()
-                - dialog.panel.check_heading.mapToGlobal(
-                    dialog.panel.check_heading.rect().center()
-                ).y()
-            )
-            < dialog.panel.check_button.height()
+            dialog.panel.check_button.mapToGlobal(
+                dialog.panel.check_button.rect().center()
+            ).y()
+            > dialog.panel.check_heading.mapToGlobal(
+                dialog.panel.check_heading.rect().center()
+            ).y()
         )
 
     def test_action_buttons_live_inside_the_card(self, qapp, branch):
@@ -5959,8 +6495,8 @@ class TestVehicleDetailsDialog:
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
         card = dialog.panel.card
-        assert dialog.panel.rent_button.parent() is card
-        assert dialog.panel.close_button.parent() is card
+        assert card.isAncestorOf(dialog.panel.rent_button)
+        assert card.isAncestorOf(dialog.panel.close_button)
 
     def test_overlay_has_scoped_dim_backdrop(self, qapp, shell, branch):
         _built, context = branch
@@ -5973,7 +6509,7 @@ class TestVehicleDetailsDialog:
         # Frosted glass (v9): the dim is scoped to the overlay itself so it
         # can never cascade onto the white card.
         assert "VehicleDetailsOverlay" in overlay.styleSheet()
-        assert "rgba" in overlay.styleSheet()
+        assert "rgba(23, 23, 23, 110)" in overlay.styleSheet()
         overlay.hide_overlay()
 
     def test_overlay_backdrop_is_frosted_and_click_through(
@@ -6001,7 +6537,7 @@ class TestVehicleDetailsDialog:
         assert overlay.backdrop.geometry().width() > 0
         # Card stays crisp and round on top of the frosted glass.
         assert overlay.panel.card.objectName() == "vehicleDetailsCard"
-        assert overlay.panel.card._radius == 8.0
+        assert overlay.panel.card._radius == 18.0
         # Hiding frees the frozen frame.
         overlay.hide_overlay()
         assert overlay.backdrop.pixmap() is None or overlay.backdrop.pixmap().isNull()
@@ -6012,11 +6548,11 @@ class TestVehicleDetailsDialog:
         dialog = self._dialog(context, vid)
         assert "transparent" in dialog.price.styleSheet()
 
-    def test_details_card_uses_8px_corners(self, qapp, branch):
+    def test_details_card_uses_18px_corners(self, qapp, branch):
         _built, context = branch
         vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-001")
         dialog = self._dialog(context, vid)
-        assert dialog.panel.card._radius == 8.0
+        assert dialog.panel.card._radius == 18.0
         assert dialog.panel.card.objectName() == "vehicleDetailsCard"
 
     def test_card_corners_are_truly_round_not_square(self, qapp):
@@ -6168,7 +6704,7 @@ class TestVehicleDetailsDialog:
         dialog.end_edit.setDate(today.addDays(9))
         dialog.check_button.click()
         assert dialog.check_error.isHidden() is True
-        assert "(1 day)" in dialog.check_result.text()
+        assert "1 day" in dialog.check_result.text()
         assert dialog.checked_window is not None
 
     def _booked_vehicle(self, branch):
@@ -6198,7 +6734,7 @@ class TestVehicleDetailsDialog:
         dialog.check_button.click()
         assert dialog.check_error.isHidden() is True
         assert "Available" in dialog.check_result.text()
-        assert "(1 day)" in dialog.check_result.text()
+        assert "1 day" in dialog.check_result.text()
         assert dialog.checked_window is not None
 
     def test_a_clashing_window_names_the_booking(self, qapp, branch):
@@ -6539,7 +7075,7 @@ class TestRentalWizard:
             assert wizard.state.deposit == Decimal("2500.00")
             assert wizard.state.default_method == "gcash"
             assert wizard.state.default_channel == "online"
-            assert "3,000.00" in pay_step.min_button.text()  # 500 fee + 2,500 deposit
+            assert "3,000.00" in pay_step.due_now.amount_text  # 500 fee + 2,500 deposit
             fee_captions = [
                 label.text()
                 for label in pay_step.findChildren(QLabel)
@@ -6807,7 +7343,7 @@ class TestRentalWizard:
             pay_step.pay_button.click()
             qapp_process(page)
             done = wizard._current
-            assert "booked" in done._body.itemAt(1).widget().text()
+            assert "booked" in done.title_label.text()
             assert os.listdir(tmp_path), "expected a receipt PDF"
         finally:
             receipt_service.RECEIPTS_DIR = old_dir
@@ -6888,7 +7424,7 @@ class TestRentalWizard:
         finally:
             overlay.hide_overlay()
 
-    def test_wizard_has_no_stadium_shapes(self, qapp, shell, branch):
+    def test_wizard_buttons_use_the_modal_styles(self, qapp, shell, branch):
         from PySide6.QtWidgets import QPushButton
 
         from app.staff import rental_wizard
@@ -6896,21 +7432,23 @@ class TestRentalWizard:
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             assert "999" not in open(rental_wizard.__file__, encoding="utf-8").read()
+            allowed = {
+                "primaryButton",
+                "secondaryButton",
+                "wizardChoice",
+                "linkButton",
+                "modalCancel",
+                "viewerControl",
+                "viewerControlLight",
+                "",
+            }
             for button in overlay.findChildren(QPushButton):
-                assert button.objectName() in (
-                    "primaryButton",
-                    "secondaryButton",
-                    "wizardChoice",
-                    "",
-                )
+                assert button.objectName() in allowed
         finally:
             overlay.hide_overlay()
 
-    def test_wizard_steps_use_compact_density(self, qapp, shell, branch):
-        from PySide6.QtWidgets import QSizePolicy
-
-        from app.staff import rental_wizard
-        from app.staff.cards import SectionLabel
+    def test_wizard_steps_use_the_modal_sheet(self, qapp, shell, branch):
+        from app.staff.rental_ui import MODAL_PADDING
         from app.staff.rental_wizard import SchedulePanel
 
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
@@ -6919,49 +7457,28 @@ class TestRentalWizard:
             assert isinstance(step, SchedulePanel)
             margins = step._body.contentsMargins()
             assert (margins.left(), margins.top()) == (
-                rental_wizard.WIZARD_PADDING,
-                rental_wizard.WIZARD_PADDING,
+                MODAL_PADDING,
+                MODAL_PADDING,
             )
-            assert step._body.spacing() == rental_wizard.WIZARD_SPACING
-            # Step titles are section-head size, not hero size.
-            titles = [
-                w
-                for w in step.findChildren(SectionLabel)
-                if w.text() == "When is it out?"
-            ]
-            assert titles
-            assert titles[0].font().pixelSize() == 16
+            assert step.title_label.text() == "When is it out?"
+            assert step.title_label.font().pixelSize() == 26
+            assert step.recap.isVisible() is True
         finally:
             overlay.hide_overlay()
 
-    def test_wizard_card_hugs_content_and_centers(self, qapp, shell, branch):
-        from PySide6.QtWidgets import QSizePolicy, QSpacerItem
-
+    def test_wizard_card_is_900_wide_with_a_sticky_footer(self, qapp, shell, branch):
+        from app.staff.rental_ui import MODAL_WIDTH
         from app.staff.rental_wizard import SchedulePanel
 
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             step = page._wizard._current
             assert isinstance(step, SchedulePanel)
-            # Hug: the shared Card is Expanding, the wizard opts back out.
-            assert (
-                step.card.sizePolicy().verticalPolicy()
-                == QSizePolicy.Policy.Preferred
-            )
-            # Center: one stretch above the card, one below.
-            outer = step.layout()
-            stretches = [
-                outer.itemAt(i)
-                for i in range(outer.count())
-                if isinstance(outer.itemAt(i), QSpacerItem)
-            ]
-            assert len(stretches) == 2
-            # No ballooning: short content stays far shorter than the view.
             qapp_process(page)
-            assert (
-                step.card.height()
-                < overlay.scroll.viewport().height() // 2
-            )
+            assert step.card.maximumWidth() == MODAL_WIDTH
+            assert overlay.scroll.width() == MODAL_WIDTH
+            assert step.footer.isVisible() is True
+            assert step.footer.geometry().bottom() <= step.card.rect().bottom()
         finally:
             overlay.hide_overlay()
 
@@ -7048,7 +7565,7 @@ class TestRentalWizard:
 
         from app.staff import rental_wizard
 
-        monkeypatch.setattr(rental_wizard, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(rental_wizard, "confirm_modal", lambda *a, **k: True)
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             assert page.selected_vehicle_id is not None
@@ -7091,7 +7608,7 @@ class TestRentalWizard:
             calls.append((question, kwargs))
             return True
 
-        monkeypatch.setattr(rental_wizard, "confirm", _confirm)
+        monkeypatch.setattr(rental_wizard, "confirm_modal", _confirm)
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             wizard = page._wizard
@@ -7111,6 +7628,7 @@ class TestRentalWizard:
                 "The customer, dates, and payment choice will be lost."
             )
             assert calls[0][1]["destructive"] is True
+            assert calls[0][1]["confirm_text"] == "Discard rental"
         finally:
             overlay.set_dismissible(True)
             overlay.hide_overlay()
@@ -7122,7 +7640,7 @@ class TestRentalWizard:
 
         from app.staff import rental_wizard
 
-        monkeypatch.setattr(rental_wizard, "confirm", lambda *a, **k: False)
+        monkeypatch.setattr(rental_wizard, "confirm_modal", lambda *a, **k: False)
         page, overlay, _vid = self._open_wizard(qapp, shell, branch)
         try:
             wizard = page._wizard
@@ -7218,3 +7736,246 @@ class TestRentalWizard:
                 assert created is None
         finally:
             step.deleteLater()
+
+class TestRentalModalRedesign:
+    """The warm 900px counter modal: progress, day strip, recap, summary."""
+
+    def _open_wizard(self, qapp, shell, branch, plate="HON-900"):
+        from PySide6.QtCore import QDate
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate=plate)
+        page = NewRentalPage(shell)
+        shell.show()
+        page.show()
+        page.resize(1440, 900)
+        page.refresh()
+        vid = next(s.vehicle.vehicle_id for s in page.slots)
+        page._open_vehicle_details(vid)
+        qapp_process(page)
+        overlay = page._details_overlay
+        today = QDate.currentDate()
+        overlay.panel.start_edit.setDate(today.addDays(10))
+        overlay.panel.end_edit.setDate(today.addDays(11))
+        overlay.panel.check_button.click()
+        overlay.panel.rent_button.click()
+        qapp_process(page)
+        return page, overlay, vid
+
+    def test_schedule_panel_has_progress_and_day_strip(
+        self, qapp, shell, branch
+    ):
+        from app.staff.rental_wizard import SchedulePanel
+
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            step = page._wizard._current
+            assert isinstance(step, SchedulePanel)
+            assert step.progress.current == 1
+            assert step.progress.states == (
+                "done",
+                "current",
+                "upcoming",
+                "upcoming",
+            )
+            assert step.day_strip.tiles
+            assert "October" in step.day_strip.month_labels
+        finally:
+            overlay.hide_overlay()
+
+    def test_schedule_legend_sits_on_a_cream_strip(self, qapp, shell, branch):
+        from PySide6.QtWidgets import QLabel
+
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            step = page._wizard._current
+            # The root must stay transparent; otherwise it paints a cream
+            # 900px column over the overlay's dark frost.
+            assert step.objectName() == "wizardStep"
+            assert step.legend_host.objectName() == "wizardLegend"
+            assert step.legend_host.isVisible() is True
+            labels = {
+                label.text() for label in step.legend_host.findChildren(QLabel)
+            }
+            assert "Your dates" in labels
+            block = theme.load_stylesheet().split(
+                "QFrame#wizardLegend {", 1
+            )[1].split("}", 1)[0]
+            assert "background: #F1E8D8" in block
+        finally:
+            overlay.hide_overlay()
+
+    def test_schedule_panel_warns_about_an_overlapping_booking(
+        self, qapp, shell, branch
+    ):
+        from app.services import booking_service
+
+        built, context = branch
+        page, overlay, vid = self._open_wizard(qapp, shell, branch)
+        try:
+            step = page._wizard._current
+            start = step.start_edit.date().toPython()
+            end = step.end_edit.date().toPython()
+            with context.session() as session:
+                vehicle = session.get(Vehicle, vid)
+                booking_service.create_booking(
+                    session, built.customer, vehicle, start, end
+                )
+            step._refresh_quote()
+            qapp_process(page)
+            assert step.conflict_banner.isVisible() is True
+            assert "already" in step.conflict_label.text().lower()
+            assert step.next_button.isEnabled() is False
+            assert step.day_strip.states[start] == "pending"
+        finally:
+            overlay.hide_overlay()
+
+    def test_payment_summary_splits_due_now_and_due_at_pickup(
+        self, qapp, branch
+    ):
+        from PySide6.QtCore import QDate
+
+        from app.staff.rental_wizard import PaymentPanel, WizardState
+
+        _built, context = branch
+        today = QDate.currentDate()
+        state = WizardState(
+            vehicle_id=1,
+            start=today,
+            end=today.addDays(1),
+            days=1,
+            total=Decimal("5800.00"),
+            deposit=Decimal("3000.00"),
+            scheduling_fee=Decimal("100.00"),
+        )
+        panel = PaymentPanel(context, state)
+        try:
+            assert "3,100.00" in panel.due_now.amount_text
+            assert "5,700.00" in panel.due_at_pickup.amount_text
+            panel.full_button.setChecked(True)
+            panel._refresh_pay_button()
+            assert "8,800.00" in panel.due_now.amount_text
+            assert "0.00" in panel.due_at_pickup.amount_text
+        finally:
+            panel.deleteLater()
+
+    def test_done_panel_has_a_balance_box_and_receipt_row(self, qapp):
+        from app.staff.rental_wizard import DonePanel
+
+        panel = DonePanel(
+            booking_id=363,
+            total=Decimal("5800.00"),
+            paid_amount=Decimal("100.00"),
+            balance=Decimal("5700.00"),
+            deposit=Decimal("3000.00"),
+            receipt_path="receipts/receipt_363.pdf",
+            confirmed=True,
+        )
+        try:
+            assert "5,700.00" in panel.balance_amount.amount_text
+            assert panel.receipt_row is not None
+            assert panel.receipt_name.text() == "receipt_363.pdf"
+            assert panel.print_button.isEnabled() is True
+        finally:
+            panel.deleteLater()
+
+    def test_vehicle_details_is_900_wide_with_gallery_tabs(
+        self, qapp, shell, branch
+    ):
+        from app.staff.vehicle_details import VehicleDetailsOverlay
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-901")
+        with context.reading() as session:
+            vid = (
+                session.query(Vehicle)
+                .filter(Vehicle.plate_number == "HON-901")
+                .one()
+                .vehicle_id
+            )
+        overlay = VehicleDetailsOverlay(context, vid, shell, autoload=False)
+        try:
+            overlay.show_overlay()
+            qapp_process(shell)
+            panel = overlay.panel
+            assert overlay.scroll.width() == 900
+            assert panel.card._radius == 18
+            assert panel.gallery.views == ("front", "left", "right", "3d")
+            assert panel.gallery.view_buttons["3d"].text() == "3D"
+            assert panel.spec_tiles["Seats"].value_label.text() == "—"
+        finally:
+            overlay.hide_overlay()
+            overlay.deleteLater()
+
+    def test_details_3d_tab_exposes_drag_auto_rotate_and_reset(
+        self, qapp, shell, branch
+    ):
+        from app.staff.vehicle_details import MODAL_THREE_HTML, VehicleDetailsOverlay
+
+        _built, context = branch
+        _add_vehicle(context, make="Honda", model="Civic", plate="HON-902")
+        with context.reading() as session:
+            vid = (
+                session.query(Vehicle)
+                .filter(Vehicle.plate_number == "HON-902")
+                .one()
+                .vehicle_id
+            )
+        overlay = VehicleDetailsOverlay(context, vid, shell, autoload=False)
+        try:
+            gallery = overlay.panel.gallery
+            assert gallery.auto_button.text() == "Auto-rotate"
+            assert gallery.reset_button.text() == "Reset"
+            assert "Drag to rotate" in gallery.hint.text()
+            assert "OrbitControls" in MODAL_THREE_HTML
+            assert "autoRotate = true" in MODAL_THREE_HTML
+            assert "__resetView" in MODAL_THREE_HTML
+        finally:
+            overlay.deleteLater()
+
+    def test_payment_summary_shows_total_before_due_now(self, qapp, branch):
+        from PySide6.QtCore import QDate
+
+        from app.staff.rental_wizard import PaymentPanel, WizardState
+
+        _built, context = branch
+        today = QDate.currentDate()
+        state = WizardState(
+            vehicle_id=1,
+            start=today,
+            end=today.addDays(1),
+            days=1,
+            total=Decimal("5800.00"),
+            deposit=Decimal("3000.00"),
+            scheduling_fee=Decimal("100.00"),
+        )
+        panel = PaymentPanel(context, state)
+        try:
+            labels = [left.text() for left, _right in panel.recap.rows]
+            assert "Total" in labels
+            total_index = labels.index("Total")
+            assert labels.index("Rental · 1 day\nIncludes ₱100.00 non-refundable fee") < total_index
+            assert panel.due_now.amount_text.endswith("3,100.00")
+        finally:
+            panel.deleteLater()
+
+    def test_customer_step_shows_a_matched_customer_card(
+        self, qapp, shell, branch
+    ):
+        built, context = branch
+        page, overlay, _vid = self._open_wizard(qapp, shell, branch)
+        try:
+            wizard = page._wizard
+            wizard._current._on_continue()
+            qapp_process(page)
+            step = wizard._current
+            step.licence_edit.setText(built.customer.license_number)
+            step.find_button.click()
+            qapp_process(page)
+            assert step.customer_card.isVisible() is True
+            assert step.customer_name.text() == "Ana Reyes"
+            assert "Valid until" in step.validity_chip.text()
+            assert step.next_button.isEnabled() is True
+            assert step.past_rentals_label.text() != ""
+        finally:
+            overlay.hide_overlay()

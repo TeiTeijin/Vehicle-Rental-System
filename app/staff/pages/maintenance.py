@@ -21,6 +21,12 @@ from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
+from app.staff.ui_kit import (
+    SelectionBar,
+    StatusChipRow,
+    WarmHost,
+    WarmPanel,
+)
 from app.staff.widgets import toast
 from app.utils.money import pesos
 
@@ -30,6 +36,12 @@ STATUS_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("In Progress", "in_progress"),
     ("Completed", "completed"),
     ("Cancelled", "cancelled"),
+)
+
+#: Same status codes as the hidden combo, with the reference's short labels.
+STATUS_CHIP_OPTIONS: tuple[tuple[str, str], ...] = tuple(
+    ("all" if code is None else code, "All" if code is None else label)
+    for label, code in STATUS_FILTERS
 )
 
 TYPE_FILTERS: tuple[tuple[str, str | None], ...] = (
@@ -136,29 +148,31 @@ class MaintenancePage(StaffPage):
 
         self.due = LoadStateTable(
             [
-                Column("Vehicle", ALIGN_LEFT),
+                Column("Vehicle", ALIGN_LEFT, kind="strong"),
                 Column("Due", ALIGN_LEFT),
-                Column("Last job", ALIGN_LEFT),
+                Column("Last job", ALIGN_LEFT, kind="muted"),
             ],
             lambda: _due_rows(self.context),
             empty_message="Nothing due in the next 14 days.",
             shimmer_rows=3,
+            variant="warm",
         )
 
         self.table = LoadStateTable(
             [
-                Column("Ref", ALIGN_RIGHT),
-                Column("Vehicle", ALIGN_LEFT),
+                Column("Ref", ALIGN_RIGHT, kind="muted"),
+                Column("Vehicle", ALIGN_LEFT, kind="strong"),
                 Column("Type", ALIGN_LEFT),
                 Column("Description", ALIGN_LEFT),
-                Column("From", ALIGN_LEFT),
-                Column("To", ALIGN_LEFT),
-                Column("Cost", ALIGN_RIGHT),
-                Column("Status"),
+                Column("From", ALIGN_LEFT, kind="muted"),
+                Column("To", ALIGN_LEFT, kind="muted"),
+                Column("Cost", ALIGN_RIGHT, kind="money"),
+                Column("Status", kind="status"),
             ],
             self._load_rows,
             empty_message="No maintenance recorded yet.",
             shimmer_rows=8,
+            variant="warm",
         )
 
         # -- shared async machinery (one pool, shimmer-then-rows) ------------
@@ -177,61 +191,62 @@ class MaintenancePage(StaffPage):
         self._search_timer.setInterval(120)
         self._search_timer.timeout.connect(self._apply_filters)
 
-        # -- Bookings recipe, three boxes ----------------------------------
-        # Tools on top hugging its content, Due soon + Log below sharing
-        # the rest. Thin CARD_GUTTER gaps, 8px page edges matching the
-        # sidebar rhythm.
+        # -- Warm list recipe: tools, Due soon, Service log -----------------
+        # Tools hug their content; Due soon + Log below share the rest.
+        # Thin CARD_GUTTER gaps and the same page edges as before.
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
 
-        tools = QFrame(self)
-        tools.setObjectName(theme.OBJ_PAGE_PANEL)
-        tools.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        tools_layout.setSpacing(8)
-        tools_layout.addLayout(self._filter_row())
-        tools_layout.addLayout(self._action_row())
-        self.body.addWidget(tools)
-        self._tools_panel = tools
+        # No second page heading above the tools card; keep the old count
+        # label hidden for callers that still read it.
+        self.count_caption = Caption("", parent=self)
+        self.count_caption.setVisible(False)
 
-        due_box = QFrame(self)
-        due_box.setObjectName(theme.OBJ_PAGE_PANEL)
+        self._tools_panel = WarmHost(self)
+        self._filter_card = WarmPanel(self._tools_panel)
+        self._filter_card.body.addLayout(self._filter_row())
+        self.status_chips = StatusChipRow(
+            STATUS_CHIP_OPTIONS, parent=self._filter_card
+        )
+        self._filter_card.body.addWidget(self.status_chips)
+        self.status_chips.changed.connect(self._on_status_chip)
+        self.hint_label = Caption("Completing releases the vehicle.", parent=self)
+        self.hint_label.setObjectName("pageSubtitle")
+        self._filter_card.body.addWidget(self.hint_label)
+        self._tools_panel.body.addWidget(self._filter_card)
+
+        self.selection_bar = SelectionBar(self._tools_panel)
+        self._selection_bar = self.selection_bar
+        self._build_actions()
+        self._tools_panel.body.addWidget(self.selection_bar)
+        self.body.addWidget(self._tools_panel)
+
+        due_box = WarmPanel(self)
         due_box.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        due_layout = QVBoxLayout(due_box)
-        due_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
+        due_layout = due_box.body
         due_layout.setSpacing(8)
         due_layout.addWidget(self._heading("Due soon"))
         due_layout.addWidget(self.due)
         self.body.addWidget(due_box)
         self._due_panel = due_box
 
-        log_box = QFrame(self)
-        log_box.setObjectName(theme.OBJ_PAGE_PANEL)
+        log_box = WarmPanel(self)
         log_box.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        log_layout = QVBoxLayout(log_box)
-        log_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
+        log_layout = log_box.body
         log_layout.setSpacing(8)
         log_layout.addWidget(self._heading("Service log"))
-        self.count_caption = Caption("", parent=self)
-        log_layout.addWidget(self.count_caption)
         self.spend_line = Caption("", parent=self)
         log_layout.addWidget(self.spend_line)
         log_layout.addWidget(self.table, 1)
         self.body.addWidget(log_box, 1)
         self._log_panel = log_box
+        # Compatibility name used by the other list pages; the service log
+        # is this page's data card.
+        self._data_panel = log_box
 
         self.table.table.itemSelectionChanged.connect(self._refresh_actions)
         self.table.table.cellDoubleClicked.connect(
@@ -264,9 +279,10 @@ class MaintenancePage(StaffPage):
             [label for label, _code in STATUS_FILTERS]
         )
         self.status_combo.currentIndexChanged.connect(
-            lambda _i: self._apply_filters()
+            self._on_status_combo_changed
         )
         row.addWidget(self.status_combo)
+        self.status_combo.hide()
         self.clear_button = QPushButton("Clear", self)
         self.clear_button.setObjectName("ghostButton")
         self.clear_button.setProperty("corner", "topRight")
@@ -275,44 +291,42 @@ class MaintenancePage(StaffPage):
         row.addWidget(self.clear_button)
         return row
 
-    def _action_row(self):
-        """Bottom tools row: the lifecycle actions."""
-        from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton
+    def _build_actions(self):
+        """Selection bar: the lifecycle actions."""
+        from PySide6.QtWidgets import QPushButton
 
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
         self.add_button = QPushButton("Log maintenance", self)
         self.add_button.setObjectName("ghostButton")
-        # Concentric with the tools panel (28 - 16 = 12); bottom-left
-        # outer corner only, like the Bookings Confirm button.
+        # Kept for the old concentric-corner contract; the selection bar
+        # supplies the actual rounded style now.
         self.add_button.setProperty("corner", "bottomLeft")
         self.add_button.setFixedHeight(TOOL_ROW_H)
         self.add_button.clicked.connect(self.open_add)
-        row.addWidget(self.add_button)
         self.complete_button = self._action_button("Mark completed")
         self.complete_button.clicked.connect(self.open_complete)
-        row.addWidget(self.complete_button)
-        self.cancel_button = self._action_button("Cancel")
+        self.cancel_button = self._action_button("Cancel", danger=True)
         self.cancel_button.clicked.connect(self.open_cancel)
-        row.addWidget(self.cancel_button)
         self.history_button = self._action_button("History")
         self.history_button.clicked.connect(self.open_history)
-        row.addWidget(self.history_button)
         self.open_button = self._action_button("Open vehicle")
         self.open_button.clicked.connect(self._on_open_vehicle)
-        row.addWidget(self.open_button)
-        hint = QLabel("Completing releases the vehicle.", self)
-        hint.setObjectName("pageSubtitle")
-        row.addWidget(hint)
-        row.addStretch(1)
-        return row
+        self._action_buttons = [
+            self.add_button,
+            self.complete_button,
+            self.cancel_button,
+            self.history_button,
+            self.open_button,
+        ]
+        self.selection_bar.add_action(self.add_button)
+        for button in self._action_buttons[1:]:
+            kind = "danger" if button is self.cancel_button else "action"
+            self.selection_bar.add_action(button, kind=kind)
 
-    def _action_button(self, text: str):
+    def _action_button(self, text: str, *, danger: bool = False):
         from PySide6.QtWidgets import QPushButton
 
         button = QPushButton(text, self)
-        button.setObjectName("ghostButton")
+        button.setObjectName("dangerButton" if danger else "ghostButton")
         button.setFixedHeight(TOOL_ROW_H)
         return button
 
@@ -338,6 +352,29 @@ class MaintenancePage(StaffPage):
             self.context, status=self._status, kind=self._kind,
             search=self._search,
         )
+
+    def _status_key(self, index: int) -> str:
+        _label, code = STATUS_FILTERS[index]
+        return code or "all"
+
+    def _sync_status_chip(self, index: int) -> None:
+        self.status_chips.select(self._status_key(index))
+
+    def _on_status_combo_changed(self, index: int) -> None:
+        self._sync_status_chip(index)
+        self._apply_filters()
+
+    def _on_status_chip(self, key: str) -> None:
+        index = next(
+            i for i in range(len(STATUS_FILTERS))
+            if self._status_key(i) == key
+        )
+        blocked = self.status_combo.blockSignals(True)
+        try:
+            self.status_combo.setCurrentIndex(index)
+        finally:
+            self.status_combo.blockSignals(blocked)
+        self._apply_filters()
 
     def _apply_filters(self) -> None:
         self._search = self.search.text()
@@ -377,6 +414,7 @@ class MaintenancePage(StaffPage):
             self.search.clear()
             self.type_combo.setCurrentIndex(0)
             self.status_combo.setCurrentIndex(0)
+            self.status_chips.select("all")
         finally:
             self.search.blockSignals(blocked_search)
             for combo, was in blocked:
@@ -417,11 +455,21 @@ class MaintenancePage(StaffPage):
         return text.split()[0]
 
     def _refresh_actions(self) -> None:
-        has_row = self.selected_record_id() is not None
+        record_id = self.selected_record_id()
+        has_row = record_id is not None
+        self.selection_bar.set_active(has_row)
+        self.add_button.setEnabled(True)
         self.complete_button.setEnabled(has_row)
         self.cancel_button.setEnabled(has_row)
         self.history_button.setEnabled(has_row)
         self.open_button.setEnabled(has_row)
+        if has_row:
+            row = self.table.table.currentRow()
+            vehicle = self.table.cell_text(row, 1) if row >= 0 else ""
+            description = self.table.cell_text(row, 3) if row >= 0 else ""
+            self.selection_bar.set_parts(
+                f"#{record_id} ", vehicle, description
+            )
 
     # -- write paths (one lifecycle, same as Fleet) ---------------------
 
@@ -457,7 +505,10 @@ class MaintenancePage(StaffPage):
             self._maintenance_overlay.deleteLater()
             self._maintenance_overlay = None
         window = self.window()
-        overlay = FrostedOverlay(window if window is not None else self)
+        overlay = FrostedOverlay(
+            window if window is not None else self,
+            card_width=getattr(panel, "sheet_width", 640),
+        )
         overlay.set_content(panel)
         overlay.show_overlay()
         self._maintenance_overlay = overlay
@@ -571,6 +622,7 @@ class MaintenancePage(StaffPage):
                 combo.setCurrentIndex(wanted)
             finally:
                 combo.blockSignals(blocked)
+        self._sync_status_chip(self.status_combo.currentIndex())
         if self._search_timer.isActive():
             self._search_timer.stop()
         self._request_load()

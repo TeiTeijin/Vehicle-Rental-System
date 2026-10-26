@@ -11,15 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -34,47 +33,127 @@ from app.services import settings_service, staff_service
 from app.services.errors import ServiceError
 from app.staff import prefs, theme
 from app.staff.feedback import describe, show_field_error
-from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
+from app.staff.metrics import CARD_GUTTER, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, Column, LoadStateTable
+from app.staff.ui_kit import WarmHost
 from app.staff.widgets import toast
 from app.utils.money import pesos
 
 VERSION = "1.0.0-settings.1"
 
 
-def _panel() -> tuple[QFrame, QVBoxLayout]:
+def _panel(
+    title: str = "", caption: str = "", tag: str = ""
+) -> tuple[QFrame, QVBoxLayout]:
+    """White 18px Settings card: left title/tag rail + right control column."""
     box = QFrame()
     box.setObjectName(theme.OBJ_PAGE_PANEL)
+    box.setProperty("variant", "warm")
     box.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-    layout = QVBoxLayout(box)
-    layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
-    layout.setSpacing(8)
-    return box, layout
+    row = QHBoxLayout(box)
+    row.setContentsMargins(24, 20, 24, 20)
+    row.setSpacing(24)
+
+    rail = QWidget(box)
+    rail.setObjectName("settingsCardRail")
+    rail.setFixedWidth(220)
+    rail_layout = QVBoxLayout(rail)
+    rail_layout.setContentsMargins(0, 0, 0, 0)
+    rail_layout.setSpacing(6)
+    rail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+    if title:
+        title_label = QLabel(title, rail)
+        title_label.setObjectName("settingsCardTitle")
+        title_label.setWordWrap(True)
+        rail_layout.addWidget(title_label)
+    if caption:
+        caption_label = QLabel(caption, rail)
+        caption_label.setObjectName("settingsCardCaption")
+        caption_label.setWordWrap(True)
+        rail_layout.addWidget(caption_label)
+    if tag:
+        tag_label = QLabel(tag, rail)
+        tag_label.setObjectName("settingsTag")
+        tag_label.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
+        rail_layout.addWidget(tag_label, 0, Qt.AlignmentFlag.AlignLeft)
+    rail_layout.addStretch(1)
+    row.addWidget(rail, 0, Qt.AlignmentFlag.AlignTop)
+
+    body = QVBoxLayout()
+    body.setContentsMargins(0, 0, 0, 0)
+    body.setSpacing(12)
+    row.addLayout(body, 1)
+    return box, body
 
 
-def _heading(text: str, parent: QWidget) -> QLabel:
-    label = QLabel(text, parent)
-    label.setObjectName("pageSubtitle")
-    font = QFont("Inter")
-    font.setPixelSize(15)
-    font.setWeight(QFont.Weight.DemiBold)
-    label.setFont(font)
-    label.setStyleSheet(f"color: {theme.TEXT}; background: transparent;")
-    return label
+def _grid() -> QGridLayout:
+    grid = QGridLayout()
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(16)
+    grid.setVerticalSpacing(14)
+    for column in range(3):
+        grid.setColumnStretch(column, 1)
+    return grid
 
 
-def _caption(text: str, parent: QWidget) -> QLabel:
-    label = QLabel(text, parent)
-    label.setObjectName("pageSubtitle")
-    label.setWordWrap(True)
-    return label
+def _field(text: str, widget: QWidget, parent: QWidget) -> QWidget:
+    host = QWidget(parent)
+    host.setObjectName("settingsField")
+    host.setSizePolicy(
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+    )
+    column = QVBoxLayout(host)
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(6)
+    label = QLabel(text, host)
+    label.setObjectName("settingsFieldLabel")
+    column.addWidget(label)
+    column.addWidget(widget)
+    return host
+
+
+def _inline_host(*widgets: QWidget, parent: QWidget) -> QWidget:
+    host = QWidget(parent)
+    host.setObjectName("settingsFieldHost")
+    row = QHBoxLayout(host)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(10)
+    for widget in widgets:
+        row.addWidget(widget, 0, Qt.AlignmentFlag.AlignVCenter)
+    row.addStretch(1)
+    return host
+
+
+def _check_host(*checks: QCheckBox, parent: QWidget) -> QWidget:
+    host = QWidget(parent)
+    host.setObjectName("settingsFieldHost")
+    row = QHBoxLayout(host)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(26)
+    for check in checks:
+        check.setObjectName("settingsCheck")
+        row.addWidget(check)
+    row.addStretch(1)
+    return host
+
+
+def _pill(text: str, *, kind: str = "secondary",
+          parent: QWidget | None = None) -> QPushButton:
+    names = {"primary": "settingsPrimary", "danger": "settingsDanger"}
+    button = QPushButton(text, parent)
+    button.setObjectName(names.get(kind, "settingsSecondary"))
+    button.setFixedHeight(TOOL_ROW_H)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    return button
 
 
 def _combo(items: list[str], parent: QWidget) -> QComboBox:
     combo = QComboBox(parent)
+    combo.setObjectName("warmInput")
     combo.addItems(items)
-    combo.setFixedHeight(TOOL_ROW_H)
     return combo
 
 
@@ -96,8 +175,8 @@ class SettingsPage(StaffPage):
         self._overlay = None
         self._shared: dict[str, str] = dict(settings_service.DEFAULTS)
 
-        tools, tools_layout = _panel()
-        tools_layout.addLayout(self._tools_row())
+        tools = WarmHost(self)
+        tools.body.addLayout(self._tools_row())
         self.body.addWidget(tools)
         self._tools_panel = tools
 
@@ -121,60 +200,56 @@ class SettingsPage(StaffPage):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        self.save_shared_btn = QPushButton("Save shared policy", self)
-        self.save_shared_btn.setObjectName("primaryButton")
-        self.save_shared_btn.setFixedHeight(TOOL_ROW_H)
+        self.save_shared_btn = _pill(
+            "Save shared policy", kind="primary", parent=self
+        )
         self.save_shared_btn.clicked.connect(self._on_save_shared)
         row.addWidget(self.save_shared_btn)
-        self.reload_btn = QPushButton("Reload", self)
-        self.reload_btn.setObjectName("ghostButton")
-        self.reload_btn.setFixedHeight(TOOL_ROW_H)
+        self.reload_btn = _pill("Reload", parent=self)
         self.reload_btn.clicked.connect(lambda: self.refresh())
         row.addWidget(self.reload_btn)
         row.addStretch(1)
         self.admin_note = QLabel("", self)
-        self.admin_note.setObjectName("pageSubtitle")
+        self.admin_note.setObjectName("settingsAdminNote")
         row.addWidget(self.admin_note)
         return row
 
     # -- appearance ---------------------------------------------------------
 
     def _build_appearance(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Appearance", self))
-        layout.addWidget(_caption("This PC only. Theme dark is stored now; "
-                                  "the full dark palette ships later.", self))
-        form = QFormLayout()
-        form.setSpacing(8)
+        box, layout = _panel(
+            "Appearance",
+            "Dark is stored now; the full dark palette ships later.",
+            "This PC only",
+        )
         self.theme_combo = _combo(["light", "dark", "system"], self)
         self.theme_combo.currentTextChanged.connect(self._on_theme)
-        form.addRow("Theme", self.theme_combo)
-        accent_row = QHBoxLayout()
-        self.accent_preview = QLabel("    ", self)
-        self.accent_preview.setFixedSize(44, 24)
-        self.accent_btn = QPushButton("Pick accent", self)
-        self.accent_btn.setObjectName("ghostButton")
+        self.accent_preview = QLabel("", self)
+        self.accent_preview.setFixedSize(38, 38)
+        self.accent_btn = _pill("Pick accent", parent=self)
         self.accent_btn.clicked.connect(self._on_accent)
-        accent_row.addWidget(self.accent_preview)
-        accent_row.addWidget(self.accent_btn)
-        accent_row.addStretch(1)
-        accent_host = QWidget(self)
-        accent_host.setLayout(accent_row)
-        accent_host.setStyleSheet("background: transparent;")
-        form.addRow("Accent", accent_host)
+        accent_host = _inline_host(self.accent_preview, self.accent_btn, parent=self)
         self.font_spin = QDoubleSpinBox(self)
+        self.font_spin.setObjectName("warmInput")
         self.font_spin.setRange(0.9, 1.25)
         self.font_spin.setSingleStep(0.05)
         self.font_spin.valueChanged.connect(self._on_font_scale)
-        form.addRow("UI scale", self.font_spin)
         self.sidebar_check = QCheckBox("Collapse sidebar by default", self)
         self.sidebar_check.toggled.connect(self._on_sidebar)
-        form.addRow("", self.sidebar_check)
         self.motion_check = QCheckBox("Reduce motion (no shimmer / chart animation)", self)
         self.motion_check.toggled.connect(
             lambda on: prefs.set("appearance/reduce_motion", bool(on)))
-        form.addRow("", self.motion_check)
-        layout.addLayout(form)
+
+        grid = _grid()
+        grid.addWidget(_field("Theme", self.theme_combo, self), 0, 0)
+        grid.addWidget(_field("Accent", accent_host, self), 0, 1)
+        grid.addWidget(_field("UI scale", self.font_spin, self), 0, 2)
+        grid.addWidget(
+            _check_host(self.sidebar_check, self.motion_check, parent=self),
+            1, 0, 1, 3,
+        )
+        layout.addLayout(grid)
+        layout.addStretch(1)
         return box
 
     def _on_theme(self, value: str) -> None:
@@ -183,17 +258,26 @@ class SettingsPage(StaffPage):
             toast(self, f"Theme: {value} (applies on next open).")
 
     def _on_accent(self) -> None:
-        current = QColor(str(prefs.get("appearance/accent")))
-        picked = QColorDialog.getColor(current, self, "Accent color")
-        if picked.isValid():
-            prefs.set("appearance/accent", picked.name())
-            self._paint_accent()
-            toast(self, f"Accent: {picked.name()}.")
+        from app.staff.settings_panels import AccentPanel
+        current = str(prefs.get("appearance/accent"))
+        panel = AccentPanel(current, self)
+        panel.submitted.connect(self._on_accent_picked)
+        panel.cancelled.connect(self._hide_overlay)
+        self._overlay_panel(panel, width=540)
+
+    def _on_accent_picked(self, values: dict) -> None:
+        accent = str(values.get("accent") or "").strip()
+        if not QColor(accent).isValid():
+            return
+        prefs.set("appearance/accent", accent)
+        self._paint_accent()
+        self._hide_overlay()
+        toast(self, f"Accent: {accent}.")
 
     def _paint_accent(self) -> None:
         colour = str(prefs.get("appearance/accent"))
         self.accent_preview.setStyleSheet(
-            f"background: {colour}; border: 1px solid {theme.BORDER}; border-radius: 6px;")
+            f"background: {colour}; border: 1px solid {theme.BORDER}; border-radius: 10px;")
 
     def _on_font_scale(self, value: float) -> None:
         prefs.set("appearance/font_scale", float(value))
@@ -230,36 +314,30 @@ class SettingsPage(StaffPage):
     # -- behavior -----------------------------------------------------------
 
     def _build_behavior(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Behavior", self))
-        layout.addWidget(_caption("This PC only. Refresh Off stops the "
-                                  "dashboard timer.", self))
-        form = QFormLayout()
-        form.setSpacing(8)
+        box, layout = _panel(
+            "Behavior",
+            "Refresh Off stops the dashboard timer.",
+            "This PC only",
+        )
         self.refresh_combo = _combo([label for label, _ms in prefs.REFRESH_CHOICES], self)
         self.refresh_combo.currentIndexChanged.connect(self._on_refresh)
-        form.addRow("Dashboard refresh", self.refresh_combo)
         self.default_page_combo = _combo(["dashboard", "new_rental"], self)
         self.default_page_combo.currentTextChanged.connect(
             lambda v: prefs.set("behavior/default_page", v)
             if v in prefs.DEFAULT_PAGES else None)
-        form.addRow("Page after login", self.default_page_combo)
         self.rows_combo = _combo([str(n) for n in prefs.ROWS_CHOICES], self)
         self.rows_combo.currentTextChanged.connect(
             lambda v: prefs.set("behavior/rows_per_page", int(v))
             if v.isdigit() else None)
-        form.addRow("Table rows", self.rows_combo)
         self.date_combo = _combo(list(prefs.DATE_FORMATS), self)
         self.date_combo.currentTextChanged.connect(
             lambda v: (prefs.set("behavior/date_format", v), self._preview_formats()))
-        form.addRow("Date format", self.date_combo)
         self.currency_combo = _combo(list(prefs.CURRENCIES), self)
         self.currency_combo.currentTextChanged.connect(
             lambda v: (prefs.set("behavior/currency", v), self._preview_formats()))
-        form.addRow("Currency", self.currency_combo)
         self.format_preview = QLabel("", self)
-        self.format_preview.setObjectName("pageSubtitle")
-        form.addRow("Preview", self.format_preview)
+        self.format_preview.setObjectName("settingsPreview")
+        self.format_preview.setMinimumHeight(40)
         self.confirm_cancel = QCheckBox("Confirm before cancel", self)
         self.confirm_retire = QCheckBox("Confirm before retire", self)
         self.confirm_deactivate = QCheckBox("Confirm before deactivate", self)
@@ -269,19 +347,35 @@ class SettingsPage(StaffPage):
             lambda on: prefs.set("behavior/confirm_retire", bool(on)))
         self.confirm_deactivate.toggled.connect(
             lambda on: prefs.set("behavior/confirm_deactivate", bool(on)))
-        form.addRow("", self.confirm_cancel)
-        form.addRow("", self.confirm_retire)
-        form.addRow("", self.confirm_deactivate)
         self.toast_spin = QSpinBox(self)
+        self.toast_spin.setObjectName("warmInput")
         self.toast_spin.setRange(1000, 10000)
         self.toast_spin.setSingleStep(200)
         self.toast_spin.valueChanged.connect(
             lambda v: prefs.set("behavior/toast_ms", int(v)))
-        form.addRow("Toast (ms)", self.toast_spin)
         self.logout_combo = _combo([label for label, _m in prefs.LOGOUT_CHOICES], self)
         self.logout_combo.currentIndexChanged.connect(self._on_logout)
-        form.addRow("Auto-logout", self.logout_combo)
-        layout.addLayout(form)
+
+        grid = _grid()
+        grid.addWidget(_field("Dashboard refresh", self.refresh_combo, self), 0, 0)
+        grid.addWidget(_field("Page after login", self.default_page_combo, self), 0, 1)
+        grid.addWidget(_field("Table rows", self.rows_combo, self), 0, 2)
+        grid.addWidget(_field("Date format", self.date_combo, self), 1, 0)
+        grid.addWidget(_field("Currency", self.currency_combo, self), 1, 1)
+        grid.addWidget(_field("Toast duration (ms)", self.toast_spin, self), 1, 2)
+        grid.addWidget(_field("Auto-logout", self.logout_combo, self), 2, 0)
+        grid.addWidget(_field("Preview", self.format_preview, self), 2, 1, 1, 2)
+        grid.addWidget(
+            _check_host(
+                self.confirm_cancel,
+                self.confirm_retire,
+                self.confirm_deactivate,
+                parent=self,
+            ),
+            3, 0, 1, 3,
+        )
+        layout.addLayout(grid)
+        layout.addStretch(1)
         return box
 
     def _on_refresh(self, index: int) -> None:
@@ -313,28 +407,28 @@ class SettingsPage(StaffPage):
     # -- files --------------------------------------------------------------
 
     def _build_files(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Files", self))
-        layout.addWidget(_caption("Where PDFs and CSVs land on this PC. "
-                                  "Empty = the receipts folder.", self))
+        box, layout = _panel(
+            "Files",
+            "Where PDFs and CSVs land on this PC. Empty = the receipts folder.",
+            "This PC only",
+        )
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
         self.export_edit = QLineEdit(self)
+        self.export_edit.setObjectName("warmInput")
         self.export_edit.setPlaceholderText("Default: receipts folder")
-        self.export_edit.setFixedHeight(TOOL_ROW_H)
         row.addWidget(self.export_edit, 1)
-        browse = QPushButton("Browse", self)
-        browse.setObjectName("ghostButton")
-        browse.setFixedHeight(TOOL_ROW_H)
+        browse = _pill("Browse", parent=self)
         browse.clicked.connect(self._on_browse_export)
         row.addWidget(browse)
-        save = QPushButton("Save", self)
-        save.setObjectName("primaryButton")
-        save.setFixedHeight(TOOL_ROW_H)
+        save = _pill("Save", kind="primary", parent=self)
         save.clicked.connect(self._on_save_export)
         row.addWidget(save)
         layout.addLayout(row)
         self.export_error = _error(self)
         layout.addWidget(self.export_error)
+        layout.addStretch(1)
         return box
 
     def _on_browse_export(self) -> None:
@@ -358,33 +452,53 @@ class SettingsPage(StaffPage):
     # -- account ------------------------------------------------------------
 
     def _build_account(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Account", self))
+        box, layout = _panel("Account", "Change your own password.")
         self.must_change_banner = QLabel("", self)
         self.must_change_banner.setObjectName("fieldError")
         self.must_change_banner.setWordWrap(True)
         self.must_change_banner.setVisible(False)
         layout.addWidget(self.must_change_banner)
-        form = QFormLayout()
-        form.setSpacing(8)
         self.cur_pw = QLineEdit(self)
         self.cur_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.new_pw = QLineEdit(self)
         self.new_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_pw = QLineEdit(self)
         self.confirm_pw.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("Current password", self.cur_pw)
-        form.addRow("New password", self.new_pw)
-        form.addRow("Confirm new", self.confirm_pw)
-        layout.addLayout(form)
+        for edit in (self.cur_pw, self.new_pw, self.confirm_pw):
+            edit.setObjectName("warmInput")
+        grid = _grid()
+        self.cur_show = self._password_control(self.cur_pw)
+        self.new_show = self._password_control(self.new_pw)
+        self.confirm_show = self._password_control(self.confirm_pw)
+        grid.addWidget(_field("Current password", self.cur_show, self), 0, 0)
+        grid.addWidget(_field("New password", self.new_show, self), 0, 1)
+        grid.addWidget(_field("Confirm new", self.confirm_show, self), 0, 2)
+        layout.addLayout(grid)
+        note = QLabel("At least 8 characters", self)
+        note.setObjectName("settingsHint")
+        layout.addWidget(note)
         self.pw_error = _error(self)
         layout.addWidget(self.pw_error)
-        btn = QPushButton("Change password", self)
-        btn.setObjectName("primaryButton")
-        btn.setFixedHeight(TOOL_ROW_H)
+        btn = _pill("Change password", kind="primary", parent=self)
         btn.clicked.connect(self._on_change_pw)
         layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignLeft)
         return box
+
+    def _password_control(self, edit: QLineEdit) -> QWidget:
+        button = QPushButton("Show", self)
+        button.setObjectName("settingsInline")
+        button.setFixedHeight(TOOL_ROW_H)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda: self._toggle_password(edit, button))
+        return _inline_host(edit, button, parent=self)
+
+    @staticmethod
+    def _toggle_password(edit: QLineEdit, button: QPushButton) -> None:
+        hidden = edit.echoMode() == QLineEdit.EchoMode.Password
+        edit.setEchoMode(
+            QLineEdit.EchoMode.Normal if hidden else QLineEdit.EchoMode.Password
+        )
+        button.setText("Hide" if hidden else "Show")
 
     def _on_change_pw(self) -> None:
         if self.new_pw.text() != self.confirm_pw.text():
@@ -415,31 +529,40 @@ class SettingsPage(StaffPage):
     # -- users (admin) ------------------------------------------------------
 
     def _build_users(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Staff accounts (admin)", self))
-        layout.addWidget(_caption("Temp passwords must be changed on first login. "
-                                  "The last active admin cannot be deactivated.", self))
+        box, layout = _panel(
+            "Staff accounts",
+            "Temp passwords must be changed on first login. The last active "
+            "admin cannot be deactivated.",
+            "Admin",
+        )
         self.users_table = LoadStateTable(
             [Column("Name", ALIGN_LEFT), Column("Email", ALIGN_LEFT),
              Column("Role", ALIGN_LEFT), Column("Active", ALIGN_LEFT),
              Column("Must change", ALIGN_LEFT), Column("Since", ALIGN_LEFT)],
             lambda: [],
             empty_message="No staff accounts yet.",
+            variant="warm",
+            row_height=40,
+        )
+        self.users_table.setFixedHeight(44 + 4 * 40)
+        self.users_table.table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         layout.addWidget(self.users_table)
         row = QHBoxLayout()
-        for text, slot in (("Add", self.open_add_staff),
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        for text, slot in (("Add staff", self.open_add_staff),
                            ("Reset password", self.open_reset_pw),
-                           ("Deactivate / Reactivate", self._on_toggle_active)):
-            btn = QPushButton(text, self)
-            btn.setObjectName("ghostButton")
-            btn.setFixedHeight(TOOL_ROW_H)
+                           ("Deactivate / reactivate", self._on_toggle_active)):
+            btn = _pill(text, parent=self)
             btn.clicked.connect(slot)
             row.addWidget(btn)
         row.addStretch(1)
         layout.addLayout(row)
         self.users_error = _error(self)
         layout.addWidget(self.users_error)
+        layout.addStretch(1)
         return box
 
     def _staff_rows(self):
@@ -460,14 +583,22 @@ class SettingsPage(StaffPage):
             return None
         return self.users_table.cell_text(row, 1) or None
 
-    def _overlay_panel(self, panel: QWidget):
+    def _selected_staff_active(self) -> bool:
+        row = self.users_table.table.currentRow()
+        if row < 0:
+            return True
+        return (self.users_table.cell_text(row, 3) or "").strip().lower() == "yes"
+
+    def _overlay_panel(self, panel: QWidget, *, width: int = 540):
         from app.staff.overlay import FrostedOverlay
         if self._overlay is not None:
             self._overlay.hide_overlay()
             self._overlay.deleteLater()
             self._overlay = None
         window = self.window()
-        overlay = FrostedOverlay(window if window is not None else self)
+        overlay = FrostedOverlay(
+            window if window is not None else self, card_width=width
+        )
         overlay.set_content(panel)
         overlay.show_overlay()
         self._overlay = overlay
@@ -485,7 +616,7 @@ class SettingsPage(StaffPage):
         panel = StaffFormPanel(self)
         panel.submitted.connect(self._on_add_staff)
         panel.cancelled.connect(self._hide_overlay)
-        self._overlay_panel(panel)
+        self._overlay_panel(panel, width=panel.MODAL_WIDTH)
         return True
 
     def _on_add_staff(self, values: dict) -> None:
@@ -515,7 +646,7 @@ class SettingsPage(StaffPage):
         panel = ResetPwPanel(email, self)
         panel.submitted.connect(lambda v: self._on_reset_pw(email, v))
         panel.cancelled.connect(self._hide_overlay)
-        self._overlay_panel(panel)
+        self._overlay_panel(panel, width=panel.MODAL_WIDTH)
         return True
 
     def _on_reset_pw(self, email: str, values: dict) -> None:
@@ -544,8 +675,22 @@ class SettingsPage(StaffPage):
         if not self.context.is_admin:
             toast(self, "That action is for administrators.", "error")
             return
-        if not self._confirm("confirm_deactivate", f"Change active state for {email}?",
-                             destructive=True):
+        deactivating = self._selected_staff_active()
+        action = "Deactivate" if deactivating else "Reactivate"
+        detail = (
+            "They will be signed out and unable to sign in until reactivated."
+            if deactivating
+            else "They will be able to sign in again with their current password."
+        )
+        from app.staff.widgets import confirm_modal
+        if not confirm_modal(
+            self,
+            f"{action} {email}?",
+            detail=detail,
+            destructive=deactivating,
+            confirm_text=action,
+            pref="behavior/confirm_deactivate",
+        ):
             return
         try:
             with self.context.session() as session:
@@ -565,153 +710,183 @@ class SettingsPage(StaffPage):
 
     def _reload_users(self) -> None:
         try:
-            self.users_table.set_rows(self._staff_rows())
+            rows = self._staff_rows()
+            self.users_table.set_rows(rows)
+            self.users_table.setFixedHeight(
+                44 + max(4, min(len(rows), 8)) * 40
+            )
         except Exception as exc:
             self.users_table.set_failed(exc)
 
     # -- pricing (admin, shared) --------------------------------------------
 
-    def _money(self, key: str, label: str, form: QFormLayout) -> QLineEdit:
+    def _money(self, key: str, label: str) -> QLineEdit:
         edit = QLineEdit(self)
-        edit.setObjectName(f"setting_{key}")
-        edit.setFixedHeight(TOOL_ROW_H)
+        edit.setObjectName("warmInput")
         edit.setPlaceholderText(label)
-        form.addRow(label, edit)
         setattr(self, f"edit_{key}", edit)
         return edit
 
     def _build_pricing(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Pricing & policy (admin, shared)", self))
-        layout.addWidget(_caption("Applies to every counter. Rhodium source: "
-                                  "booking_service constants are the fallback.", self))
-        form = QFormLayout()
-        form.setSpacing(8)
-        self._money("scheduling_fee", "Scheduling fee", form)
-        for key, label in (
-                ("deposit_motorcycle", "Deposit · motorcycle"),
-                ("deposit_small", "Deposit · small"),
-                ("deposit_medium", "Deposit · medium"),
-                ("deposit_suv", "Deposit · suv"),
-                ("deposit_van", "Deposit · van"),
-                ("deposit_pickup", "Deposit · pickup"),
-                ("deposit_truck", "Deposit · truck"),
-                ("deposit_default", "Deposit · default"),
-                ("late_fee_per_day", "Late fee / day"),
-                ("sales_target", "Annual sales target")):
-            self._money(key, label, form)
+        box, layout = _panel(
+            "Pricing and policy",
+            "Applies to every counter. Rhodium source: booking_service "
+            "constants are the fallback.",
+            "Shared",
+        )
+        grid = _grid()
+        fields = (
+            ("scheduling_fee", "Scheduling fee", 0, 0),
+            ("late_fee_per_day", "Late fee per day", 0, 1),
+            ("sales_target", "Annual sales target", 0, 2),
+            ("deposit_motorcycle", "Deposit · motorcycle", 1, 0),
+            ("deposit_small", "Deposit · small", 1, 1),
+            ("deposit_medium", "Deposit · medium", 1, 2),
+            ("deposit_suv", "Deposit · SUV", 2, 0),
+            ("deposit_van", "Deposit · van", 2, 1),
+            ("deposit_pickup", "Deposit · pickup", 2, 2),
+            ("deposit_truck", "Deposit · truck", 3, 0),
+            ("deposit_default", "Deposit · default", 3, 1),
+        )
+        for key, label, row, column in fields:
+            edit = self._money(key, label)
+            grid.addWidget(_field(label, edit, self), row, column)
         self.long_days = QSpinBox(self)
+        self.long_days.setObjectName("warmInput")
         self.long_days.setRange(2, 60)
-        form.addRow("Long-term from (days)", self.long_days)
+        grid.addWidget(
+            _field("Long-term from (days)", self.long_days, self), 4, 0
+        )
         self.long_disc = QLineEdit(self)
-        self.long_disc.setFixedHeight(TOOL_ROW_H)
-        form.addRow("Long-term multiplier (0.10–1.00)", self.long_disc)
+        self.long_disc.setObjectName("warmInput")
+        grid.addWidget(
+            _field("Long-term multiplier (0.10–1.00)", self.long_disc, self),
+            4, 1,
+        )
         self.moto_mult = QLineEdit(self)
-        self.moto_mult.setFixedHeight(TOOL_ROW_H)
-        form.addRow("Motorcycle multiplier", self.moto_mult)
-        layout.addLayout(form)
+        self.moto_mult.setObjectName("warmInput")
+        grid.addWidget(
+            _field("Motorcycle multiplier", self.moto_mult, self), 4, 2
+        )
+        layout.addLayout(grid)
         self.pricing_error = _error(self)
         layout.addWidget(self.pricing_error)
+        layout.addStretch(1)
         return box
 
     # -- operations (admin, shared) -----------------------------------------
 
     def _build_operations(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Operations (admin, shared)", self))
-        form = QFormLayout()
-        form.setSpacing(8)
+        box, layout = _panel(
+            "Operations",
+            "Defaults for new bookings and reminder windows.",
+            "Shared",
+        )
         self.method_combo = _combo(["cash", "card", "gcash"], self)
-        form.addRow("Default payment method", self.method_combo)
         self.channel_combo = _combo(["walk_in", "online"], self)
-        form.addRow("Default channel", self.channel_combo)
         self.gcash_check = QCheckBox("Require GCash reference", self)
-        form.addRow("", self.gcash_check)
         self.sameday_check = QCheckBox("Allow same-day as 1-day rental", self)
-        form.addRow("", self.sameday_check)
         self.licence_spin = QSpinBox(self)
+        self.licence_spin.setObjectName("warmInput")
         self.licence_spin.setRange(0, 365)
-        form.addRow("Licence expiring window (days)", self.licence_spin)
         self.maint_days = QSpinBox(self)
+        self.maint_days.setObjectName("warmInput")
         self.maint_days.setRange(0, 365)
-        form.addRow("Maintenance due (days)", self.maint_days)
         self.maint_km = QSpinBox(self)
+        self.maint_km.setObjectName("warmInput")
         self.maint_km.setRange(0, 100000)
-        form.addRow("Maintenance due (km)", self.maint_km)
-        layout.addLayout(form)
+
+        grid = _grid()
+        grid.addWidget(_field("Default payment method", self.method_combo, self), 0, 0)
+        grid.addWidget(_field("Default channel", self.channel_combo, self), 0, 1)
+        grid.addWidget(
+            _check_host(self.gcash_check, self.sameday_check, parent=self),
+            1, 0, 1, 2,
+        )
+        grid.addWidget(
+            _field("Licence expiring window (days)", self.licence_spin, self), 2, 0
+        )
+        grid.addWidget(
+            _field("Maintenance due (days)", self.maint_days, self), 2, 1
+        )
+        grid.addWidget(
+            _field("Maintenance due (km)", self.maint_km, self), 2, 2
+        )
+        layout.addLayout(grid)
         self.ops_error = _error(self)
         layout.addWidget(self.ops_error)
+        layout.addStretch(1)
         return box
 
     # -- receipts (admin, shared) -------------------------------------------
 
     def _build_receipts(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("Receipts (admin, shared)", self))
-        form = QFormLayout()
-        form.setSpacing(8)
+        box, layout = _panel(
+            "Receipts",
+            "Printed on every receipt.",
+            "Shared",
+        )
         self.branch_name = QLineEdit(self)
         self.branch_addr = QLineEdit(self)
         self.branch_phone = QLineEdit(self)
-        for widget, label in ((self.branch_name, "Branch name"),
-                              (self.branch_addr, "Branch address"),
-                              (self.branch_phone, "Branch phone")):
-            widget.setFixedHeight(TOOL_ROW_H)
-            form.addRow(label, widget)
+        for widget in (self.branch_name, self.branch_addr, self.branch_phone):
+            widget.setObjectName("warmInput")
         self.fee_note_check = QCheckBox("Show scheduling-fee note on receipts", self)
         self.auto_open_check = QCheckBox("Open PDF after export", self)
-        form.addRow("", self.fee_note_check)
-        form.addRow("", self.auto_open_check)
-        layout.addLayout(form)
+        grid = _grid()
+        grid.addWidget(_field("Branch name", self.branch_name, self), 0, 0)
+        grid.addWidget(_field("Branch address", self.branch_addr, self), 0, 1)
+        grid.addWidget(_field("Branch phone", self.branch_phone, self), 0, 2)
+        grid.addWidget(
+            _check_host(self.fee_note_check, self.auto_open_check, parent=self),
+            1, 0, 1, 3,
+        )
+        layout.addLayout(grid)
         self.receipt_error = _error(self)
         layout.addWidget(self.receipt_error)
+        layout.addStretch(1)
         return box
 
     # -- system -------------------------------------------------------------
 
     def _build_system(self):
-        box, layout = _panel()
-        layout.addWidget(_heading("System", self))
+        box, layout = _panel("System")
         self.db_label = QLabel("", self)
-        self.db_label.setObjectName("pageSubtitle")
+        self.db_label.setObjectName("settingsHint")
         self.db_label.setWordWrap(True)
         layout.addWidget(self.db_label)
         row = QHBoxLayout()
-        test_db = QPushButton("Test connection", self)
-        test_db.setObjectName("ghostButton")
-        test_db.setFixedHeight(TOOL_ROW_H)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        test_db = _pill("Test connection", parent=self)
         test_db.clicked.connect(self._on_test_db)
         row.addWidget(test_db)
-        backup = QPushButton("Backup database", self)
-        backup.setObjectName("ghostButton")
-        backup.setFixedHeight(TOOL_ROW_H)
+        backup = _pill("Backup database", parent=self)
         backup.clicked.connect(self._on_backup)
         row.addWidget(backup)
         row.addStretch(1)
         layout.addLayout(row)
         self.cache_label = QLabel("", self)
-        self.cache_label.setObjectName("pageSubtitle")
+        self.cache_label.setObjectName("settingsHint")
         layout.addWidget(self.cache_label)
         row2 = QHBoxLayout()
-        clear = QPushButton("Clear image cache", self)
-        clear.setObjectName("ghostButton")
-        clear.setFixedHeight(TOOL_ROW_H)
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(10)
+        clear = _pill("Clear image cache", parent=self)
         clear.clicked.connect(self._on_clear_cache)
         row2.addWidget(clear)
-        test_api = QPushButton("Test CarImages API", self)
-        test_api.setObjectName("ghostButton")
-        test_api.setFixedHeight(TOOL_ROW_H)
+        test_api = _pill("Test CarImages API", parent=self)
         test_api.clicked.connect(self._on_test_api)
         row2.addWidget(test_api)
         row2.addStretch(1)
         layout.addLayout(row2)
         self.api_label = QLabel("", self)
-        self.api_label.setObjectName("pageSubtitle")
+        self.api_label.setObjectName("settingsHint")
         self.api_label.setWordWrap(True)
         layout.addWidget(self.api_label)
         about = QLabel(f"RentWheels Staff {VERSION} · "
                        "PySide6 · SQLAlchemy · SQLite/MySQL", self)
-        about.setObjectName("pageSubtitle")
+        about.setObjectName("settingsHint")
         layout.addWidget(about)
         self.system_error = _error(self)
         layout.addWidget(self.system_error)

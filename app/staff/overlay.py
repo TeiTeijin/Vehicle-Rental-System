@@ -9,7 +9,7 @@ Content swaps via `set_content()`; the backdrop renders once per opening
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -36,9 +36,15 @@ BACKDROP_RERENDER_MS = 120
 class FrostedOverlay(QWidget):
     """Window-embedded modal glass with swappable card content."""
 
-    def __init__(self, window: QWidget) -> None:
+    #: Emitted whenever the overlay is dismissed (button, Esc, outside click).
+    closed = Signal()
+
+    def __init__(
+        self, window: QWidget, *, card_width: int = OVERLAY_CARD_W
+    ) -> None:
         super().__init__(window)
         self._window = window
+        self._card_width = int(card_width or OVERLAY_CARD_W)
         #: False while a wizard owns the overlay: Escape and outside clicks
         #: must not throw away a half-filled rental.
         self._dismissible = True
@@ -87,11 +93,18 @@ class FrostedOverlay(QWidget):
             " QScrollArea#frostedScroll QWidget#frostedViewport {"
             " background: transparent; border: none; }"
         )
-        self.scroll.setFixedWidth(OVERLAY_CARD_W)
+        self.scroll.setFixedWidth(self._card_width)
         middle.addWidget(self.scroll)
         middle.addStretch(1)
         outer.addLayout(middle, 1)
         self.hide()
+
+    def set_card_width(self, width: int) -> None:
+        """Resize the content column; the backdrop follows on the next fit."""
+        self._card_width = int(width or OVERLAY_CARD_W)
+        self.scroll.setFixedWidth(self._card_width)
+        if self.isVisible():
+            self._fit()
 
     def set_dismissible(self, flag: bool) -> None:
         """Allow or refuse Escape/outside-click closing.
@@ -185,10 +198,13 @@ class FrostedOverlay(QWidget):
         self.setFocus()
 
     def hide_overlay(self) -> None:
+        was_visible = self.isVisible()
         self._window.removeEventFilter(self)
         self._blur_timer.stop()
         self.backdrop.clear()
         self.hide()
+        if was_visible:
+            self.closed.emit()
 
     def _fit(self) -> None:
         self.setGeometry(self._window.rect())
@@ -230,3 +246,24 @@ class FrostedOverlay(QWidget):
         ):
             self.hide_overlay()
         super().mousePressEvent(event)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Scroll the open sheet from anywhere on the frosted glass.
+
+        The scroll area only receives wheel events over its 540px column.
+        A wheel notch over the surrounding backdrop used to do nothing, so
+        the natural next click landed outside the card and dismissed the
+        modal. Forward those events to the same scrollbar.
+        """
+        bar = self.scroll.verticalScrollBar()
+        pixel = event.pixelDelta().y()
+        angle = event.angleDelta().y()
+        if pixel:
+            bar.setValue(bar.value() - pixel)
+        elif angle:
+            step = max(1, bar.singleStep()) * 3
+            bar.setValue(bar.value() - int(angle / 120 * step))
+        else:
+            super().wheelEvent(event)
+            return
+        event.accept()

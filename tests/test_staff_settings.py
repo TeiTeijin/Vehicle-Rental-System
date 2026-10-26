@@ -312,3 +312,244 @@ class TestSettingsPage:
             assert media.model_3d_url == ""
             assert media.source == "carimagesapi"
         target.dispose()
+
+
+class TestWarmStaffModals:
+    @staticmethod
+    def _select(page, email: str) -> None:
+        for row in range(page.users_table.row_count()):
+            if page.users_table.cell_text(row, 1) == email:
+                page.users_table.table.selectRow(row)
+                return
+        raise AssertionError(f"{email} not in staff table")
+
+    @staticmethod
+    def _window_page(branch):
+        from app.staff.pages.settings import SettingsPage
+        from app.staff.shell import StaffShell
+
+        _built, context = branch
+        window = StaffShell(context)
+        page = SettingsPage(window)
+        page.refresh()
+        return window, page
+
+    def test_settings_cards_use_warm_panels_and_rail_tags(self, branch):
+        from PySide6.QtWidgets import QFrame, QLabel
+
+        window, page = self._window_page(branch)
+        try:
+            cards = [
+                frame
+                for frame in page.findChildren(QFrame)
+                if frame.objectName() == "pagePanel"
+                and frame.property("variant") == "warm"
+            ]
+            assert len(cards) >= 9
+            tags = {
+                label.text()
+                for label in page.findChildren(QLabel)
+                if label.objectName() == "settingsTag"
+            }
+            assert tags == {"This PC only", "Shared", "Admin"}
+            assert page._tools_panel.property("variant") == "warmHost"
+        finally:
+            window.deleteLater()
+
+    def test_reset_password_panel_is_warm_and_validates(self, qapp):
+        from PySide6.QtWidgets import QLineEdit
+
+        from app.staff.settings_panels import ResetPwPanel
+
+        panel = ResetPwPanel("counter@example.com")
+        try:
+            assert panel.card.width() == 540
+            assert panel.email_label.text() == "counter@example.com"
+            assert panel.temp.echoMode() == QLineEdit.EchoMode.Password
+
+            panel.temp_show.click()
+            assert panel.temp.echoMode() == QLineEdit.EchoMode.Normal
+            assert panel.temp_show.text() == "Hide"
+
+            panel.generate.click()
+            assert len(panel.temp.text()) >= 8
+            assert panel.temp.echoMode() == QLineEdit.EchoMode.Normal
+
+            seen: list[dict] = []
+            panel.submitted.connect(seen.append)
+            panel.temp.clear()
+            panel._on_save()
+            assert "Enter a temporary password." in panel.error.text()
+            assert panel.error.isHidden() is False
+
+            panel.temp.setText("short")
+            panel._on_save()
+            assert "at least 8" in panel.error.text()
+            assert seen == []
+
+            panel.temp.setText("temp-pass-9")
+            panel._on_save()
+            assert seen == [{"temp_password": "temp-pass-9"}]
+            assert panel.error.isHidden() is True
+        finally:
+            panel.deleteLater()
+
+    def test_settings_reset_password_opens_warm_overlay(self, branch):
+        from app.staff.settings_panels import ResetPwPanel
+
+        window, page = self._window_page(branch)
+        try:
+            self._select(page, "counter@example.com")
+            assert page.open_reset_pw() is True
+            overlay = page._overlay
+            panel = overlay.findChild(ResetPwPanel)
+            assert panel is not None
+            assert overlay.isHidden() is False
+            assert overlay.scroll.width() == 540
+            assert panel.card.width() == 540
+            assert panel.email_label.text() == "counter@example.com"
+            assert panel.objectName() == "bookingModal"
+            assert panel.property("variant") == "settings"
+        finally:
+            page._hide_overlay()
+            window.deleteLater()
+
+    def test_add_staff_opens_warm_900_overlay(self, branch):
+        from app.staff.settings_panels import StaffFormPanel
+
+        window, page = self._window_page(branch)
+        try:
+            assert page.open_add_staff() is True
+            overlay = page._overlay
+            panel = overlay.findChild(StaffFormPanel)
+            assert panel is not None
+            assert overlay.scroll.width() == 900
+            assert panel.card.width() == 900
+            assert panel.role_chips.buttons["staff"].isChecked() is True
+            panel.role.setCurrentText("admin")
+            assert panel.role_chips.buttons["admin"].isChecked() is True
+        finally:
+            page._hide_overlay()
+            window.deleteLater()
+
+    def test_accent_panel_is_warm_and_submits_hex(self, qapp):
+        from app.staff.settings_panels import AccentPanel
+
+        panel = AccentPanel("#D97757")
+        try:
+            assert panel.card.width() == 540
+            assert panel.hex_edit.text().lower() == "#d97757"
+            panel.select_colour("#2563EB")
+            assert panel.hex_edit.text().lower() == "#2563eb"
+
+            seen: list[dict] = []
+            panel.submitted.connect(seen.append)
+            panel.hex_edit.setText("#12ab34")
+            panel._on_save()
+            assert seen == [{"accent": "#12ab34"}]
+
+            panel.hex_edit.setText("not-a-colour")
+            panel._on_save()
+            assert "hex colour" in panel.error.text()
+            assert seen == [{"accent": "#12ab34"}]
+        finally:
+            panel.deleteLater()
+
+    def test_deactivate_confirmation_uses_warm_modal_arguments(
+        self, branch, monkeypatch
+    ):
+        import app.staff.pages.settings as settings_mod
+        import app.staff.widgets as widgets
+
+        captured: dict = {}
+
+        def fake_confirm(parent, question, **kwargs):
+            captured["parent"] = parent
+            captured["question"] = question
+            captured.update(kwargs)
+            return False
+
+        monkeypatch.setattr(widgets, "confirm_modal", fake_confirm)
+        monkeypatch.setattr(settings_mod, "toast", lambda *a, **k: None)
+        window, page = self._window_page(branch)
+        try:
+            self._select(page, "counter@example.com")
+            page._on_toggle_active()
+            assert captured["parent"] is page
+            assert captured["question"] == "Deactivate counter@example.com?"
+            assert captured["destructive"] is True
+            assert captured["confirm_text"] == "Deactivate"
+            assert captured["pref"] == "behavior/confirm_deactivate"
+            with page.context.reading() as session:
+                from app.models import Users
+                row = session.query(Users).filter_by(
+                    email="counter@example.com").one()
+                assert row.is_active is True
+        finally:
+            window.deleteLater()
+
+    def test_reactivate_confirmation_is_not_destructive(self, branch, monkeypatch):
+        import app.staff.pages.settings as settings_mod
+        import app.staff.widgets as widgets
+        from app.models import Users
+
+        _built, context = branch
+        with context.session() as session:
+            row = session.query(Users).filter_by(
+                email="counter@example.com").one()
+            staff_service.set_active(session, row, False)
+
+        captured: dict = {}
+
+        def fake_confirm(parent, question, **kwargs):
+            captured["question"] = question
+            captured.update(kwargs)
+            return True
+
+        monkeypatch.setattr(widgets, "confirm_modal", fake_confirm)
+        monkeypatch.setattr(settings_mod, "toast", lambda *a, **k: None)
+        window, page = self._window_page(branch)
+        try:
+            self._select(page, "counter@example.com")
+            page._on_toggle_active()
+            assert captured["question"] == "Reactivate counter@example.com?"
+            assert captured["destructive"] is False
+            assert captured["confirm_text"] == "Reactivate"
+            assert captured["pref"] == "behavior/confirm_deactivate"
+            with page.context.reading() as session:
+                row = session.query(Users).filter_by(
+                    email="counter@example.com").one()
+                assert row.is_active is True
+        finally:
+            window.deleteLater()
+
+    def test_last_active_admin_guard_survives_warm_confirmation(
+        self, branch, monkeypatch
+    ):
+        import app.staff.pages.settings as settings_mod
+        import app.staff.widgets as widgets
+        from app.models import Users
+
+        seen: list[tuple[str, str]] = []
+
+        monkeypatch.setattr(
+            widgets, "confirm_modal", lambda *a, **k: True
+        )
+        monkeypatch.setattr(
+            settings_mod, "toast", lambda _p, message, kind="ok": seen.append(
+                (message, kind))
+        )
+        window, page = self._window_page(branch)
+        try:
+            self._select(page, "admin@example.com")
+            page._on_toggle_active()
+            assert any(
+                "Cannot deactivate the last active admin." in message
+                for message, _kind in seen
+            )
+            with page.context.reading() as session:
+                row = session.query(Users).filter_by(
+                    email="admin@example.com").one()
+                assert row.is_active is True
+        finally:
+            window.deleteLater()

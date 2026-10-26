@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QEventLoop,
     QPoint,
     QPropertyAnimation,
     Qt,
@@ -243,6 +244,63 @@ def confirm(parent: QWidget, question: str, *, detail: str = "", destructive: bo
     if destructive:
         box.button(QMessageBox.StandardButton.Yes).setObjectName("dangerButton")
     return box.exec() == QMessageBox.StandardButton.Yes
+
+
+def confirm_modal(
+    parent: QWidget,
+    question: str,
+    *,
+    detail: str = "",
+    destructive: bool = False,
+    confirm_text: str = "Yes",
+    pref: str | None = None,
+) -> bool:
+    """Blocking confirmation on the app's warm frosted overlay.
+
+    Same Yes/No semantics as :func:`confirm`, but the question is a 540px
+    white sheet with the standard modal header, footer, and frosted glass
+    instead of an OS message box. Escape and an outside click count as No.
+    ``pref`` honours the same Settings confirmation toggles as
+    :func:`confirm`.
+    """
+    if pref:
+        try:
+            from app.staff import prefs as _prefs
+
+            if not bool(_prefs.get(pref)):
+                return True
+        except Exception:
+            pass
+    from app.staff.overlay import FrostedOverlay
+    from app.staff.ui_kit import ConfirmPanel
+
+    window = parent.window() if parent is not None else None
+    host = window if window is not None else parent
+    overlay = FrostedOverlay(host, card_width=540)
+    panel = ConfirmPanel(
+        question,
+        detail,
+        destructive=destructive,
+        confirm_text=confirm_text,
+    )
+    overlay.set_content(panel)
+
+    accepted = {"value": False}
+    loop = QEventLoop()
+
+    def _accept() -> None:
+        accepted["value"] = True
+        loop.quit()
+
+    panel.confirmed.connect(_accept)
+    panel.cancelled.connect(loop.quit)
+    overlay.closed.connect(loop.quit)
+    overlay.show_overlay()
+    panel.keep_button.setFocus()
+    loop.exec()
+    overlay.hide_overlay()
+    overlay.deleteLater()
+    return accepted["value"]
 
 
 class InfoDialog(QDialog):

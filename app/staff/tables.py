@@ -5,7 +5,7 @@ from enum import Enum, auto
 from typing import Callable, Iterable, Sequence
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -37,6 +37,13 @@ class Column:
     title: str
     align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
     stretch: bool = False
+    #: Warm-table presentation: ``text``, ``status``, ``report_status``,
+    #: ``payment``, ``chip``, ``ratio``, ``inspection``, ``damage``,
+    #: ``muted``, ``strong``, or ``money``.
+    kind: str = "text"
+    weight: QFont.Weight | None = None
+    colour: str | None = None
+    wrap: bool = False
 
 
 ALIGN_LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -55,6 +62,114 @@ class StatusPill(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
+def _status_tone(status: str | None) -> str:
+    key = (status or "").strip().lower()
+    if key in ("confirmed", "ongoing", "available", "paid"):
+        return "ok"
+    if key in (
+        "pending",
+        "reserved",
+        "maintenance",
+        "in_progress",
+        "scheduled",
+        "refunded",
+    ):
+        return "warn"
+    if key in ("cancelled", "failed"):
+        return "danger"
+    return "neutral"
+
+
+def _payment_tone(text: str) -> str:
+    lowered = (text or "").strip().lower()
+    if "unpaid" in lowered:
+        return "danger"
+    if "partial" in lowered:
+        return "warn"
+    return "neutral"
+
+
+def _chip_tone(text: str) -> str:
+    """Tone for a report chip whose label is already human-readable."""
+    key = (text or "").strip().lower()
+    if key.startswith("overdue") or key.startswith("expired"):
+        return "danger"
+    if key.startswith("expires") or key.startswith("due"):
+        return "warn"
+    if key in ("ok", "valid", "paid", "complete", "completed"):
+        return "ok"
+    return _status_tone(key)
+
+
+def _ratio_tone(text: str) -> str:
+    try:
+        value = float((text or "").replace("%", "").replace(",", ""))
+    except ValueError:
+        return "neutral"
+    if value > 100:
+        return "danger"
+    if value > 50:
+        return "warn"
+    return "ok"
+
+
+class TableChip(QLabel):
+    """22px warm-table chip (status or payment state).
+
+    A fixed height is load-bearing: Qt drops the stylesheet's border radius
+    when it exceeds half the label height, which left the old 19px chip with
+    square corners. The QSS radius is half of this height, so the chip is a
+    true pill at every DPI.
+    """
+
+    HEIGHT = 22
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        tone: str = "neutral",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("tableChip")
+        self.setProperty("tone", tone)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
+
+
+class ChipCell(QWidget):
+    """Auto-width chip inside a full-width table cell."""
+
+    def __init__(
+        self,
+        chip: QLabel,
+        *,
+        align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        # The blanket cream QWidget rule would paint a cream block behind
+        # every chip in a white card. This host is a layout shim only.
+        self.setObjectName("tableChipCell")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        if align & Qt.AlignmentFlag.AlignRight:
+            layout.addStretch(1)
+        layout.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        if not (align & Qt.AlignmentFlag.AlignRight):
+            layout.addStretch(1)
+        self._chip = chip
+
+    def text(self) -> str:
+        return self._chip.text()
+
+
 class LoadStateTable(QWidget):
     def __init__(
         self,
@@ -64,11 +179,15 @@ class LoadStateTable(QWidget):
         empty_message: str = "Nothing here yet.",
         parent: QWidget | None = None,
         shimmer_rows: int = 0,
+        variant: str = "default",
+        row_height: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName(theme.OBJ_TABLE_HOST)
         self._loader = loader
         self._empty_message = empty_message
+        self._variant = variant
+        self._row_height = row_height or (56 if variant == "warm" else None)
         self.state = LoadState.LOADING
         self.last_error: BaseException | None = None
         #: Retry presses; surfaced for tests.
@@ -142,22 +261,30 @@ class LoadStateTable(QWidget):
     # -- construction -----------------------------------------------------
 
     def _build_table(self) -> QTableWidget:
+        warm = self._variant == "warm"
         table = QTableWidget(0, len(self._columns), self)
         table.setHorizontalHeaderLabels([c.title for c in self._columns])
-        table.setAlternatingRowColors(True)
+        table.setAlternatingRowColors(not warm)
         table.setShowGrid(False)
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        table.setWordWrap(False)
+        table.setWordWrap(warm)
         # No bar widgets at all for a cleaner look (same pattern as the
         # sidebar): wheel / keys / scrollToItem keep working.
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        if warm:
+            table.setProperty("variant", "warm")
+            if self._row_height:
+                table.verticalHeader().setDefaultSectionSize(self._row_height)
 
         header = table.horizontalHeader()
         header.setHighlightSections(False)
+        if warm:
+            header.setObjectName("warmHeader")
+            header.setFixedHeight(44)
         # Last column absorbs leftover viewport width so no empty gap
         # shows on the right when content is narrower than the panel.
         header.setStretchLastSection(True)
@@ -168,6 +295,9 @@ class LoadStateTable(QWidget):
                 header.setSectionResizeMode(
                     index, QHeaderView.ResizeMode.ResizeToContents
                 )
+            item = table.horizontalHeaderItem(index)
+            if item is not None:
+                item.setTextAlignment(column.align)
         return table
 
     # -- loading ----------------------------------------------------------
@@ -220,18 +350,131 @@ class LoadStateTable(QWidget):
         try:
             self._table.setRowCount(len(rows))
             for r, row in enumerate(rows):
+                if self._row_height:
+                    self._table.setRowHeight(r, self._row_height)
                 for c, value in enumerate(row[: len(self._columns)]):
                     self._table.setItem(r, c, self._make_item(r, c, value))
         finally:
             self._table.setUpdatesEnabled(True)
 
+    def _chip_item(
+        self,
+        row: int,
+        column: int,
+        column_spec: Column,
+        text: str,
+        *,
+        tone: str,
+    ) -> QTableWidgetItem:
+        """Chip in a cell widget plus an invisible item for column sizing."""
+        chip = TableChip(text, tone=tone)
+        self._table.setCellWidget(
+            row, column, ChipCell(chip, align=column_spec.align)
+        )
+        # ResizeToContents measures the item, not the cell widget. Keep the
+        # label in the (invisible) item so the chip gets its width.
+        placeholder = QTableWidgetItem(f"{text}  ")
+        placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
+        placeholder.setTextAlignment(column_spec.align)
+        return placeholder
+
     def _make_item(self, row: int, column: int, value) -> QTableWidgetItem:
         column_spec = self._columns[column]
-        if column_spec.title.lower() in ("status", "state") and isinstance(value, str):
+        warm = self._variant == "warm"
+        if not warm and column_spec.title.lower() in ("status", "state") and isinstance(value, str):
             pill = StatusPill(theme.status_label(value), value)
             self._table.setCellWidget(row, column, pill)
             return QTableWidgetItem("")
-        return QTableWidgetItem("" if value is None else str(value))
+        if warm and column_spec.kind in (
+            "status", "report_status", "payment", "chip", "ratio"
+        ):
+            raw = "" if value is None else str(value)
+            if column_spec.kind in ("status", "report_status"):
+                text = theme.status_label(raw)
+                if (
+                    column_spec.kind == "report_status"
+                    and raw.strip().lower() in ("ongoing", "in_progress")
+                ):
+                    # The report references paint an active rental blue.
+                    tone = "info"
+                else:
+                    tone = _status_tone(raw)
+            elif column_spec.kind == "payment":
+                text = raw
+                tone = _payment_tone(raw)
+            elif column_spec.kind == "ratio":
+                text = raw
+                tone = _ratio_tone(raw)
+            else:
+                text = raw
+                tone = _chip_tone(raw)
+            chip = TableChip(text, tone=tone)
+            self._table.setCellWidget(
+                row, column, ChipCell(chip, align=column_spec.align)
+            )
+            # ResizeToContents measures the item, not the cell widget. Keep
+            # ResizeToContents measures the item, not the cell widget. Keep
+            # the label in the (invisible) item so the chip gets its width;
+            # the trailing pad pays for the chip's 10px side padding + border.
+            placeholder = QTableWidgetItem(f"{text}      ")
+            placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
+            placeholder.setTextAlignment(column_spec.align)
+            return placeholder
+        if warm and column_spec.kind == "kind":
+            # Ledger kinds read as outlined pills, not filled status chips:
+            # "Rental"/"Deposit" are categories, not states.
+            text = "" if value is None else str(value)
+            chip = TableChip(text, tone="outline")
+            self._table.setCellWidget(
+                row, column, ChipCell(chip, align=column_spec.align)
+            )
+            placeholder = QTableWidgetItem(f"{text}      ")
+            placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
+            placeholder.setTextAlignment(column_spec.align)
+            return placeholder
+        if warm and column_spec.kind == "inspection":
+            text = "" if value is None else str(value)
+            lowered = text.strip().lower()
+            if lowered.startswith("pre"):
+                tone = "pre"
+            elif lowered.startswith("post"):
+                tone = "post"
+            else:
+                tone = "neutral"
+            return self._chip_item(
+                row, column, column_spec, text, tone=tone
+            )
+        if warm and column_spec.kind == "damage":
+            text = "" if value is None else str(value)
+            clean = text.strip().lower()
+            if not clean or clean in ("-", "none", "none recorded"):
+                # No damage is ordinary text, not a chip: a neutral sentence
+                # reads calmer than a pill and keeps the red chips meaningful.
+                item = QTableWidgetItem(text or "None recorded")
+                item.setTextAlignment(column_spec.align)
+                item.setForeground(QBrush(QColor("#7D7265")))
+                return item
+            return self._chip_item(
+                row, column, column_spec, text, tone="danger"
+            )
+
+        item = QTableWidgetItem("" if value is None else str(value))
+        item.setTextAlignment(column_spec.align)
+        kind = column_spec.kind
+        if warm:
+            font = item.font()
+            if column_spec.weight is not None:
+                font.setWeight(column_spec.weight)
+            elif kind == "strong":
+                font.setWeight(QFont.Weight.DemiBold)
+            elif kind == "money":
+                font.setWeight(QFont.Weight.DemiBold)
+            item.setFont(font)
+            colour = column_spec.colour
+            if colour is None:
+                colour = "#7D7265" if kind == "muted" else "#171717"
+            item.setForeground(QBrush(QColor(colour)))
+        return item
 
     def _sync_stack(self) -> None:
         if self.state is LoadState.LOADING and self._shimmer is not None:
@@ -292,6 +535,8 @@ class LoadStateTable(QWidget):
     def cell_text(self, row: int, column: int) -> str:
         widget = self._table.cellWidget(row, column)
         if isinstance(widget, QLabel):
+            return widget.text()
+        if widget is not None and callable(getattr(widget, "text", None)):
             return widget.text()
         item = self._table.item(row, column)
         return item.text() if item is not None else ""

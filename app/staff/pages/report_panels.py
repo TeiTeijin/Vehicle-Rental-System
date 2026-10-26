@@ -1,7 +1,8 @@
 """Right-side report panels for the Reports page.
 
-Each panel owns one question: its filter row, summary caption, chart (when
-it helps), and table. Shared contract used by `ReportsPage`:
+Each panel owns one question: its filter row, cream metric tiles, summary
+caption, chart (when it helps), and table. Shared contract used by
+`ReportsPage`:
 
 - `key`: export filename stem.
 - `set_range(from_date, to_date)` + `reload_async(controller)`: fetch runs
@@ -11,26 +12,33 @@ it helps), and table. Shared contract used by `ReportsPage`:
 - `show_error(message)` / `error_label`: the inverted-range path.
 - `summary` / `table`: captions and tables the page (and tests) read.
 - `export_data(from_date, to_date)` -> (title, summary, headers, rows).
+  Exports always use the service's complete result, never the visible page.
 """
 from __future__ import annotations
 
 import time
 from datetime import date
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from app.services import report_service
+from app.services import maintenance_service, report_service
 from app.staff.cards import Caption
 from app.staff.charts import HandDrawnBars, HandDrawnChart
 from app.staff.metrics import TOOL_ROW_H
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
+from app.staff.ui_kit import MetricGrid
 from app.utils.money import pesos
 
 CHANNEL_FILTERS: tuple[tuple[str, str | None], ...] = (
@@ -45,8 +53,17 @@ GRANULARITIES: tuple[str, ...] = ("Day", "Week", "Month")
 UTILIZATION_CACHE_SECONDS = 60
 
 
+def _stacked_vehicle(label: str) -> str:
+    """Vehicle labels read model first, plate second, like the references."""
+    plate, _, rest = (label or "").partition(" ")
+    return f"{rest}\n{plate}" if plate and rest else (label or "-")
+
+
 class _PanelBase(QWidget):
     key = "report"
+
+    #: The reference shows ten rows, then a footer that reveals the rest.
+    PAGE_SIZE = 10
 
     def __init__(self, context, parent=None) -> None:
         super().__init__(parent)
@@ -61,16 +78,32 @@ class _PanelBase(QWidget):
         self._to: date | None = None
         self._body = QVBoxLayout(self)
         self._body.setContentsMargins(0, 0, 0, 0)
-        self._body.setSpacing(8)
+        self._body.setSpacing(10)
 
         self.summary = Caption("", parent=self)
+        self.summary.setObjectName("reportSummary")
         self.error_label = QLabel("", self)
         self.error_label.setObjectName("fieldError")
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
 
+        #: Panels without a metric strip (Utilization) leave this as None.
+        self.metrics: MetricGrid | None = None
+        self.metric_tiles: dict = {}
+        self._all_rows: list = []
+        self.total_row_count = 0
+        self._page_size = self.PAGE_SIZE
+        self._count_unit = ""
+
+    def _filter_row(self) -> QHBoxLayout:
+        filters = QHBoxLayout()
+        filters.setContentsMargins(0, 0, 0, 0)
+        filters.setSpacing(8)
+        return filters
+
     def _combo(self, items: list[str]) -> QComboBox:
         combo = QComboBox(self)
+        combo.setObjectName("reportFilter")
         combo.addItems(items)
         combo.setFixedHeight(TOOL_ROW_H)
         return combo
@@ -88,6 +121,125 @@ class _PanelBase(QWidget):
     def _reload_requested(self) -> None:
         self.reload_requested()
 
+    def _add_metrics(self, rows: list[list[tuple[str, str, bool]]]) -> None:
+        """Build the cream metric rows; the first tile is the headline."""
+        self.metrics = MetricGrid(self)
+        for spec in rows:
+            row = self.metrics.row()
+            for label, value, highlight in spec:
+                row.add(label, value, highlight=highlight)
+        self.metric_tiles = self.metrics.tiles
+        self._body.addWidget(self.metrics)
+
+    def _warm_table(
+        self,
+        columns: list[Column],
+        *,
+        empty_message: str,
+    ) -> LoadStateTable:
+        return LoadStateTable(
+            columns,
+            lambda: [],
+            empty_message=empty_message,
+            shimmer_rows=8,
+            variant="warm",
+            row_height=56,
+        )
+
+    def _mount(
+        self,
+        table: LoadStateTable,
+        *,
+        chart: QWidget | None = None,
+    ) -> None:
+        """Add the shared caption/chart/table/footer rhythm."""
+        self.table = table
+        self._body.addWidget(self.summary)
+        self._body.addWidget(self.error_label)
+
+        if chart is not None:
+            card = QFrame(self)
+            card.setObjectName("reportChartCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(8, 8, 8, 8)
+            card_layout.setSpacing(0)
+            chart.setMinimumHeight(240)
+            card_layout.addWidget(chart)
+            self.chart_card = card
+            self._body.addWidget(card)
+
+        # The table hugs exactly the rows on its page. A stretch after it
+        # keeps the footer at the card's bottom when the viewport is taller,
+        # while a taller page (chart + ten rows) scrolls instead of squeezing
+        # the last rows out of sight behind the hidden scrollbar.
+        self.table.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.table.setFixedHeight(44 + self.PAGE_SIZE * 56)
+        self._body.addWidget(self.table)
+
+        footer = QWidget(self)
+        footer.setObjectName("reportTableFooter")
+        footer_row = QHBoxLayout(footer)
+        footer_row.setContentsMargins(4, 8, 4, 0)
+        footer_row.setSpacing(12)
+        self.footer_count = QLabel("", footer)
+        self.footer_count.setObjectName("reportFooterCount")
+        footer_font = QFont("Inter")
+        footer_font.setPixelSize(12)
+        self.footer_count.setFont(footer_font)
+        self.footer_count.setStyleSheet(
+            "color: #6A645C; background: transparent;"
+        )
+        footer_row.addWidget(self.footer_count, 1)
+        self.load_more_button = QPushButton("Load more", footer)
+        self.load_more_button.setObjectName("warmLoadMore")
+        self.load_more_button.setFixedHeight(32)
+        self.load_more_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.load_more_button.clicked.connect(self._load_more)
+        self.load_more_button.hide()
+        footer_row.addWidget(self.load_more_button)
+        self._footer = footer
+        self._body.addWidget(footer)
+        # A taller viewport leaves the card's white space below the footer
+        # rather than stretching the table or pushing its count off-screen.
+        self._body.addStretch(1)
+
+    # -- paging ----------------------------------------------------------
+
+    def _count_caption(self, showing: int) -> str:
+        total = self.total_row_count
+        if total == 0:
+            return "Showing 0"
+        if total > self.PAGE_SIZE:
+            return f"1–{showing} of {total}{self._count_unit}"
+        return f"Showing {total}"
+
+    def _render_page(self) -> None:
+        shown = self._all_rows[: self._page_size]
+        self.table.set_rows(shown)
+        # Reserve the full height of the rows on this page. The table's
+        # scrollbar is deliberately hidden, so letting the layout squeeze it
+        # would silently clip the bottom rows instead of scrolling the page.
+        self.table.setFixedHeight(44 + max(1, len(shown)) * 56)
+        self.footer_count.setText(self._count_caption(len(shown)))
+        self.load_more_button.setVisible(len(shown) < self.total_row_count)
+
+    def _show_report(self, data) -> None:
+        """Apply the fetched report, then display its first page."""
+        self._all_rows = list(self.render_report(data))
+        self.total_row_count = len(self._all_rows)
+        self._page_size = self.PAGE_SIZE
+        self._render_page()
+
+    def _load_more(self) -> None:
+        if self._page_size >= self.total_row_count:
+            return
+        self._page_size = min(
+            self.total_row_count, self._page_size + self.PAGE_SIZE
+        )
+        self._render_page()
+
     # -- async contract -------------------------------------------------
 
     def set_range(self, from_date: date, to_date: date) -> None:
@@ -104,16 +256,18 @@ class _PanelBase(QWidget):
         raise NotImplementedError
 
     def render_report(self, data) -> list:
-        """Apply summary/chart on the GUI thread; return the table rows."""
+        """Apply summary/chart on the GUI thread; return every table row."""
         raise NotImplementedError
 
     def reload_async(self, controller) -> None:
         self.snapshot_filters()
         self._clear_error()
-        controller.request(
-            self.fetch_report,
-            on_done=lambda data: self.table.set_rows(self.render_report(data)),
-        )
+        self._page_size = self.PAGE_SIZE
+        self._all_rows = []
+        self.total_row_count = 0
+        self.footer_count.clear()
+        self.load_more_button.hide()
+        controller.request(self.fetch_report, on_done=self._show_report)
 
     def show_error(self, message: str) -> None:
         self.error_label.setText(message)
@@ -132,35 +286,39 @@ class RevenuePanel(_PanelBase):
         super().__init__(context, parent)
         self._granularity = "day"
         self._channel: str | None = None
-        filters = QHBoxLayout()
-        filters.setContentsMargins(0, 0, 0, 0)
-        filters.setSpacing(8)
+        filters = self._filter_row()
         self.granularity_combo = self._combo(list(GRANULARITIES))
+        self.granularity_combo.setFixedWidth(100)
         self.granularity_combo.currentIndexChanged.connect(
             lambda _i: self._on_granularity()
         )
         filters.addWidget(self.granularity_combo)
         self.channel_combo = self._channel_combo(self._channel)
+        self.channel_combo.setFixedWidth(150)
         filters.addWidget(self.channel_combo)
         filters.addStretch(1)
         self._body.addLayout(filters)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
+        self._add_metrics([
+            [
+                ("Revenue", "—", True),
+                ("Rental", "—", False),
+                ("Penalties", "—", False),
+            ]
+        ])
         self.chart = HandDrawnChart("Revenue", [], parent=self)
         self.chart.setObjectName("reportChart")
-        self._body.addWidget(self.chart)
-        self.table = LoadStateTable(
-            [
-                Column("Period", ALIGN_LEFT),
-                Column("Rental", ALIGN_RIGHT),
-                Column("Penalties", ALIGN_RIGHT),
-                Column("Total", ALIGN_RIGHT),
-            ],
-            lambda: [],
-            empty_message="No revenue in this period.",
-            shimmer_rows=8,
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Period", ALIGN_LEFT, kind="strong"),
+                    Column("Rental", ALIGN_RIGHT, kind="money"),
+                    Column("Penalties", ALIGN_RIGHT, kind="money"),
+                    Column("Total", ALIGN_RIGHT, kind="money"),
+                ],
+                empty_message="No revenue in this period.",
+            ),
+            chart=self.chart,
         )
-        self._body.addWidget(self.table, 1)
 
     def _on_granularity(self) -> None:
         self._granularity = self.granularity_combo.currentText().lower()
@@ -178,6 +336,10 @@ class RevenuePanel(_PanelBase):
             )
 
     def render_report(self, report) -> list:
+        self._count_unit = " days" if report.granularity == "day" else ""
+        self.metrics.set_value("Revenue", pesos(report.total))
+        self.metrics.set_value("Rental", pesos(report.rental))
+        self.metrics.set_value("Penalties", pesos(report.penalties))
         self.summary.setText(
             f"Revenue {pesos(report.total)} = rental {pesos(report.rental)} + "
             f"penalties {pesos(report.penalties)}."
@@ -237,30 +399,39 @@ class BookingsPanel(_PanelBase):
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
         self._channel: str | None = None
-        filters = QHBoxLayout()
-        filters.setContentsMargins(0, 0, 0, 0)
-        filters.setSpacing(8)
+        filters = self._filter_row()
         self.channel_combo = self._channel_combo(self._channel)
+        self.channel_combo.setFixedWidth(150)
         filters.addWidget(self.channel_combo)
         filters.addStretch(1)
         self._body.addLayout(filters)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
-        self.table = LoadStateTable(
+        self._add_metrics([
             [
-                Column("Ref", ALIGN_LEFT),
-                Column("Customer", ALIGN_LEFT),
-                Column("Vehicle", ALIGN_LEFT),
-                Column("Dates", ALIGN_LEFT),
-                Column("Status"),
-                Column("Channel", ALIGN_LEFT),
-                Column("Total", ALIGN_RIGHT),
+                ("Bookings", "—", True),
+                ("Completed", "—", False),
+                ("Ongoing", "—", False),
+                ("Confirmed", "—", False),
             ],
-            lambda: [],
-            empty_message="No bookings in this period.",
-            shimmer_rows=8,
+            [
+                ("Pending", "—", False),
+                ("Avg length", "—", False),
+                ("Per booking", "—", False),
+            ],
+        ])
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Ref", ALIGN_LEFT, kind="muted"),
+                    Column("Customer", ALIGN_LEFT, kind="strong"),
+                    Column("Vehicle", ALIGN_LEFT, kind="strong", wrap=True),
+                    Column("Dates", ALIGN_LEFT),
+                    Column("Status", ALIGN_LEFT, kind="report_status"),
+                    Column("Channel", ALIGN_LEFT, kind="muted"),
+                    Column("Total", ALIGN_RIGHT, kind="money"),
+                ],
+                empty_message="No bookings in this period.",
+            )
         )
-        self._body.addWidget(self.table, 1)
 
     def snapshot_filters(self) -> None:
         _label, self._channel = CHANNEL_FILTERS[self.channel_combo.currentIndex()]
@@ -272,18 +443,30 @@ class BookingsPanel(_PanelBase):
             )
 
     def render_report(self, report) -> list:
-        by_status = ", ".join(
-            f"{status} {count}" for status, count in sorted(report.by_status.items())
+        by_status = report.by_status or {}
+        self.metrics.set_value("Bookings", str(report.total))
+        self.metrics.set_value(
+            "Completed", str(by_status.get("completed", 0))
+        )
+        self.metrics.set_value("Ongoing", str(by_status.get("ongoing", 0)))
+        self.metrics.set_value(
+            "Confirmed", str(by_status.get("confirmed", 0))
+        )
+        self.metrics.set_value("Pending", str(by_status.get("pending", 0)))
+        self.metrics.set_value("Avg length", f"{report.avg_days:.1f} days")
+        self.metrics.set_value("Per booking", pesos(report.avg_value))
+        status_text = ", ".join(
+            f"{status} {count}" for status, count in sorted(by_status.items())
         ) or "—"
         self.summary.setText(
-            f"Bookings {report.total} ({by_status}) · "
+            f"Bookings {report.total} ({status_text}) · "
             f"walk-in {report.walk_in}, online {report.online}, "
             f"cancelled {report.cancelled} · "
             f"avg {report.avg_days} day(s), {pesos(report.avg_value)} per booking."
         )
         return [
             (
-                row.ref, row.customer, row.vehicle, row.dates,
+                row.ref, row.customer, _stacked_vehicle(row.vehicle), row.dates,
                 row.status, row.channel, f"{row.total:,.2f}",
             )
             for row in report.rows
@@ -324,38 +507,34 @@ class UtilizationPanel(_PanelBase):
         self._cache_key = None
         self._cache_rows = None
         self._cache_at = 0.0
-        filters = QHBoxLayout()
-        filters.setContentsMargins(0, 0, 0, 0)
-        filters.setSpacing(8)
+        filters = self._filter_row()
         with context.reading() as session:
             categories = report_service.vehicle_categories(session)
         self.category_combo = self._combo(["All categories", *categories])
+        self.category_combo.setFixedWidth(170)
         self.category_combo.currentIndexChanged.connect(
             lambda _i: self._reload_requested()
         )
         filters.addWidget(self.category_combo)
         filters.addStretch(1)
         self._body.addLayout(filters)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
         self.chart = HandDrawnBars("Utilization %", [], parent=self)
         self.chart.setObjectName("reportChart")
-        self._body.addWidget(self.chart)
-        self.table = LoadStateTable(
-            [
-                Column("Vehicle", ALIGN_LEFT),
-                Column("Category", ALIGN_LEFT),
-                Column("Rented", ALIGN_RIGHT),
-                Column("Available", ALIGN_RIGHT),
-                Column("Use %", ALIGN_RIGHT),
-                Column("Revenue", ALIGN_RIGHT),
-                Column("Shop cost", ALIGN_RIGHT),
-            ],
-            lambda: [],
-            empty_message="No vehicles in scope.",
-            shimmer_rows=8,
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Vehicle", ALIGN_LEFT, kind="strong", wrap=True),
+                    Column("Category", ALIGN_LEFT, kind="muted"),
+                    Column("Rented", ALIGN_RIGHT),
+                    Column("Available", ALIGN_RIGHT),
+                    Column("Use %", ALIGN_RIGHT, kind="money"),
+                    Column("Revenue", ALIGN_RIGHT, kind="money"),
+                    Column("Shop cost", ALIGN_RIGHT, kind="money"),
+                ],
+                empty_message="No vehicles in scope.",
+            ),
+            chart=self.chart,
         )
-        self._body.addWidget(self.table, 1)
 
     def snapshot_filters(self) -> None:
         index = self.category_combo.currentIndex()
@@ -392,8 +571,9 @@ class UtilizationPanel(_PanelBase):
         ])
         return [
             (
-                r.label, r.category, str(r.rented_days), str(r.available_days),
-                self._use_text(r), f"{r.revenue:,.2f}", f"{r.shop_cost:,.2f}",
+                _stacked_vehicle(r.label), r.category, str(r.rented_days),
+                str(r.available_days), self._use_text(r),
+                f"{r.revenue:,.2f}", f"{r.shop_cost:,.2f}",
             )
             for r in rows
         ]
@@ -426,23 +606,27 @@ class PerformancePanel(_PanelBase):
 
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
-        self.chart = HandDrawnBars("Revenue by model", [], parent=self)
-        self.chart.setObjectName("reportChart")
-        self._body.addWidget(self.chart)
-        self.table = LoadStateTable(
+        self._add_metrics([
             [
-                Column("Category", ALIGN_LEFT),
-                Column("Model", ALIGN_LEFT),
-                Column("Revenue", ALIGN_RIGHT),
-                Column("Rentals", ALIGN_RIGHT),
-            ],
-            lambda: [],
-            empty_message="No revenue in this period.",
-            shimmer_rows=8,
+                ("Top model", "—", True),
+                ("Top revenue", "—", False),
+                ("Models", "—", False),
+            ]
+        ])
+        self.chart = HandDrawnBars("Revenue by model (top 10)", [], parent=self)
+        self.chart.setObjectName("reportChart")
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Category", ALIGN_LEFT, kind="muted"),
+                    Column("Model", ALIGN_LEFT, kind="strong"),
+                    Column("Revenue", ALIGN_RIGHT, kind="money"),
+                    Column("Rentals", ALIGN_RIGHT),
+                ],
+                empty_message="No revenue in this period.",
+            ),
+            chart=self.chart,
         )
-        self._body.addWidget(self.table, 1)
 
     def fetch_report(self):
         with self._context.reading() as session:
@@ -450,6 +634,11 @@ class PerformancePanel(_PanelBase):
 
     def render_report(self, rows) -> list:
         top = rows[0] if rows else None
+        self.metrics.set_value("Top model", top.model if top else "—")
+        self.metrics.set_value(
+            "Top revenue", pesos(top.revenue) if top else pesos(0)
+        )
+        self.metrics.set_value("Models", str(len(rows)))
         self.summary.setText(
             f"{len(rows)} model(s). "
             + (
@@ -485,23 +674,27 @@ class MaintenanceCostPanel(_PanelBase):
 
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
+        self._add_metrics([
+            [
+                ("Spent", "—", True),
+                ("Inspection / registration", "—", False),
+                ("Routine", "—", False),
+            ]
+        ])
         self.chart = HandDrawnBars("Shop spend", [], parent=self)
         self.chart.setObjectName("reportChart")
-        self._body.addWidget(self.chart)
-        self.table = LoadStateTable(
-            [
-                Column("Vehicle", ALIGN_LEFT),
-                Column("Spend", ALIGN_RIGHT),
-                Column("Revenue", ALIGN_RIGHT),
-                Column("Cost vs revenue", ALIGN_RIGHT),
-            ],
-            lambda: [],
-            empty_message="No completed spend in this period.",
-            shimmer_rows=8,
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Vehicle", ALIGN_LEFT, kind="strong", wrap=True),
+                    Column("Spend", ALIGN_RIGHT, kind="money"),
+                    Column("Revenue", ALIGN_RIGHT, kind="money"),
+                    Column("Cost vs revenue", ALIGN_RIGHT, kind="ratio"),
+                ],
+                empty_message="No completed spend in this period.",
+            ),
+            chart=self.chart,
         )
-        self._body.addWidget(self.table, 1)
 
     def fetch_report(self):
         with self._context.reading() as session:
@@ -514,15 +707,25 @@ class MaintenanceCostPanel(_PanelBase):
         return f"{row.ratio * 100:.0f}%" if row.ratio is not None else "—"
 
     def render_report(self, report) -> list:
-        by_type = ", ".join(
-            f"{t} {pesos(a)}" for t, a in sorted(report.by_type.items())
+        by_type = report.by_type or {}
+        self.metrics.set_value("Spent", pesos(report.spend))
+        self.metrics.set_value(
+            "Inspection / registration",
+            pesos(by_type.get("inspection_registration", report_service.ZERO)),
+        )
+        self.metrics.set_value(
+            "Routine", pesos(by_type.get("routine", report_service.ZERO))
+        )
+        type_text = ", ".join(
+            f"{maintenance_service.type_label(t)} {pesos(a)}"
+            for t, a in sorted(by_type.items())
         ) or "—"
-        self.summary.setText(f"Spent {pesos(report.spend)} · {by_type}.")
+        self.summary.setText(f"Spent {pesos(report.spend)} · {type_text}.")
         self.chart.set_pairs([(r.plate, float(r.spend)) for r in report.rows[:12]])
         return [
             (
-                r.label, f"{r.spend:,.2f}", f"{r.revenue:,.2f}",
-                self._ratio_text(r),
+                _stacked_vehicle(r.label), f"{r.spend:,.2f}",
+                f"{r.revenue:,.2f}", self._ratio_text(r),
             )
             for r in report.rows
         ]
@@ -553,44 +756,45 @@ class ReceivablesPanel(_PanelBase):
 
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
-        from PySide6.QtGui import QFont
-
         from app.staff import theme
 
         self._overdue_only = False
-        filters = QHBoxLayout()
-        filters.setContentsMargins(0, 0, 0, 0)
-        filters.setSpacing(8)
+        filters = self._filter_row()
         self.overdue_check = QCheckBox("Overdue only", self)
+        self.overdue_check.setObjectName("reportOverdue")
         overdue_font = QFont("Inter")
         overdue_font.setPixelSize(12)
         overdue_font.setWeight(QFont.Weight.DemiBold)
         self.overdue_check.setFont(overdue_font)
-        self.overdue_check.setStyleSheet(
-            f"color: {theme.MUTED}; background: transparent;"
-        )
+        self.overdue_check.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.overdue_check.setFixedHeight(TOOL_ROW_H)
         self.overdue_check.toggled.connect(lambda _on: self._reload_requested())
         filters.addWidget(self.overdue_check)
         filters.addStretch(1)
         self._body.addLayout(filters)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
-        self.table = LoadStateTable(
+        self._add_metrics([
             [
-                Column("Ref", ALIGN_LEFT),
-                Column("Customer", ALIGN_LEFT),
-                Column("Vehicle", ALIGN_LEFT),
-                Column("Due", ALIGN_LEFT),
-                Column("Age", ALIGN_RIGHT),
-                Column("Owed", ALIGN_RIGHT),
-                Column("Penalties", ALIGN_RIGHT),
-                Column("Collected", ALIGN_RIGHT),
-            ],
-            lambda: [],
-            empty_message="Nothing outstanding.",
-            shimmer_rows=8,
+                ("Owed", "—", True),
+                ("Bookings", "—", False),
+                ("Penalties charged", "—", False),
+                ("Collected", "—", False),
+            ]
+        ])
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Ref", ALIGN_LEFT, kind="muted"),
+                    Column("Customer", ALIGN_LEFT, kind="strong"),
+                    Column("Vehicle", ALIGN_LEFT, kind="strong", wrap=True),
+                    Column("Due", ALIGN_LEFT),
+                    Column("Age", ALIGN_LEFT, kind="chip"),
+                    Column("Owed", ALIGN_RIGHT, kind="money", colour=theme.DANGER),
+                    Column("Penalties", ALIGN_RIGHT, kind="money"),
+                    Column("Collected", ALIGN_RIGHT, kind="money"),
+                ],
+                empty_message="Nothing outstanding.",
+            )
         )
-        self._body.addWidget(self.table, 1)
 
     def snapshot_filters(self) -> None:
         self._overdue_only = self.overdue_check.isChecked()
@@ -604,22 +808,26 @@ class ReceivablesPanel(_PanelBase):
     @staticmethod
     def _age_text(row) -> str:
         if row.age_days < 0:
-            return f"due in {abs(row.age_days)}d"
+            return f"Due in {abs(row.age_days)}d"
         if row.age_days == 0:
-            return "due today"
-        return f"OVERDUE {row.age_days}d"
+            return "Due today"
+        return f"Overdue {row.age_days}d"
 
     def render_report(self, rows) -> list:
         owed = sum((r.owed for r in rows), report_service.ZERO)
         charged = sum((r.penalties_charged for r in rows), report_service.ZERO)
         collected = sum((r.penalties_collected for r in rows), report_service.ZERO)
+        self.metrics.set_value("Owed", pesos(owed))
+        self.metrics.set_value("Bookings", str(len(rows)))
+        self.metrics.set_value("Penalties charged", pesos(charged))
+        self.metrics.set_value("Collected", pesos(collected))
         self.summary.setText(
             f"Owed {pesos(owed)} across {len(rows)} booking(s) · "
             f"penalties charged {pesos(charged)}, collected {pesos(collected)}."
         )
         return [
             (
-                r.ref, r.customer, r.vehicle,
+                r.ref, r.customer, _stacked_vehicle(r.vehicle),
                 r.due.strftime("%d %b %Y") if r.due else "-",
                 self._age_text(r), f"{r.owed:,.2f}",
                 f"{r.penalties_charged:,.2f}", f"{r.penalties_collected:,.2f}",
@@ -657,20 +865,25 @@ class CustomersPanel(_PanelBase):
 
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
-        self.table = LoadStateTable(
+        self._add_metrics([
             [
-                Column("Customer", ALIGN_LEFT),
-                Column("Bookings", ALIGN_RIGHT),
-                Column("Spent", ALIGN_RIGHT),
-                Column("Licence", ALIGN_LEFT),
-            ],
-            lambda: [],
-            empty_message="No customer activity in this period.",
-            shimmer_rows=8,
+                ("Repeat customers", "—", True),
+                ("New", "—", False),
+                ("Top customer", "—", False),
+                ("Licence issues", "—", False),
+            ]
+        ])
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Customer", ALIGN_LEFT, kind="strong"),
+                    Column("Bookings", ALIGN_RIGHT),
+                    Column("Spent", ALIGN_RIGHT, kind="money"),
+                    Column("Licence", ALIGN_LEFT, kind="chip"),
+                ],
+                empty_message="No customer activity in this period.",
+            )
         )
-        self._body.addWidget(self.table, 1)
 
     def fetch_report(self):
         with self._context.reading() as session:
@@ -678,7 +891,14 @@ class CustomersPanel(_PanelBase):
 
     def render_report(self, report) -> list:
         new_names = ", ".join(report.new_names) or "—"
-        issues = ", ".join(report.licence_issues) or "none"
+        issues = ", ".join(report.licence_issues) or "None"
+        self.metrics.set_value("Repeat customers", str(report.repeat_count))
+        self.metrics.set_value("New", f"{report.new_count} · {new_names}")
+        self.metrics.set_value(
+            "Top customer",
+            f"{report.top_spender} · {pesos(report.top_spent)}",
+        )
+        self.metrics.set_value("Licence issues", issues)
         self.summary.setText(
             f"New {report.new_count} ({new_names}) · "
             f"repeat {report.repeat_count} · "
@@ -711,28 +931,37 @@ class StaffPanel(_PanelBase):
 
     def __init__(self, context, parent=None) -> None:
         super().__init__(context, parent)
-        self._body.addWidget(self.summary)
-        self._body.addWidget(self.error_label)
-        self.table = LoadStateTable(
+        self._add_metrics([
             [
-                Column("Date", ALIGN_LEFT),
-                Column("Staff", ALIGN_LEFT),
-                Column("Transactions", ALIGN_RIGHT),
-                Column("Rental", ALIGN_RIGHT),
-                Column("Deposits", ALIGN_RIGHT),
-                Column("Total", ALIGN_RIGHT),
-            ],
-            lambda: [],
-            empty_message="No takings in this period.",
-            shimmer_rows=8,
+                ("Taken", "—", True),
+                ("Rental", "—", False),
+                ("Deposits", "—", False),
+                ("Transactions", "—", False),
+            ]
+        ])
+        self._mount(
+            self._warm_table(
+                [
+                    Column("Date", ALIGN_LEFT, kind="strong"),
+                    Column("Staff", ALIGN_LEFT, kind="muted"),
+                    Column("Transactions", ALIGN_RIGHT),
+                    Column("Rental", ALIGN_RIGHT, kind="money"),
+                    Column("Deposits", ALIGN_RIGHT, kind="money"),
+                    Column("Total", ALIGN_RIGHT, kind="money"),
+                ],
+                empty_message="No takings in this period.",
+            )
         )
-        self._body.addWidget(self.table, 1)
 
     def fetch_report(self):
         with self._context.reading() as session:
             return report_service.staff_report(session, self._from, self._to)
 
     def render_report(self, report) -> list:
+        self.metrics.set_value("Taken", pesos(report.total))
+        self.metrics.set_value("Rental", pesos(report.rental))
+        self.metrics.set_value("Deposits", pesos(report.deposits))
+        self.metrics.set_value("Transactions", str(report.transactions))
         self.summary.setText(
             f"Taken {pesos(report.total)} = rental {pesos(report.rental)} + "
             f"deposits {pesos(report.deposits)} across {report.transactions} "

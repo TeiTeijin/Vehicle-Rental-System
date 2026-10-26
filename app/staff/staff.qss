@@ -1,4 +1,4 @@
-/* STAFF APP
+﻿/* STAFF APP
    Same palette as the customer app (app/ui/styles.qss) so the two windows
    look like one product, plus the semantic colours the operations screens
    need. Object names are defined in app/staff/theme.py and set from Python,
@@ -639,7 +639,7 @@ QFrame[class="card"] {
 /* Check-details card: the same card recipe at an 8px radius (ID wins over
    the class rule above; the painted shadow follows Card's own radius). */
 QFrame#vehicleDetailsCard {
-    border-radius: 8px;
+    border-radius: 18px;
     border: 1px solid #D8CCBB;
     background: transparent;
 }
@@ -1135,3 +1135,2609 @@ QCalendarWidget QAbstractItemView {
     selection-color: #1A1A1A;
 }
 
+
+/* ===================================================================
+   COUNTER RENTAL MODAL (Vehicle details + Scheduling/Customer/Payment/Done)
+   Scoped to #vehicleDetailsCard so the rest of the staff app keeps its
+   existing 8px controls. The reference is a warm paper card: 18px radius,
+   white sheet, ink primary, cream recap.
+   =================================================================== */
+
+QFrame#vehicleDetailsCard {
+    background: transparent;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton,
+QFrame#vehicleDetailsCard QPushButton#secondaryButton {
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 16px;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton {
+    background: #171717;
+    border: 1px solid #171717;
+    color: #FFFFFF;
+    font-weight: 600;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton:hover {
+    background: #2A2A2A;
+    border-color: #2A2A2A;
+}
+
+QFrame#vehicleDetailsCard QPushButton#primaryButton:disabled {
+    background: #D7CCBA;
+    border-color: #D7CCBA;
+    color: #FFFFFF;
+}
+
+QFrame#vehicleDetailsCard QPushButton#secondaryButton {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    color: #171717;
+}
+
+QFrame#vehicleDetailsCard QPushButton#secondaryButton:hover {
+    background: #F7F1E7;
+    border-color: #C6B8A3;
+}
+
+QFrame#vehicleDetailsCard QPushButton#secondaryButton:disabled {
+    background: #F4EFE5;
+    border-color: #E4DACA;
+    color: #B8AD9C;
+}
+
+QPushButton#modalCancel {
+    background: transparent;
+    border: none;
+    color: #9B2C1F;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 2px;
+    text-align: left;
+}
+
+QPushButton#modalCancel:hover {
+    color: #7F2117;
+    text-decoration: underline;
+}
+
+QPushButton#linkButton {
+    background: transparent;
+    border: none;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 0;
+    text-align: left;
+}
+
+QPushButton#linkButton:hover {
+    color: #6B5E4F;
+    text-decoration: underline;
+}
+
+QFrame#modalFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #E8DFD1;
+}
+
+QLabel#modalTitle {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#modalSubtitle {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QLabel#modalHint {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QFrame#modalRule,
+QFrame#recapRule {
+    background: #E7DDCE;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QWidget#rentalModalBody,
+QWidget#modalGallery,
+QWidget#galleryStage {
+    background: transparent;
+    border: none;
+}
+
+/* -- progress rail -------------------------------------------------- */
+
+QFrame#stepChip {
+    background: #EEEAE1;
+    border: 1px solid transparent;
+    border-radius: 15px;
+}
+
+QFrame#stepChip[state="current"] {
+    background: #171717;
+    border-color: #171717;
+}
+
+QFrame#stepChip[state="done"] {
+    background: #E4F1E4;
+    border-color: #E4F1E4;
+}
+
+QLabel#stepDot {
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    background: #E1D8C9;
+    color: #6B5E4F;
+}
+
+QLabel#stepDot[state="current"] {
+    background: transparent;
+    color: #FFFFFF;
+}
+
+QLabel#stepDot[state="done"] {
+    background: #4F7A5B;
+    color: #FFFFFF;
+}
+
+QLabel#stepName {
+    background: transparent;
+}
+
+/* -- recap column --------------------------------------------------- */
+
+QFrame#modalRecap {
+    background: #EFE6D5;
+    border: 1px solid #E7DBC7;
+    border-radius: 14px;
+}
+
+QLabel#recapTitle {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#recapValue {
+    background: transparent;
+    color: #171717;
+}
+
+/* -- vehicle row ----------------------------------------------------- */
+
+QFrame#modalVehicleRow {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+}
+
+QLabel#modalVehicleThumb {
+    background: #EEEAE1;
+    border-radius: 7px;
+}
+
+QLabel#modalVehicleName {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#modalVehicleMeta {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+/* -- status chips ---------------------------------------------------- */
+
+QLabel#statusChip {
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 9px;
+    background: #EEEAE1;
+    color: #6B5E4F;
+}
+
+QLabel#statusChip[tone="ok"] {
+    background: #DCEEDC;
+    color: #3F6D4E;
+}
+
+QLabel#statusChip[tone="warn"] {
+    background: #F6E6C8;
+    color: #8A6523;
+}
+
+QLabel#statusChip[tone="danger"] {
+    background: #F6E0DB;
+    color: #9B2C1F;
+}
+
+QLabel#statusChip[tone="neutral"] {
+    background: #EEEAE1;
+    color: #6B5E4F;
+}
+
+QLabel#plateChip {
+    background: #EEEAE1;
+    border-radius: 6px;
+    color: #6B5E4F;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+}
+
+/* -- spec / meta tiles ---------------------------------------------- */
+
+QFrame#modalSpecTile,
+QFrame#modalMetaTile {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 8px;
+}
+
+QLabel#specLabel,
+QLabel#metaLabel {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QLabel#specValue,
+QLabel#metaValue {
+    background: transparent;
+    color: #171717;
+}
+
+/* -- availability list ---------------------------------------------- */
+
+QFrame#availabilityRow {
+    background: transparent;
+    border: none;
+}
+
+QFrame#availabilityRow[divider="true"] {
+    border-top: 1px solid #ECE3D5;
+}
+
+QLabel#availabilityDate {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#availabilityMeta {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+/* -- day strip ------------------------------------------------------- */
+
+QLabel#dayStripMonth {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QFrame#dayTile {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 8px;
+}
+
+QFrame#dayTile[state="selected"] {
+    background: #171717;
+}
+
+QFrame#dayTile[state="confirmed"] {
+    background: #D7E9DA;
+}
+
+QFrame#dayTile[state="pending"] {
+    background: #F6E5C6;
+}
+
+QFrame#dayTile[state="free"] {
+    background: #EEEAE1;
+}
+
+QLabel#dayWeekday {
+    background: transparent;
+    font-size: 8px;
+}
+
+QLabel#dayNumber {
+    background: transparent;
+    font-size: 12px;
+}
+
+QLabel#legendChip {
+    border-radius: 2px;
+}
+
+QFrame#wizardLegend {
+    background: #F1E8D8;
+    border: none;
+    border-radius: 8px;
+}
+
+/* -- notices / result bars ------------------------------------------- */
+
+QFrame#modalNotice {
+    background: #F7E9CE;
+    border: 1px solid #EEDDBB;
+    border-radius: 8px;
+}
+
+QFrame#modalNotice[tone="danger"] {
+    background: #F6E0DB;
+    border-color: #EBC9C0;
+}
+
+QLabel#modalNoticeText {
+    background: transparent;
+    color: #171717;
+}
+
+QLabel#modalNoticeIcon {
+    background: transparent;
+}
+
+QFrame#resultBar {
+    background: #E4F1E4;
+    border: 1px solid #CFE3D1;
+    border-radius: 8px;
+}
+
+QFrame#resultBar[tone="danger"] {
+    background: #F6E0DB;
+    border-color: #EBC9C0;
+}
+
+QFrame#resultBar[tone="warn"] {
+    background: #F7E9CE;
+    border-color: #EEDDBB;
+}
+
+QLabel#resultText {
+    background: transparent;
+    color: #171717;
+}
+
+/* -- customer -------------------------------------------------------- */
+
+QFrame#customerCard {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 12px;
+}
+
+QLabel#customerAvatar {
+    background: #EFE6D5;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#customerName {
+    background: transparent;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QLabel#customerLicence {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+/* -- payment --------------------------------------------------------- */
+
+QFrame#paymentOption {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+}
+
+QFrame#paymentOption[selected="true"] {
+    border: 1px solid #171717;
+}
+
+QRadioButton#paymentRadio {
+    background: transparent;
+    spacing: 0;
+}
+
+QRadioButton#paymentRadio::indicator {
+    width: 17px;
+    height: 17px;
+    border-radius: 9px;
+    border: 1px solid #B6A791;
+    background: #FFFFFF;
+}
+
+QRadioButton#paymentRadio::indicator:checked {
+    background: #171717;
+    border: 5px solid #FFFFFF;
+}
+
+QLabel#paymentTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#paymentSub {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 11px;
+}
+
+QToolButton#methodChoice {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 6px;
+}
+
+QToolButton#methodChoice:hover {
+    border-color: #B8A68A;
+    background: #FFFDF9;
+}
+
+QToolButton#methodChoice:checked {
+    border: 1px solid #171717;
+    background: #FFFFFF;
+}
+
+/* -- done ------------------------------------------------------------ */
+
+QFrame#balanceBox {
+    background: #F7E9CE;
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#summaryCard {
+    background: #FFFFFF;
+    border: 1px solid #E3D8C8;
+    border-radius: 10px;
+}
+
+QFrame#doneCheck {
+    background: #DCEEDC;
+    border: none;
+    border-radius: 12px;
+}
+
+QLabel#doneCheckGlyph {
+    background: transparent;
+    color: #4F7A5B;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+QFrame#receiptRow {
+    background: #FFFFFF;
+    border: 1px solid #E3D8C8;
+    border-radius: 10px;
+}
+
+QLabel#receiptIcon {
+    background: #EEEAE1;
+    border-radius: 7px;
+    color: #6B5E4F;
+}
+
+QLabel#receiptName {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#receiptNote {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 11px;
+}
+
+/* -- gallery --------------------------------------------------------- */
+
+QFrame#galleryHero {
+    background: #EFE6D5;
+    border: none;
+    border-radius: 12px;
+}
+
+QFrame#galleryHero QLabel#galleryImage {
+    background: transparent;
+}
+
+QLabel#galleryHint {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 10px;
+}
+
+QToolButton#galleryTab {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 3px;
+}
+
+QToolButton#galleryTab:hover {
+    background: #FFFDF9;
+    border-color: #B8A68A;
+}
+
+QToolButton#galleryTab:checked {
+    border: 1px solid #171717;
+    background: #FFFFFF;
+}
+
+QPushButton#viewerControl {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 7px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 10px;
+}
+
+QPushButton#viewerControl:hover {
+    background: #F7F1E7;
+}
+
+QPushButton#viewerControl:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+QPushButton#viewerControlLight {
+    background: #FFFFFF;
+    border: 1px solid #D8CCBB;
+    border-radius: 7px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 10px;
+}
+
+QLabel#galleryBadge {
+    background: #FFFFFF;
+    border: 1px solid #E7DBC7;
+    border-radius: 8px;
+    color: #171717;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 9px;
+}
+
+/* -- detail right column -------------------------------------------- */
+
+QScrollArea#modalColumnScroll,
+QScrollArea#modalColumnScroll QWidget#modalColumnViewport {
+    background: transparent;
+    border: none;
+}
+
+QLabel#detailPriceSuffix {
+    background: transparent;
+    color: #6B5E4F;
+}
+
+QPushButton#checkAvailability {
+    min-height: 36px;
+}
+
+/* ======================================================================
+   WARM LIST PAGES AND BOOKING MODALS
+   Opt-in: only widgets with variant="warm" or the warm object names below
+   are affected, so Dashboard, Reports, Settings, and sign-in keep the
+   existing sheet look. Values are sampled from the seven booking
+   references (1440x970, 1360px content column).
+   ====================================================================== */
+
+QFrame#pagePanel[variant="warm"] {
+    background: #FFFFFF;
+    border: 1px solid #DFD4C5;
+    border-radius: 18px;
+}
+
+QFrame#pagePanel[variant="warmHost"] {
+    background: transparent;
+    border: none;
+}
+
+/* The data card's own title, used by the Inspections audit. */
+QLabel#warmCardTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+/* -- filter chips ---------------------------------------------------- */
+
+QPushButton#statusFilterChip {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 15px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+QPushButton#statusFilterChip:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#statusFilterChip:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+/* -- cream selection bar --------------------------------------------- */
+
+QFrame#selectionBar {
+    background: #EADBBB;
+    border: none;
+    border-radius: 14px;
+}
+
+QLabel#selectionSummary {
+    background: transparent;
+    color: #4D4A42;
+    font-size: 15px;
+    font-weight: 400;
+}
+
+QPushButton#barPrimary {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#barPrimary:hover {
+    background: #333333;
+}
+
+QPushButton#barAction {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#barAction:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#barDanger {
+    background: #FFFFFF;
+    border: 1px solid #C07B72;
+    border-radius: 18px;
+    color: #9B2C1F;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#barDanger:hover {
+    background: #F8E0DC;
+}
+
+QPushButton#barPrimary:disabled,
+QPushButton#barAction:disabled,
+QPushButton#barDanger:disabled {
+    background: #EADBBB;
+    border-color: #DCCBAA;
+    color: #A79B87;
+}
+
+/* -- warm table ------------------------------------------------------ */
+
+QTableView[variant="warm"] {
+    background: #FFFFFF;
+    alternate-background-color: #FFFFFF;
+    border: none;
+    border-radius: 12px;
+    gridline-color: #F0EBE2;
+    selection-background-color: #F6EEDC;
+    selection-color: #171717;
+    font-size: 13px;
+}
+
+QTableView[variant="warm"]::item {
+    border-bottom: 1px solid #F0EBE2;
+    padding: 0 8px;
+}
+
+QTableView[variant="warm"]::item:selected {
+    background: #F6EEDC;
+    color: #171717;
+}
+
+QHeaderView#warmHeader {
+    background: transparent;
+    border: none;
+}
+
+QHeaderView#warmHeader::section {
+    background: #EEEAE1;
+    border: none;
+    color: #6F685E;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 8px;
+}
+
+QHeaderView#warmHeader::section:first {
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+}
+
+QHeaderView#warmHeader::section:last {
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+/* -- table chips ----------------------------------------------------- */
+
+QLabel#tableChip {
+    border: none;
+    /* Half of TableChip.HEIGHT: Qt ignores a radius larger than half the
+       label height, so this must stay in sync with the 22px fixed height. */
+    border-radius: 11px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 2px 10px;
+}
+
+QLabel#tableChip[tone="ok"] {
+    background: #DDF0E0;
+    color: #2C6A3C;
+}
+
+QLabel#tableChip[tone="warn"] {
+    background: #F7E4C4;
+    color: #744A15;
+}
+
+QLabel#tableChip[tone="danger"] {
+    background: #F6DDD8;
+    color: #9B2C1F;
+}
+
+QLabel#tableChip[tone="neutral"] {
+    background: #E6E1D6;
+    color: #5F574C;
+}
+
+/* Ledger kinds are categories, not states: outlined instead of filled. */
+QLabel#tableChip[tone="outline"] {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    color: #171717;
+}
+
+/* The chip's layout host must not catch the blanket QWidget cream. */
+QWidget#tableChipCell {
+    background: transparent;
+    border: none;
+}
+
+/* -- list-card headings and footers ---------------------------------- */
+
+QLabel#warmCardTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#warmCardCaption {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#warmFooterRange {
+    background: transparent;
+    color: #6A645C;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* -- payments tools --------------------------------------------------- */
+
+QLabel#paymentsTakings {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QPushButton#paymentsClear {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 12px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#paymentsClear:hover {
+    background: #F6EEDC;
+}
+
+/* Inspection handovers: a cool tint for pre-rental, warm paper for post. */
+QLabel#tableChip[tone="pre"] {
+    background: #DDE8F4;
+    color: #2F506E;
+}
+
+QLabel#tableChip[tone="post"] {
+    background: #EFE9DE;
+    color: #5F574C;
+}
+
+/* -- modal frame ----------------------------------------------------- */
+
+QWidget#bookingModal,
+QWidget#confirmPanel {
+    background: transparent;
+}
+
+/* Plain QWidget hosts inside the white sheet must not inherit the page
+   cream. QSS paints backgrounds on named QWidgets even when the Card
+   underneath already painted white. */
+QWidget#bookingModalHeader,
+QWidget#bookingModalBody,
+QWidget#warmTableFooter,
+QWidget#warmFormField,
+QWidget#warmFieldHost,
+QWidget#warmFactRow,
+QWidget#warmChipGrid,
+QWidget#warmDetailColumn,
+QWidget#summaryRow,
+QWidget#summaryDividerHost {
+    background: transparent;
+    border: none;
+}
+
+QLabel#bookingEyebrow {
+    background: #ECE6DD;
+    border-radius: 9px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#bookingModalTitle {
+    background: transparent;
+    color: #161616;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#bookingModalSubtitle {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#bookingModalDivider {
+    background: #F5F1EA;
+    border: none;
+}
+
+QFrame#bookingModalFooter {
+    /* Transparent so the Card's rounded bottom corners stay visible; an
+       opaque footer painted a square white block over them. */
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F5F1EA;
+}
+
+QPushButton#modalPrimary {
+    background: #161616;
+    border: 1px solid #161616;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#modalPrimary:hover {
+    background: #333333;
+}
+
+QPushButton#modalSecondary {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #161616;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#modalSecondary:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#modalDanger {
+    background: #A3271D;
+    border: 1px solid #A3271D;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#modalDanger:hover {
+    background: #8E2119;
+}
+
+QPushButton#modalPrimary:disabled,
+QPushButton#modalSecondary:disabled,
+QPushButton#modalDanger:disabled {
+    background: #ECE6DD;
+    border-color: #E0D6C9;
+    color: #A79B87;
+}
+
+QLabel#modalError {
+    background: #F8E0DC;
+    border-radius: 8px;
+    color: #9B2C1F;
+    font-size: 12px;
+    padding: 8px 12px;
+}
+
+/* -- modal chips ----------------------------------------------------- */
+
+QPushButton#choiceChip {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 16px;
+    color: #161616;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 16px;
+}
+
+QPushButton#choiceChip:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#choiceChip:checked {
+    background: #161616;
+    border-color: #161616;
+    color: #FFFFFF;
+}
+
+QPushButton#choiceChip[variant="fuel"] {
+    border-radius: 17px;
+    padding: 0 4px;
+}
+
+QPushButton#choiceChip[variant="reason"] {
+    border-radius: 24px;
+    font-size: 13px;
+    padding: 0 20px;
+}
+
+/* -- modal tiles, summaries, notices --------------------------------- */
+
+QFrame#warmMetricTile {
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#warmMetricTile[tone="neutral"] {
+    background: #ECE6DD;
+}
+
+QFrame#warmMetricTile[tone="owed"] {
+    background: #F7E3C3;
+}
+
+QFrame#warmMetricTile[tone="cream"] {
+    background: #F1E7D6;
+}
+
+QFrame#warmMetricTile[large="true"] {
+    border-radius: 12px;
+}
+
+QLabel#metricLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+QLabel#metricValue {
+    background: transparent;
+    color: #171717;
+    font-weight: 700;
+}
+
+QFrame#modalSummary {
+    background: #F1E7D6;
+    border: none;
+    border-radius: 10px;
+}
+
+QLabel#summaryLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#summaryValue {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QFrame#summaryDivider {
+    background: #EDE3D2;
+    border: none;
+}
+
+QFrame#warmNotice {
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#warmNotice[tone="cream"] {
+    background: #F1E7D6;
+}
+
+QFrame#warmNotice[tone="red"] {
+    background: #F8E0DC;
+    border-radius: 8px;
+}
+
+QFrame#warmNotice[tone="green"] {
+    background: #DCEFE0;
+    border-radius: 8px;
+}
+
+QFrame#warmNotice[tone="amber"] {
+    background: #F7E3C3;
+    border-radius: 8px;
+}
+
+QLabel#warmNoticeText {
+    background: transparent;
+    color: #161616;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#warmSectionTitle {
+    background: transparent;
+    color: #746A5C;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QLabel#warmFieldLabel {
+    background: transparent;
+    color: #161616;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#warmFieldOptional {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* -- modal controls -------------------------------------------------- */
+
+QLineEdit#warmInput, QDateEdit#warmInput, QComboBox#warmInput,
+QSpinBox#warmInput, QDoubleSpinBox#warmInput {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #161616;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 12px;
+}
+
+QLineEdit#warmInput:focus, QDateEdit#warmInput:focus,
+QComboBox#warmInput:focus {
+    border-color: #171717;
+}
+
+QLineEdit#warmAmount {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #161616;
+    font-size: 26px;
+    font-weight: 700;
+    min-height: 50px;
+    padding: 0 16px;
+}
+
+QLineEdit#warmAmount:focus {
+    border-color: #171717;
+}
+
+QLabel#warmFieldValue {
+    background: transparent;
+    color: #161616;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#warmSuffix {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#warmAmountPrefix {
+    background: transparent;
+    color: #161616;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+/* -- invoice-style amount field -------------------------------------- */
+
+QFrame#warmAmountBox {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+}
+
+QLineEdit#warmAmount {
+    background: transparent;
+    border: none;
+    min-height: 0;
+    padding: 0;
+}
+
+QLineEdit#warmAmount:focus {
+    border: none;
+}
+
+/* Spin boxes are number inputs in the references, not steppers. */
+QSpinBox#warmInput::up-button,
+QSpinBox#warmInput::down-button {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
+
+QDateEdit#warmInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+/* Filter toggles read as outline pills, matching the chip row. */
+QPushButton#warmCheck {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 16px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+QPushButton#warmCheck:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#warmCheck:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+QPushButton#warmCheck:disabled {
+    background: #F1E8D8;
+    color: #A79B87;
+}
+QPushButton#warmLoadMore {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#warmLoadMore:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#choiceChip[variant="reason"] {
+    padding: 0 12px;
+    text-align: center;
+}
+
+
+QPushButton#warmCheck {
+    min-height: 30px;
+}
+
+/* ======================================================================
+   MAINTENANCE ACTION MODALS
+   Warm 540px History / Mark completed sheets and the 900px Log maintenance
+   sheet. Scoped to #maintenanceSheet so the list page, the rental wizard,
+   and every other modal keep their existing measurements.
+   ====================================================================== */
+
+QWidget#maintenanceSheet,
+QWidget#maintenanceSheetHeader,
+QWidget#maintenanceSheetBody,
+QWidget#maintenanceColumn,
+QWidget#maintenanceRightColumn,
+QWidget#maintenanceFieldHost,
+QWidget#maintenanceSummaryRow {
+    background: transparent;
+    border: none;
+}
+
+QFrame#maintenanceCard {
+    background: transparent;
+    border: none;
+    border-radius: 18px;
+}
+
+QLabel#maintenanceEyebrow {
+    background: #F0E6D5;
+    border-radius: 11px;
+    color: #6B5E4F;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 12px;
+}
+
+QLabel#maintenanceEyebrowPlain {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QLabel#maintenanceTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceTitle[large="true"] {
+    font-size: 30px;
+}
+
+QLabel#maintenanceSubtitle {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#maintenanceDivider {
+    background: #EFE8DD;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QFrame#maintenanceFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F1EAE0;
+}
+
+QLabel#maintenanceError {
+    background: #F8E0DC;
+    border-radius: 8px;
+    color: #9B2C1F;
+    font-size: 12px;
+    padding: 8px 12px;
+}
+
+QLabel#maintenanceSectionLabel {
+    background: transparent;
+    color: #7A6F61;
+}
+
+QLabel#maintenanceFieldSuffix,
+QLabel#maintenanceFieldOptional {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+/* -- History metrics and cards --------------------------------------- */
+
+QFrame#maintenanceMetricTile {
+    background: #F3EAD9;
+    border: none;
+    border-radius: 14px;
+}
+
+QLabel#maintenanceMetricLabel {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#maintenanceMetricValue {
+    background: transparent;
+    color: #171717;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QFrame#maintenanceRecordCard {
+    background: #FFFFFF;
+    border: 1px solid #E4D9CA;
+    border-radius: 14px;
+}
+
+QLabel#maintenanceRecordType {
+    background: transparent;
+    color: #171717;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceRecordMeta,
+QLabel#maintenanceRecordDue {
+    background: transparent;
+    color: #6B5E4F;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#maintenanceRecordBody {
+    background: transparent;
+    color: #171717;
+    font-size: 14px;
+}
+
+/* -- Log maintenance ------------------------------------------------- */
+
+QWidget#maintenanceSheet QLineEdit#warmInput,
+QWidget#maintenanceSheet QDateEdit#warmInput,
+QWidget#maintenanceSheet QComboBox#warmInput,
+QWidget#maintenanceSheet QSpinBox#warmInput {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 12px;
+    color: #171717;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+QWidget#maintenanceSheet QLineEdit#warmInput:focus,
+QWidget#maintenanceSheet QDateEdit#warmInput:focus,
+QWidget#maintenanceSheet QComboBox#warmInput:focus,
+QWidget#maintenanceSheet QSpinBox#warmInput:focus {
+    border-color: #171717;
+}
+
+QWidget#maintenanceSheet QDateEdit#warmInput::drop-down,
+QWidget#maintenanceSheet QComboBox#warmInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+QLabel#maintenanceEndPlaceholder {
+    background: #F8F1E5;
+    border: 1px dashed #D7C7B0;
+    border-radius: 12px;
+    color: #8B7F70;
+    font-size: 14px;
+    padding: 0 14px;
+}
+QFrame#maintenanceSummary {
+    background: #F3EAD9;
+    border: none;
+    border-radius: 16px;
+}
+
+QLabel#maintenanceSummaryTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceSummaryValue {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QFrame#maintenanceSummaryRule {
+    background: #E9DDCB;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QFrame#maintenanceNotice {
+    background: #FAE7C8;
+    border: none;
+    border-radius: 16px;
+}
+
+QLabel#maintenanceNoticeTitle {
+    background: transparent;
+    color: #5F4413;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#maintenanceNoticeText {
+    background: transparent;
+    color: #5F4413;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+/* -- Mark completed: optional next service --------------------------- */
+
+QFrame#maintenanceNextPanel {
+    background: #F3EAD9;
+    border: none;
+    border-radius: 16px;
+}
+
+QWidget#maintenanceSheet QDateEdit#nextServiceInput,
+QWidget#maintenanceSheet QSpinBox#nextServiceInput {
+    background: #F8F1E5;
+    border: 1px solid #E3D5C2;
+    border-radius: 12px;
+    color: #171717;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+QWidget#maintenanceSheet QDateEdit#nextServiceInput:disabled,
+QWidget#maintenanceSheet QSpinBox#nextServiceInput:disabled {
+    background: #F8F1E5;
+    border: 1px dashed #D7C7B0;
+    color: #6B5E4F;
+}
+
+QWidget#maintenanceSheet QDateEdit#nextServiceInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+QWidget#maintenanceSheet QSpinBox#nextServiceInput::up-button,
+QWidget#maintenanceSheet QSpinBox#nextServiceInput::down-button {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
+
+/* ===================================================================
+   FLEET MODALS (Add/Edit vehicle + Vehicle details)
+   The references are a 900px white sheet on the frosted app backdrop:
+   cream preview/spec panels, warm inputs, chip selectors, and an ink
+   primary action in a sticky footer. Scoped by object name so the rest
+   of the staff app keeps its existing control geometry.
+   =================================================================== */
+
+QWidget#fleetModal,
+QWidget#fleetModalHeader,
+QWidget#fleetModalBody,
+QWidget#fleetFieldHost {
+    background: transparent;
+    border: none;
+}
+
+/* Card paints its own rounded white fill; the QSS class rule must not
+   square off the corners behind it. */
+QFrame#fleetModalCard {
+    background: transparent;
+    border: none;
+}
+
+QLabel#fleetEyebrow {
+    background: #ECE6DD;
+    border-radius: 9px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#fleetModalTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+QLabel#fleetModalSubtitle {
+    background: transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#fleetModalRule {
+    background: #EDE5D8;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QFrame#fleetModalFooter {
+    /* Transparent so Card's rounded bottom corners stay visible. */
+    background: transparent;
+    border: none;
+    border-top: 1px solid #EDE5D8;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton,
+QFrame#fleetModalCard QPushButton#secondaryButton {
+    border-radius: 18px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 20px;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton {
+    background: #171717;
+    border: 1px solid #171717;
+    color: #FFFFFF;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton:hover {
+    background: #333333;
+    border-color: #333333;
+}
+
+QFrame#fleetModalCard QPushButton#secondaryButton {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    color: #171717;
+}
+
+QFrame#fleetModalCard QPushButton#secondaryButton:hover {
+    background: #F6EEDC;
+    border-color: #C6B8A3;
+}
+
+QFrame#fleetModalCard QPushButton#primaryButton:disabled,
+QFrame#fleetModalCard QPushButton#secondaryButton:disabled {
+    background: #ECE6DD;
+    border-color: #E0D6C9;
+    color: #A79B87;
+}
+
+/* -- cream preview panel -------------------------------------------- */
+
+QFrame#fleetPreview {
+    background: #EFE6D5;
+    border: 1px solid #E7DBC7;
+    border-radius: 14px;
+}
+
+/* -- details panels and rows ---------------------------------------- */
+
+QLabel#fleetHero {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 14px;
+    color: #8A8175;
+    font-size: 13px;
+}
+
+QLabel#fleetThumb {
+    background: #EEEAE1;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #8A8175;
+    font-size: 11px;
+}
+
+QLabel#fleetThumb[selected="true"] {
+    border: 2px solid #171717;
+}
+
+QLabel#fleetViewerPlaceholder {
+    background: #EEEAE1;
+    border: none;
+    border-radius: 14px;
+    color: #8A8175;
+    font-size: 13px;
+}
+
+QFrame#fleetHistoryRow {
+    background: transparent;
+    border: none;
+}
+
+QFrame#fleetRowRule {
+    background: #EFE8DC;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#fleetMetaChip {
+    background: #EDE6D9;
+    border: none;
+    border-radius: 11px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+}
+
+QProgressBar#fleetUtilBar {
+    background: #EDE6D9;
+    border: none;
+    border-radius: 4px;
+}
+
+QProgressBar#fleetUtilBar::chunk {
+    background: #171717;
+    border-radius: 4px;
+}
+
+/* -- track-expiry checkbox ------------------------------------------ */
+
+QCheckBox#fleetCheck {
+    background: transparent;
+    color: #3F3A33;
+    font-size: 12px;
+    spacing: 8px;
+}
+
+QCheckBox#fleetCheck::indicator {
+    width: 16px;
+    height: 16px;
+    background: #FFFFFF;
+    border: 1px solid #CFC3B2;
+    border-radius: 4px;
+}
+
+QCheckBox#fleetCheck::indicator:checked {
+    background: #171717;
+    border-color: #171717;
+}
+
+/* ======================================================================
+   CUSTOMER MODALS (add/edit, profile, settle)
+   The counter's warm paper language at the reference's 900px width:
+   white rounded sheet, pill eyebrow, large title, two columns, cream
+   preview/metric surfaces, dashed licence boxes, sticky footer.
+   Scoped to the customer modal so Fleet/Bookings keep their own sheets.
+   ====================================================================== */
+
+QWidget#customerModal,
+QWidget#customerModalHeader,
+QWidget#customerModalBody,
+QWidget#customerField,
+QWidget#customerFacts,
+QWidget#customerPreviewColumn,
+QWidget#customerPreviewRow,
+QWidget#customerNotesHost,
+QWidget#customerTabPage,
+QWidget#customerStatusCell,
+QWidget#customerProfileColumn,
+QWidget#settleColumn {
+    background: transparent;
+    border: none;
+}
+
+QFrame#customerModalFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F1EBE1;
+}
+
+QLabel#customerEyebrow {
+    background: #F0EAE0;
+    border-radius: 10px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#customerModalTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+QLabel#customerModalSubtitle {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#customerModalDivider {
+    background: #F1EBE1;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#customerSectionLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.7px;
+}
+
+QLabel#customerFieldLabel {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#customerFieldOptional {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLineEdit#customerInput,
+QDateEdit#customerInput {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 12px;
+}
+
+QLineEdit#customerInput:focus,
+QDateEdit#customerInput:focus {
+    border-color: #171717;
+}
+
+QDateEdit#customerInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+QLabel#customerDuplicateWarning {
+    background: #F8E0DC;
+    border-radius: 8px;
+    color: #9B2C1F;
+    font-size: 11px;
+    padding: 7px 10px;
+}
+
+QLabel#customerDuplicateWarning:empty {
+    background: transparent;
+    padding: 0;
+}
+
+/* -- source / method chips ------------------------------------------- */
+
+QPushButton#sourceChip,
+QPushButton#settleMethod {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 14px;
+}
+
+QPushButton#sourceChip:hover,
+QPushButton#settleMethod:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#sourceChip:checked,
+QPushButton#settleMethod:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+/* -- preview panel --------------------------------------------------- */
+
+QFrame#customerPreview {
+    background: #F1E8D8;
+    border: 1px solid #EADFCF;
+    border-radius: 16px;
+}
+
+QLabel#customerAvatar,
+QLabel#customerAvatarLarge {
+    background: #EADBBB;
+    border-radius: 29px;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#customerPreviewName {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QFrame#customerPreviewRule {
+    background: #E4D7C4;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#customerFactKey {
+    background: transparent;
+    color: #7D7265;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#customerFactValue {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QFrame#customerLicenceNotice {
+    background: #F7E3C3;
+    border: none;
+    border-radius: 12px;
+}
+
+QLabel#customerNoticeText {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+}
+
+/* -- dashed licence photo boxes -------------------------------------- */
+
+QPushButton#docBox {
+    background: #FFFFFF;
+    border: 1px dashed #D8CCBB;
+    border-radius: 10px;
+    color: #171717;
+    text-align: center;
+}
+
+QPushButton#docBox:hover {
+    background: #FBF7F0;
+    border-color: #B8A68A;
+}
+
+QPushButton#docBox:disabled {
+    background: #FBF8F2;
+    border-color: #E7DED0;
+}
+
+QLabel#docBoxPreview {
+    background: transparent;
+    border: none;
+}
+
+QLabel#docBoxTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#docBoxSubtitle {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+/* -- profile --------------------------------------------------------- */
+
+QLabel#customerProfileName {
+    background: transparent;
+    color: #171717;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#customerProfileMeta,
+QLabel#customerProfileContact {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QFrame#customerActivityStrip {
+    background: #F5EFE4;
+    border: none;
+    border-top: 1px solid #F1E8D8;
+    border-bottom: 1px solid #F1E8D8;
+}
+
+QFrame#customerActivityTile {
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#customerActivityTile[tone="amber"] {
+    background: #F7E3C3;
+}
+
+QFrame#customerActivityTile[tone="plain"] {
+    background: #FFFFFF;
+    border: 1px solid #ECE4D8;
+}
+
+QLabel#customerActivityTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#customerActivityDetail {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+}
+
+QFrame#customerMetricTile {
+    background: #ECE6DD;
+    border: none;
+    border-radius: 10px;
+}
+
+QLabel#customerMetricLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+}
+
+QLabel#customerMetricValue {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QFrame#customerOwedBanner {
+    border: none;
+    border-radius: 12px;
+}
+
+QFrame#customerOwedBanner[tone="owed"] {
+    background: #F8E0DC;
+}
+
+QFrame#customerOwedBanner[tone="clear"] {
+    background: #E4F1E4;
+}
+
+QLabel#customerOwedLabel {
+    background: transparent;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#customerOwedAmount {
+    background: transparent;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+/* -- profile tabs and tables ---------------------------------------- */
+
+QTabWidget#customerTabs,
+QTabWidget#customerTabs QTabBar,
+QTabWidget#customerTabs QStackedWidget,
+QTabWidget#customerTabs QWidget#customerTabPage {
+    background: transparent;
+    border: none;
+}
+
+QTabWidget#customerTabs::pane {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F1EBE1;
+}
+
+QTabWidget#customerTabs QTabBar::tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 12px;
+    margin-right: 4px;
+}
+
+QTabWidget#customerTabs QTabBar::tab:hover {
+    color: #171717;
+}
+
+QTabWidget#customerTabs QTabBar::tab:selected {
+    color: #171717;
+    border-bottom: 2px solid #171717;
+}
+
+QTableWidget#customerBookingsTable {
+    background: transparent;
+    alternate-background-color: transparent;
+    border: none;
+    gridline-color: #F0EBE2;
+    font-size: 12px;
+    selection-background-color: transparent;
+}
+
+QTableWidget#customerBookingsTable::item {
+    border-bottom: 1px solid #F0EBE2;
+    color: #171717;
+    padding: 0 6px;
+}
+
+QTableWidget#customerBookingsTable QHeaderView::section {
+    background: #EEEAE1;
+    border: none;
+    color: #6F685E;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 6px;
+}
+
+QTableWidget#customerBookingsTable QHeaderView::section:first {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+QTableWidget#customerBookingsTable QHeaderView::section:last {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QFrame#customerIncidentRow {
+    background: #FFFFFF;
+    border: 1px solid #F0EBE2;
+    border-radius: 8px;
+}
+
+/* -- settle ---------------------------------------------------------- */
+
+QFrame#settleAmountBox {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+}
+
+QLabel#settleAmountPrefix {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLineEdit#settleAmountInput {
+    background: transparent;
+    border: none;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 0;
+}
+
+QLineEdit#settleAmountInput:focus {
+    border: none;
+}
+
+QPushButton#settlePayAll {
+    background: transparent;
+    border: none;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
+}
+
+QPushButton#settlePayAll:hover {
+    color: #6B5E4F;
+}
+
+QLabel#settleRefHint {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 11px;
+}
+
+QPushButton#settleBooking {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 12px;
+    text-align: left;
+}
+
+QPushButton#settleBooking:hover {
+    background: #FBF7F0;
+}
+
+QPushButton#settleBooking:checked {
+    border: 1px solid #171717;
+}
+
+QLabel#settleRef {
+    background: transparent;
+    color: #171717;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#settleOwed {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+}
+
+QLabel#settleCheck {
+    background: transparent;
+    border: 1px solid #C9BCA6;
+    border-radius: 6px;
+    color: transparent;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#settleCoverage {
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    color: #7D7265;
+    font-size: 11px;
+    padding: 3px 9px;
+}
+
+QLabel#settleCoverage[state="full"] {
+    background: #DCEEDC;
+    color: #3F6D4E;
+}
+
+QLabel#settleCoverage[state="partial"] {
+    background: #F7E3C3;
+    color: #8A6523;
+}
+
+QFrame#settleSummary {
+    background: #F1E7D6;
+    border: none;
+    border-radius: 12px;
+}
+
+QFrame#settleSummaryRule {
+    background: #E4D7C4;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#settleTotal {
+    background: transparent;
+    color: #171717;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* ======================================================================
+   REPORTS WORKSPACE
+   Scoped to report* object names and the warm metric "report" variant so
+   Dashboard, Settings, and the list pages are untouched.
+   ====================================================================== */
+
+QComboBox#reportPreset,
+QComboBox#reportFilter,
+QDateEdit#reportDate {
+    background: #FFFFFF;
+    border: 1px solid #DCD0C0;
+    border-radius: 8px;
+    color: #171717;
+    font-size: 13px;
+    padding: 4px 10px;
+}
+
+QComboBox#reportPreset:hover,
+QComboBox#reportFilter:hover,
+QDateEdit#reportDate:hover {
+    border-color: #C9BCA6;
+}
+
+QComboBox#reportPreset::drop-down,
+QComboBox#reportFilter::drop-down,
+QDateEdit#reportDate::drop-down {
+    border: none;
+    background: transparent;
+    width: 22px;
+}
+
+QPushButton#reportExportPdf {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 8px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#reportExportPdf:hover {
+    background: #333333;
+    border-color: #333333;
+}
+
+QPushButton#reportExportCsv {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 8px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#reportExportCsv:hover {
+    background: #F6EEDC;
+    border-color: #C9BCA6;
+}
+
+QFrame#reportChartCard {
+    background: #FFFFFF;
+    border: 1px solid #E9DFD1;
+    border-radius: 14px;
+}
+
+QWidget#reportMetricGrid,
+QWidget#reportMetricRow,
+QWidget#reportTableFooter {
+    background: transparent;
+    border: none;
+}
+
+QLabel#reportSummary {
+    background: transparent;
+    color: #7D7265;
+    font-size: 12px;
+}
+
+QLabel#reportFooterCount {
+    background: transparent;
+    color: #6A645C;
+    font-size: 12px;
+}
+
+QFrame#warmMetricTile[tone="highlight"] {
+    background: #EADBBB;
+}
+
+QFrame#warmMetricTile[tone="report"] {
+    background: #EFE6D7;
+}
+
+QFrame#warmMetricTile[report="true"] {
+    border-radius: 12px;
+}
+
+QFrame#warmMetricTile[report="true"] QLabel#metricLabel {
+    color: #7D7265;
+    font-size: 12px;
+}
+
+QFrame#warmMetricTile[report="true"] QLabel#metricValue {
+    color: #171717;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+QCheckBox#reportOverdue {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 14px;
+    spacing: 7px;
+}
+
+QCheckBox#reportOverdue:hover {
+    background: #F6EEDC;
+}
+
+QCheckBox#reportOverdue::indicator {
+    width: 9px;
+    height: 9px;
+    border: 1px solid #C07B72;
+    border-radius: 5px;
+    background: #C07B72;
+}
+
+QCheckBox#reportOverdue::indicator:checked {
+    background: #A8452F;
+    border-color: #A8452F;
+}
+
+/* ======================================================================
+   SETTINGS
+   Warm Settings cards: left title/tag rail + right control column, plus
+   the Add staff, Reset password, and Accent color sheets. Scoped by
+   object name so the rest of the app keeps its existing surfaces.
+   ====================================================================== */
+
+QWidget#settingsCardRail,
+QWidget#settingsField,
+QWidget#settingsFieldHost {
+    background: transparent;
+    border: none;
+}
+
+QLabel#settingsCardTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#settingsCardCaption {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#settingsTag {
+    background: #ECE6DD;
+    border-radius: 9px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#settingsFieldLabel {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#settingsHint {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#settingsAdminNote {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#settingsPreview {
+    background: #F1E7D6;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+QLabel#settingsEmailValue {
+    background: #F1E7D6;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+QPushButton#settingsPrimary {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#settingsPrimary:hover {
+    background: #333333;
+}
+
+QPushButton#settingsSecondary {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#settingsSecondary:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#settingsDanger {
+    background: #FFFFFF;
+    border: 1px solid #C07B72;
+    border-radius: 18px;
+    color: #9B2C1F;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#settingsDanger:hover {
+    background: #F8E0DC;
+}
+
+QPushButton#settingsPrimary:disabled,
+QPushButton#settingsSecondary:disabled,
+QPushButton#settingsDanger:disabled {
+    background: #EADBBB;
+    border-color: #DCCBAA;
+    color: #A79B87;
+}
+
+QPushButton#settingsInline {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 16px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 12px;
+}
+
+QPushButton#settingsInline:hover {
+    background: #F6EEDC;
+}
+
+QCheckBox#settingsCheck {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QLabel#settingsAccentPreview {
+    min-height: 40px;
+}
+
+QLabel#settingsContrast {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+}
+
+QSlider#accentSlider {
+    min-height: 30px;
+}
+
+QSlider#accentSlider::groove:horizontal {
+    height: 14px;
+    border-radius: 7px;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 #EF3E36,
+        stop: 0.17 #F5D43A,
+        stop: 0.34 #4ED26B,
+        stop: 0.50 #2FD3C4,
+        stop: 0.67 #2A6BEA,
+        stop: 0.84 #7B3FE4,
+        stop: 1 #D6298A
+    );
+}
+
+QSlider#accentSlider::handle:horizontal {
+    width: 24px;
+    margin: -7px 0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    border: 3px solid #171717;
+}
+
+QSpinBox#warmInput:focus,
+QDoubleSpinBox#warmInput:focus {
+    border-color: #171717;
+}
+
+QDoubleSpinBox#warmInput::up-button,
+QDoubleSpinBox#warmInput::down-button {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
+
+QWidget#bookingModal[variant="settings"] QLabel#bookingModalTitle {
+    font-size: 26px;
+}
+
+QWidget#bookingModal[variant="settings"] QLabel#warmFieldLabel {
+    font-size: 13px;
+}

@@ -19,16 +19,19 @@ from datetime import date
 from decimal import Decimal
 
 from PySide6.QtCore import QDate, Qt, QTimer, QUrl, Signal, QObject, QRunnable
-from PySide6.QtGui import QDesktopServices, QImage, QPixmap
+from PySide6.QtGui import QDesktopServices, QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QDateEdit,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -45,9 +48,17 @@ from app.models import Booking, Vehicle
 from app.services import fleet_service, image_cache, media_service
 from app.services.vehicle_service import TRANSMISSIONS, FUEL_TYPES, VEHICLE_CLASSES, VEHICLE_CLASS_LABELS
 from app.staff import theme
-from app.staff.cards import Caption, SectionLabel
+from app.staff.cards import Caption, Card, MoneyNumber
 from app.staff.feedback import describe
-from app.staff.rental_wizard import _StepBase, make_choice_button, make_status_box
+from app.staff.rental_ui import SpecTile, StatusChip
+from app.staff.rental_wizard import _StepBase, make_choice_button
+from app.staff.ui_kit import (
+    ChipGroup,
+    FormField,
+    MetricTile,
+    NoticeBox,
+    SectionTitle,
+)
 from app.staff.workers import emit_safely, media_pool
 from app.utils.money import ZERO, money, pesos
 
@@ -114,6 +125,311 @@ def _field_label(text: str, parent: QWidget) -> QLabel:
 def _friendly(error: BaseException) -> str:
     message, _field, _kind = describe(error)
     return message
+
+
+# -- fleet modal shell ------------------------------------------------------
+
+#: The fleet references are one 900px white sheet, unlike the 540px booking
+#: confirmations. The overlay is told this width per panel, so the bulk sheet
+#: can keep the compact 640px column.
+FLEET_MODAL_WIDTH = 900
+
+FLEET_INK = "#171717"
+FLEET_MUTED = "#6B5E4F"
+
+_STATUS_TONES = {
+    "available": "ok",
+    "reserved": "warn",
+    "rented": "warn",
+    "maintenance": "danger",
+    "retired": "neutral",
+    "pending": "warn",
+    "confirmed": "ok",
+    "ongoing": "warn",
+    "completed": "ok",
+    "cancelled": "danger",
+}
+
+
+def _fleet_text(
+    text: str,
+    *,
+    parent: QWidget | None = None,
+    size: int = 13,
+    weight: QFont.Weight = QFont.Weight.Medium,
+    colour: str = FLEET_INK,
+) -> QLabel:
+    label = QLabel(text, parent)
+    font = QFont("Inter")
+    font.setPixelSize(size)
+    font.setWeight(weight)
+    label.setFont(font)
+    label.setStyleSheet(f"color: {colour}; background: transparent;")
+    return label
+
+
+def _chip_selector(
+    combo: QComboBox, parent: QWidget, *, expanding: bool = True
+) -> ChipGroup:
+    """Visible chips driving one of the form's hidden combos.
+
+    The combo stays the single source of truth, so ``currentText()``,
+    ``setCurrentText()``, prefill, and validation keep working unchanged.
+    """
+    options = [
+        (combo.itemText(index), combo.itemText(index))
+        for index in range(combo.count())
+    ]
+    chips = ChipGroup(options, expanding=expanding, parent=parent)
+    chips.select(combo.currentText())
+    chips.changed.connect(combo.setCurrentText)
+    combo.currentTextChanged.connect(chips.select)
+    combo.hide()
+    return chips
+
+
+class _FleetPreview(QFrame):
+    """Cream live preview beside the add/edit form."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("fleetPreview")
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(8)
+
+        eyebrow = _fleet_text(
+            "PREVIEW",
+            parent=self,
+            size=10,
+            weight=QFont.Weight.DemiBold,
+            colour=FLEET_MUTED,
+        )
+        layout.addWidget(eyebrow)
+        self.title_label = _fleet_text(
+            "New vehicle", parent=self, size=20, weight=QFont.Weight.Bold
+        )
+        self.title_label.setWordWrap(True)
+        layout.addWidget(self.title_label)
+        layout.addSpacing(4)
+
+        self.rows: dict[str, QLabel] = {}
+        for key in ("Plate", "Year", "Seats", "Fuel", "Rate"):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(10)
+            name = _fleet_text(
+                key, parent=self, size=12, colour=FLEET_MUTED
+            )
+            value = _fleet_text(
+                "",
+                parent=self,
+                size=12,
+                weight=QFont.Weight.DemiBold,
+            )
+            value.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            value.setWordWrap(True)
+            row.addWidget(name, 1)
+            row.addWidget(value)
+            layout.addLayout(row)
+            self.rows[key] = value
+
+    def update_preview(
+        self,
+        *,
+        make: str,
+        model: str,
+        plate: str,
+        year: int,
+        seats: int,
+        fuel: str,
+        rate_text: str,
+        editing: bool,
+    ) -> None:
+        name = f"{make} {model}".strip()
+        self.title_label.setText(
+            name or ("Vehicle preview" if editing else "New vehicle")
+        )
+        self.rows["Plate"].setText(plate or "ABC-123")
+        self.rows["Year"].setText(str(year))
+        self.rows["Seats"].setText(str(seats))
+        self.rows["Fuel"].setText(fuel)
+        self.rows["Rate"].setText(f"{rate_text} / day")
+
+
+class _FleetSheet(QWidget):
+    """Transparent host around a 900px white modal sheet.
+
+    Header (eyebrow / title / subtitle), scrollable two-column body, and a
+    sticky footer. Mirrors the modal language in rental_ui.ModalStep without
+    inheriting its step rail or its 540px confirmation geometry.
+    """
+
+    cancel_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # The root host must stay transparent: the blanket QWidget cream
+        # would otherwise paint a square column behind the rounded sheet.
+        self.setObjectName("fleetModal")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addStretch(1)
+
+        self.card = Card(self, radius=22)
+        self.card.setObjectName("fleetModalCard")
+        self.card.setMaximumWidth(FLEET_MODAL_WIDTH)
+        self.card.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        outer.addWidget(self.card)
+        outer.addStretch(1)
+
+        card_layout = self.card.layout()
+
+        self.header_host = QWidget(self.card)
+        self.header_host.setObjectName("fleetModalHeader")
+        self.header_layout = QVBoxLayout(self.header_host)
+        self.header_layout.setContentsMargins(28, 22, 28, 0)
+        self.header_layout.setSpacing(8)
+        card_layout.addWidget(self.header_host)
+
+        eyebrow_row = QHBoxLayout()
+        eyebrow_row.setContentsMargins(0, 0, 0, 0)
+        eyebrow_row.setSpacing(10)
+        self.eyebrow_label = QLabel("", self.header_host)
+        self.eyebrow_label.setObjectName("fleetEyebrow")
+        self.eyebrow_label.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
+        self.eyebrow_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        eyebrow_row.addWidget(self.eyebrow_label, 0, Qt.AlignmentFlag.AlignLeft)
+        eyebrow_row.addStretch(1)
+        self.status_host = QHBoxLayout()
+        self.status_host.setContentsMargins(0, 0, 0, 0)
+        self.status_host.setSpacing(8)
+        eyebrow_row.addLayout(self.status_host)
+        self.header_layout.addLayout(eyebrow_row)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(16)
+        self.title_label = _fleet_text(
+            "",
+            parent=self.header_host,
+            size=30,
+            weight=QFont.Weight.Bold,
+        )
+        self.title_label.setObjectName("fleetModalTitle")
+        self.title_label.setWordWrap(True)
+        title_row.addWidget(self.title_label, 1)
+        self.title_right = QHBoxLayout()
+        self.title_right.setContentsMargins(0, 0, 0, 0)
+        self.title_right.setSpacing(6)
+        title_row.addLayout(self.title_right)
+        self.header_layout.addLayout(title_row)
+
+        self.subtitle_label = _fleet_text(
+            "",
+            parent=self.header_host,
+            size=13,
+            colour=FLEET_MUTED,
+        )
+        self.subtitle_label.setObjectName("fleetModalSubtitle")
+        self.subtitle_label.setWordWrap(True)
+        self.header_layout.addWidget(self.subtitle_label)
+
+        rule = QFrame(self.header_host)
+        rule.setObjectName("fleetModalRule")
+        rule.setFixedHeight(1)
+        self.header_layout.addWidget(rule)
+
+        self.content_host = QWidget(self.card)
+        self.content_host.setObjectName("fleetModalBody")
+        self._content_outer = QVBoxLayout(self.content_host)
+        self._content_outer.setContentsMargins(28, 22, 28, 18)
+        self._content_outer.setSpacing(14)
+        card_layout.addWidget(self.content_host, 1)
+
+        self._columns: QHBoxLayout | None = None
+        self._left: QVBoxLayout | None = None
+        self._body: QVBoxLayout | None = None
+        self._error: QLabel | None = None
+
+        self.footer = QFrame(self.card)
+        self.footer.setObjectName("fleetModalFooter")
+        self.footer_layout = QHBoxLayout(self.footer)
+        self.footer_layout.setContentsMargins(28, 14, 28, 16)
+        self.footer_layout.setSpacing(10)
+        self.footer.setVisible(False)
+        card_layout.addWidget(self.footer)
+
+    def _head(self, eyebrow: str, title: str, subtitle: str) -> None:
+        self.eyebrow_label.setText(eyebrow.upper())
+        self.title_label.setText(title)
+        self.subtitle_label.setText(subtitle)
+        self.subtitle_label.setVisible(bool(subtitle))
+
+    def _set_header(self, title: str, subtitle: str) -> None:
+        self.title_label.setText(title)
+        self.subtitle_label.setText(subtitle)
+        self.subtitle_label.setVisible(bool(subtitle))
+
+    def _start_columns(
+        self, *, left_stretch: int = 5, right_stretch: int = 4
+    ) -> tuple[QVBoxLayout, QVBoxLayout]:
+        columns = QHBoxLayout()
+        columns.setContentsMargins(0, 0, 0, 0)
+        columns.setSpacing(24)
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(16)
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(10)
+        columns.addLayout(left, left_stretch)
+        columns.addLayout(right, right_stretch)
+        self._content_outer.addLayout(columns)
+        self._columns = columns
+        self._left = left
+        self._body = right
+        return left, right
+
+    def _error_label(self) -> QLabel:
+        label = QLabel("", self.content_host)
+        label.setObjectName("fieldError")
+        label.setWordWrap(True)
+        label.setVisible(False)
+        self._content_outer.addWidget(label)
+        self._error = label
+        return label
+
+    def _buttons(
+        self, primary_text: str, *, back_text: str = "Back"
+    ) -> tuple[QPushButton, QPushButton]:
+        while self.footer_layout.count():
+            item = self.footer_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.footer_layout.addStretch(1)
+        back = QPushButton(back_text, self.footer)
+        back.setObjectName("secondaryButton")
+        back.setMinimumHeight(38)
+        back.setCursor(Qt.CursorShape.PointingHandCursor)
+        primary = QPushButton(primary_text, self.footer)
+        primary.setObjectName("primaryButton")
+        primary.setMinimumHeight(38)
+        primary.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.footer_layout.addWidget(back)
+        self.footer_layout.addWidget(primary)
+        self.footer.setVisible(True)
+        return back, primary
 
 
 def _media_failure_message(exc: object) -> str:
@@ -207,7 +523,7 @@ def _download(url: str, timeout: int = 10) -> bytes | None:
 # -- add / edit form --------------------------------------------------------
 
 
-class VehicleFormPanel(_StepBase):
+class VehicleFormPanel(_FleetSheet):
     submitted = Signal(dict)
     cancelled = Signal()
 
@@ -215,94 +531,181 @@ class VehicleFormPanel(_StepBase):
         super().__init__(parent)
         self._context = context
         self._vehicle_id = vehicle_id
+        editing = vehicle_id is not None
         self._head(
-            "Edit vehicle" if vehicle_id else "Add vehicle",
-            "Plate, specs, rate, and paperwork dates.",
+            "Edit vehicle" if editing else "Add vehicle",
+            "Update plate, specs, rate and paperwork"
+            if editing
+            else "Plate, specs, rate and paperwork",
+            "Changes apply to future bookings only."
+            if editing
+            else "Required: plate, brand, model and daily rate.",
         )
+        left, right = self._start_columns(left_stretch=5, right_stretch=4)
         self._error = self._error_label()
-        grid = QFormLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(6)
+
+        def field(label: str, widget: QWidget, *, optional: bool = False) -> FormField:
+            return FormField(
+                label, widget, optional=optional, parent=self.card
+            )
+
+        # -- identity ---------------------------------------------------
+        left.addWidget(SectionTitle("Identity", self.card))
+        identity = QGridLayout()
+        identity.setContentsMargins(0, 0, 0, 0)
+        identity.setHorizontalSpacing(20)
+        identity.setVerticalSpacing(14)
+        identity.setColumnStretch(0, 1)
+        identity.setColumnStretch(1, 1)
 
         self.plate_edit = QLineEdit(self.card)
+        self.plate_edit.setObjectName("warmInput")
         self.plate_edit.setPlaceholderText("ABC-123 (max 7 chars)")
-        grid.addRow(_field_label("Plate", self.card), self.plate_edit)
-
-        self.make_edit = QLineEdit(self.card)
-        grid.addRow(_field_label("Brand", self.card), self.make_edit)
-        self.model_edit = QLineEdit(self.card)
-        grid.addRow(_field_label("Model", self.card), self.model_edit)
-
-        self.year_edit = QSpinBox(self.card)
-        self.year_edit.setRange(1900, date.today().year + 2)
-        self.year_edit.setValue(date.today().year)
-        grid.addRow(_field_label("Year", self.card), self.year_edit)
+        identity.addWidget(field("Plate", self.plate_edit), 0, 0)
 
         self.color_edit = QLineEdit(self.card)
+        self.color_edit.setObjectName("warmInput")
         self.color_edit.setPlaceholderText("Optional")
-        grid.addRow(_field_label("Color", self.card), self.color_edit)
+        identity.addWidget(field("Color", self.color_edit, optional=True), 0, 1)
+
+        self.make_edit = QLineEdit(self.card)
+        self.make_edit.setObjectName("warmInput")
+        identity.addWidget(field("Brand", self.make_edit), 1, 0)
+        self.model_edit = QLineEdit(self.card)
+        self.model_edit.setObjectName("warmInput")
+        identity.addWidget(field("Model", self.model_edit), 1, 1)
+
+        self.year_edit = QSpinBox(self.card)
+        self.year_edit.setObjectName("warmInput")
+        self.year_edit.setRange(1900, date.today().year + 2)
+        self.year_edit.setValue(date.today().year)
+        identity.addWidget(field("Year", self.year_edit), 2, 0)
+
+        self.seats_edit = QSpinBox(self.card)
+        self.seats_edit.setObjectName("warmInput")
+        self.seats_edit.setRange(0, 60)
+        self.seats_edit.setValue(5)
+        identity.addWidget(field("Seats (0 = unset)", self.seats_edit), 2, 1)
+        left.addLayout(identity)
+        left.addSpacing(2)
+
+        # -- specs ------------------------------------------------------
+        left.addWidget(SectionTitle("Specs", self.card))
+        specs = QGridLayout()
+        specs.setContentsMargins(0, 0, 0, 0)
+        specs.setHorizontalSpacing(20)
+        specs.setVerticalSpacing(14)
+        specs.setColumnStretch(0, 1)
+        specs.setColumnStretch(1, 1)
 
         self.category_combo = QComboBox(self.card)
         self.category_combo.addItems(["Car", "Motorcycle"])
-        grid.addRow(_field_label("Category", self.card), self.category_combo)
+        self.category_chips = _chip_selector(self.category_combo, self.card)
+        specs.addWidget(field("Category", self.category_chips), 0, 0, 1, 2)
 
         self.trans_combo = QComboBox(self.card)
         self.trans_combo.addItems(list(TRANSMISSIONS))
-        grid.addRow(_field_label("Transmission", self.card), self.trans_combo)
-
-        self.fuel_combo = QComboBox(self.card)
-        self.fuel_combo.addItems(list(FUEL_TYPES))
-        grid.addRow(_field_label("Fuel type", self.card), self.fuel_combo)
-
-        self.seats_edit = QSpinBox(self.card)
-        self.seats_edit.setRange(0, 60)
-        self.seats_edit.setValue(5)
-        grid.addRow(_field_label("Seats (0 = unset)", self.card), self.seats_edit)
+        self.transmission_chips = _chip_selector(self.trans_combo, self.card)
+        specs.addWidget(field("Transmission", self.transmission_chips), 1, 0)
 
         self.class_combo = QComboBox(self.card)
+        self.class_combo.setObjectName("warmInput")
         self.class_combo.addItem("Unset", None)
         for cls in VEHICLE_CLASSES:
             self.class_combo.addItem(VEHICLE_CLASS_LABELS[cls], cls)
-        grid.addRow(_field_label("Size class", self.card), self.class_combo)
+        specs.addWidget(field("Size class", self.class_combo), 1, 1)
+
+        self.fuel_combo = QComboBox(self.card)
+        self.fuel_combo.addItems(list(FUEL_TYPES))
+        self.fuel_chips = _chip_selector(self.fuel_combo, self.card)
+        specs.addWidget(field("Fuel type", self.fuel_chips), 2, 0, 1, 2)
 
         self.cc_edit = QSpinBox(self.card)
+        self.cc_edit.setObjectName("warmInput")
         self.cc_edit.setRange(0, 2000)
-        grid.addRow(_field_label("Engine CC (0 = unset)", self.card), self.cc_edit)
+        specs.addWidget(field("Engine size (cc)", self.cc_edit), 3, 0, 1, 2)
+        left.addLayout(specs)
+        left.addSpacing(2)
+
+        # -- rate and odometer -----------------------------------------
+        left.addWidget(SectionTitle("Rate and odometer", self.card))
+        rate_grid = QGridLayout()
+        rate_grid.setContentsMargins(0, 0, 0, 0)
+        rate_grid.setHorizontalSpacing(20)
+        rate_grid.setVerticalSpacing(14)
+        rate_grid.setColumnStretch(0, 1)
+        rate_grid.setColumnStretch(1, 1)
 
         self.rate_edit = QLineEdit(self.card)
+        self.rate_edit.setObjectName("warmInput")
         self.rate_edit.setPlaceholderText("0.00")
-        grid.addRow(_field_label("Daily rate (PHP)", self.card), self.rate_edit)
+        rate_grid.addWidget(field("Daily rate (₱)", self.rate_edit), 0, 0)
 
         self.mileage_edit = QSpinBox(self.card)
+        self.mileage_edit.setObjectName("warmInput")
         self.mileage_edit.setRange(0, 9_999_999)
-        grid.addRow(_field_label("Odometer (km)", self.card), self.mileage_edit)
+        rate_grid.addWidget(field("Odometer (km)", self.mileage_edit), 0, 1)
+        left.addLayout(rate_grid)
+        left.addSpacing(2)
+
+        # -- paperwork --------------------------------------------------
+        left.addWidget(SectionTitle("Paperwork dates", self.card))
+        dates = QGridLayout()
+        dates.setContentsMargins(0, 0, 0, 0)
+        dates.setHorizontalSpacing(20)
+        dates.setVerticalSpacing(14)
+        dates.setColumnStretch(0, 1)
+        dates.setColumnStretch(1, 1)
 
         self.reg_edit = QDateEdit(self.card)
+        self.reg_edit.setObjectName("warmInput")
         self.reg_edit.setCalendarPopup(True)
         self.reg_edit.setDisplayFormat("dd MMM yyyy")
         self.reg_edit.setDate(QDate.currentDate().addYears(1))
-        self.reg_set = QCheckBox("Set", self.card)
-        reg_row = QHBoxLayout()
-        reg_row.setContentsMargins(0, 0, 0, 0)
-        reg_row.addWidget(self.reg_edit, 1)
-        reg_row.addWidget(self.reg_set)
-        grid.addRow(_field_label("Registration expiry", self.card), reg_row)
+        self.reg_set = QCheckBox("Track this expiry", self.card)
+        self.reg_set.setObjectName("fleetCheck")
+        reg_host = QWidget(self.card)
+        reg_host.setObjectName("fleetFieldHost")
+        reg_lay = QVBoxLayout(reg_host)
+        reg_lay.setContentsMargins(0, 0, 0, 0)
+        reg_lay.setSpacing(8)
+        reg_lay.addWidget(self.reg_edit)
+        reg_lay.addWidget(self.reg_set)
+        dates.addWidget(field("Registration expiry", reg_host), 0, 0)
 
         self.ins_edit = QDateEdit(self.card)
+        self.ins_edit.setObjectName("warmInput")
         self.ins_edit.setCalendarPopup(True)
         self.ins_edit.setDisplayFormat("dd MMM yyyy")
         self.ins_edit.setDate(QDate.currentDate().addYears(1))
-        self.ins_set = QCheckBox("Set", self.card)
-        ins_row = QHBoxLayout()
-        ins_row.setContentsMargins(0, 0, 0, 0)
-        ins_row.addWidget(self.ins_edit, 1)
-        ins_row.addWidget(self.ins_set)
-        grid.addRow(_field_label("Insurance expiry", self.card), ins_row)
+        self.ins_set = QCheckBox("Track this expiry", self.card)
+        self.ins_set.setObjectName("fleetCheck")
+        ins_host = QWidget(self.card)
+        ins_host.setObjectName("fleetFieldHost")
+        ins_lay = QVBoxLayout(ins_host)
+        ins_lay.setContentsMargins(0, 0, 0, 0)
+        ins_lay.setSpacing(8)
+        ins_lay.addWidget(self.ins_edit)
+        ins_lay.addWidget(self.ins_set)
+        dates.addWidget(field("Insurance expiry", ins_host), 0, 1)
+        left.addLayout(dates)
+        left.addStretch(1)
 
-        self._body.addLayout(grid)
+        # -- live preview ----------------------------------------------
+        self._preview = _FleetPreview(self.card)
+        right.addWidget(self._preview)
+        right.addWidget(
+            NoticeBox(
+                "Expiry reminders only run for dates you tick.",
+                tone="amber",
+                parent=self.card,
+            )
+        )
         self._media_hint = Caption("", parent=self.card, colour=theme.WARN)
         self._media_hint.setWordWrap(True)
-        self._body.addWidget(self._media_hint)
+        right.addWidget(self._media_hint)
+        right.addStretch(1)
+
         back, go = self._buttons("Save vehicle")
         back.clicked.connect(self.cancelled.emit)
         go.clicked.connect(self._on_go)
@@ -323,8 +726,33 @@ class VehicleFormPanel(_StepBase):
         self.year_edit.valueChanged.connect(lambda _v: self._schedule_probe())
         self.category_combo.currentIndexChanged.connect(lambda _i: self._schedule_probe())
 
+        for edit in (self.plate_edit, self.make_edit, self.model_edit, self.rate_edit):
+            edit.textChanged.connect(lambda _t: self._refresh_preview())
+        for spin in (self.year_edit, self.seats_edit):
+            spin.valueChanged.connect(lambda _v: self._refresh_preview())
+        self.fuel_combo.currentTextChanged.connect(
+            lambda _t: self._refresh_preview()
+        )
+
         if vehicle_id is not None:
             self._prefill()
+        self._refresh_preview()
+
+    def _refresh_preview(self) -> None:
+        try:
+            rate = money(self.rate_edit.text(), field="daily_rate")
+        except Exception:  # noqa: BLE001 - preview is advisory, never blocks
+            rate = ZERO
+        self._preview.update_preview(
+            make=self.make_edit.text().strip(),
+            model=self.model_edit.text().strip(),
+            plate=self.plate_edit.text().strip().upper(),
+            year=self.year_edit.value(),
+            seats=self.seats_edit.value(),
+            fuel=self.fuel_combo.currentText(),
+            rate_text=pesos(rate),
+            editing=self._vehicle_id is not None,
+        )
 
     def _prefill(self) -> None:
         with self._context.reading() as session:
@@ -726,7 +1154,7 @@ class _MediaRefresh(QRunnable):
             emit_safely(self._done, snapshot)
 
 
-class FleetDetailsPanel(_StepBase):
+class FleetDetailsPanel(_FleetSheet):
     closed = Signal()
     edit_requested = Signal(int)
     refreshed = Signal(str)
@@ -747,22 +1175,15 @@ class FleetDetailsPanel(_StepBase):
         self._media_signals = _MediaSignals(self)
         self._media_signals.done.connect(self._on_media_done)
         self._media_signals.failed.connect(self._on_media_failed)
-        self._head("Vehicle", f"Vehicle #{vehicle_id}")
-        self._error = self._error_label()
-        self._load()
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        row.addStretch(1)
-        self.edit_button = QPushButton("Edit", self.card)
-        self.edit_button.setObjectName("secondaryButton")
-        self.edit_button.clicked.connect(lambda: self.edit_requested.emit(self._vehicle_id))
-        self.close_button = QPushButton("Close", self.card)
-        self.close_button.setObjectName("primaryButton")
+        self._head(f"Vehicle #{vehicle_id}", "Vehicle", "")
+        self.edit_button, self.close_button = self._buttons(
+            "Close", back_text="Edit"
+        )
+        self.edit_button.clicked.connect(
+            lambda: self.edit_requested.emit(self._vehicle_id)
+        )
         self.close_button.clicked.connect(self.closed.emit)
-        row.addWidget(self.edit_button)
-        row.addWidget(self.close_button)
-        self._body.addLayout(row)
+        self._load()
 
     # -- data -----------------------------------------------------------
 
@@ -863,7 +1284,12 @@ class FleetDetailsPanel(_StepBase):
                     ("Seats", str(vehicle.seats) if vehicle.seats is not None else DASH),
                     ("Transmission", vehicle.transmission or DASH),
                     ("Fuel", vehicle.fuel_type or DASH),
-                    ("Class", vehicle.vehicle_class or DASH),
+                    (
+                        "Class",
+                        VEHICLE_CLASS_LABELS.get(
+                            vehicle.vehicle_class or "", vehicle.vehicle_class or DASH
+                        ),
+                    ),
                     ("Mileage", f"{vehicle.mileage:,} km" if vehicle.mileage is not None else DASH),
                     (
                         "Registration",
@@ -883,156 +1309,318 @@ class FleetDetailsPanel(_StepBase):
             }
 
     def _section(self, title: str, lines: list[str]) -> None:
-        from app.staff.cards import SectionLabel
-
-        self._body.addWidget(SectionLabel(title, parent=self.card))
+        self._body.addWidget(SectionTitle(title, self.card))
         for line in lines:
             self._body.addWidget(Caption(line, parent=self.card))
 
     # -- layout ---------------------------------------------------------
 
     def _load(self) -> None:
-        from app.staff.cards import MoneyNumber, SectionLabel
-
         data = self._read()
+        left, right = self._start_columns(left_stretch=4, right_stretch=6)
+        self._error = self._error_label()
         if data is None:
-            self._section("Missing", ["That vehicle no longer exists."])
+            self._set_header("Vehicle", f"#{self._vehicle_id}")
             self.edit_button.setEnabled(False)
+            self._section("Missing", ["That vehicle no longer exists."])
             return
         self._data = data
         self._media_rows = list(data["media"])
 
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(8)
-        head.addWidget(SectionLabel(data["name"], parent=self.card), 1)
-        head.addWidget(
-            make_status_box(
+        self._set_header(data["name"], data["subtitle"])
+        self.status_host.addWidget(
+            StatusChip(
                 data["status"].title(),
-                theme.STATUS_COLOURS.get(data["status"], theme.MUTED),
-                self.card,
-            )
+                tone=_STATUS_TONES.get(data["status"], "neutral"),
+                parent=self.card,
+            ),
+            0,
+            Qt.AlignmentFlag.AlignRight,
         )
-        self._body.addLayout(head)
-        self._body.addWidget(Caption(data["subtitle"], parent=self.card))
-        price = MoneyNumber(parent=self.card)
-        price.set_colours(dim=theme.MUTED, bright=theme.TEXT)
-        price.set_amount(data["rate"] or 0)
-        price_row = QHBoxLayout()
-        price_row.setContentsMargins(0, 0, 0, 0)
-        price_row.addWidget(price)
-        price_row.addWidget(Caption("/ day", parent=self.card))
-        price_row.addStretch(1)
-        self._body.addLayout(price_row)
+        self.price = MoneyNumber(
+            parent=self.card,
+            size=30,
+            dim=FLEET_MUTED,
+            bright=FLEET_INK,
+            weight=QFont.Weight.Bold,
+        )
+        self.price.set_amount(data["rate"] or 0)
+        self.title_right.addWidget(self.price)
+        self.title_right.addWidget(
+            _fleet_text("/ day", parent=self.card, size=13, colour=FLEET_MUTED)
+        )
 
-        self._body.addWidget(SectionLabel("Gallery", parent=self.card))
+        # -- left column: gallery + 3D ---------------------------------
+        left.addWidget(SectionTitle("Gallery", self.card))
         self._hero = QLabel(self.card)
-        self._hero.setFixedHeight(220)
+        self._hero.setObjectName("fleetHero")
+        self._hero.setFixedHeight(300)
         self._hero.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hero.setStyleSheet("QLabel { background: #FFFFFF; }")
-        self._body.addWidget(self._hero)
+        left.addWidget(self._hero)
         self._strip = QHBoxLayout()
         self._strip.setContentsMargins(0, 0, 0, 0)
         self._strip.setSpacing(8)
         strip_host = QWidget(self.card)
         strip_host.setObjectName("fleetGalleryStrip")
         strip_host.setLayout(self._strip)
-        self._body.addWidget(strip_host)
+        left.addWidget(strip_host)
         self._fill_gallery()
 
-        self._body.addWidget(SectionLabel("3D preview", parent=self.card))
+        left.addWidget(SectionTitle("3D preview", self.card))
         self._viewer_host = QVBoxLayout()
         self._viewer_host.setContentsMargins(0, 0, 0, 0)
         self._viewer_host.setSpacing(8)
         viewer_box = QWidget(self.card)
         viewer_box.setObjectName("fleetViewerHost")
         viewer_box.setLayout(self._viewer_host)
-        self._body.addWidget(viewer_box)
+        left.addWidget(viewer_box)
         self._fill_viewer()
 
-        refresh_row = QHBoxLayout()
-        refresh_row.setContentsMargins(0, 0, 0, 0)
-        refresh_row.addStretch(1)
         self.refresh_button = QPushButton("Refresh photos + 3D", self.card)
         self.refresh_button.setObjectName("secondaryButton")
+        self.refresh_button.setMinimumHeight(38)
+        self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_button.clicked.connect(self._on_refresh_media)
-        refresh_row.addWidget(self.refresh_button)
-        self._body.addLayout(refresh_row)
+        left.addWidget(self.refresh_button)
+        left.addStretch(1)
 
-        self._body.addWidget(SectionLabel("Specifications", parent=self.card))
-        for key, value in data["specs"]:
-            self._body.addWidget(Caption(f"{key}: {value}", parent=self.card))
+        # -- right column: metrics, specs, history ---------------------
+        stats = data["stats"]
+        metrics = QHBoxLayout()
+        metrics.setContentsMargins(0, 0, 0, 0)
+        metrics.setSpacing(8)
+        for label, value in (
+            ("Times rented", f"{stats['times_rented']}×"),
+            ("All-time revenue", pesos(stats["total_revenue"])),
+            ("Maintenance spend", pesos(stats["maintenance_cost"])),
+        ):
+            metrics.addWidget(MetricTile(label, value, parent=self.card), 1)
+        right.addLayout(metrics)
 
-        actives = [b for b in data["bookings"] if b["status"] in ("pending", "confirmed", "ongoing")]
+        actives = [
+            b
+            for b in data["bookings"]
+            if b["status"] in ("pending", "confirmed", "ongoing")
+        ]
         current = actives[0] if actives else None
         if current:
-            self._body.addWidget(
-                make_status_box(
+            right.addWidget(
+                NoticeBox(
                     f"Out now: #{current['ref']} · {current['customer']} · "
                     f"{current['start']:%d %b} → {current['end']:%d %b}",
-                    theme.WARN,
-                    self.card,
-                )
-            )
-        upcoming = [b for b in actives[1:2]]
-        for b in upcoming:
-            self._body.addWidget(
-                Caption(
-                    f"Next: #{b['ref']} · {b['customer']} · {b['start']:%d %b} → {b['end']:%d %b}",
+                    tone="amber",
                     parent=self.card,
                 )
             )
+        for b in actives[1:2]:
+            right.addWidget(
+                NoticeBox(
+                    f"Next: #{b['ref']} · {b['customer']} · "
+                    f"{b['start']:%d %b} → {b['end']:%d %b}",
+                    tone="cream",
+                    parent=self.card,
+                )
+            )
+
+        right.addWidget(SectionTitle("Specifications", self.card))
+        spec_grid = QGridLayout()
+        spec_grid.setContentsMargins(0, 0, 0, 0)
+        spec_grid.setHorizontalSpacing(8)
+        spec_grid.setVerticalSpacing(8)
+        for index, (key, value) in enumerate(data["specs"]):
+            spec_grid.addWidget(
+                SpecTile(key, value, self.card), index // 3, index % 3
+            )
+        right.addLayout(spec_grid)
+
+        right.addWidget(SectionTitle("Booking history", self.card))
         history = data["history"]
-        self._section(
-            "Booking history",
-            [
-                f"#{b['ref']} · {b['customer']} · {b['start']:%d %b %Y} → {b['end']:%d %b %Y} · {b['status']}"
-                for b in history
-            ]
-            or ["No past rentals."],
-        )
+        if history:
+            for index, booking in enumerate(history):
+                right.addWidget(self._history_row(booking))
+                if index < len(history) - 1:
+                    right.addWidget(self._row_rule())
+        else:
+            right.addWidget(Caption("No past rentals.", parent=self.card))
 
-        self._section(
-            "Inspections",
-            [
-                f"#{r['ref']} {r['type']} · {r['mileage']:,} km · fuel {r['fuel']} · {r['damage']}"
-                if r["mileage"] is not None
-                else f"#{r['ref']} {r['type']} · fuel {r['fuel']} · {r['damage']}"
-                for r in data["inspections"]
-            ]
-            or ["No inspection records."],
-        )
+        right.addWidget(SectionTitle("Inspections", self.card))
+        if data["inspections"]:
+            for index, inspection in enumerate(data["inspections"]):
+                right.addWidget(self._inspection_row(inspection))
+                if index < len(data["inspections"]) - 1:
+                    right.addWidget(self._row_rule())
+        else:
+            right.addWidget(Caption("No inspection records.", parent=self.card))
 
-        cost_lines = [
-            f"{r['start']:%d %b %Y} → {r['end']:%d %b %Y} · {r['description']} · {r['status']}"
-            for r in data["maintenance"]
-        ] or ["No maintenance records."]
-        self._section("Maintenance", cost_lines)
-        self._stats_caption = Caption("", parent=self.card)
-        self._body.addWidget(self._stats_caption)
+        right.addWidget(SectionTitle("Maintenance", self.card))
+        if data["maintenance"]:
+            for index, record in enumerate(data["maintenance"]):
+                right.addWidget(self._maintenance_row(record))
+                if index < len(data["maintenance"]) - 1:
+                    right.addWidget(self._row_rule())
+        else:
+            right.addWidget(Caption("No maintenance records.", parent=self.card))
 
-        self._body.addWidget(SectionLabel("Utilization", parent=self.card))
+        right.addWidget(SectionTitle("Utilization", self.card))
         switch = QHBoxLayout()
         switch.setContentsMargins(0, 0, 0, 0)
         switch.setSpacing(8)
         self._window_group = QButtonGroup(self)
         self._window_buttons: dict[int, QPushButton] = {}
         for days in STAT_WINDOWS:
-            button = make_choice_button(f"{days}d", self.card)
+            button = QPushButton(f"{days}d", self.card)
+            button.setObjectName("choiceChip")
+            button.setProperty("variant", "choice")
             button.setCheckable(True)
             button.setChecked(days == self._window_days)
-            button.clicked.connect(lambda _c=False, _d=days: self._on_window(_d))
+            button.setFixedHeight(34)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _c=False, _d=days: self._on_window(_d)
+            )
             self._window_group.addButton(button)
-            switch.addWidget(button, 1)
+            switch.addWidget(button)
             self._window_buttons[days] = button
         switch.addStretch(1)
-        self._body.addLayout(switch)
+        right.addLayout(switch)
+
+        self._util_bar = QProgressBar(self.card)
+        self._util_bar.setObjectName("fleetUtilBar")
+        self._util_bar.setRange(0, 100)
+        self._util_bar.setTextVisible(False)
+        self._util_bar.setFixedHeight(8)
+        right.addWidget(self._util_bar)
+
+        self._stats_caption = Caption("", parent=self.card)
+        self._stats_caption.setVisible(False)
+        right.addWidget(self._stats_caption)
         self._util_caption = Caption("", parent=self.card)
-        self._body.addWidget(self._util_caption)
+        right.addWidget(self._util_caption)
+        right.addStretch(1)
         self._refresh_stats_text()
         # Fetch on open: the panel calls the CarImages API itself instead
         # of waiting for Refresh. Freshness-aware, usually a cache hit.
         self._start_silent_refresh()
+
+    def _row_rule(self) -> QFrame:
+        rule = QFrame(self.card)
+        rule.setObjectName("fleetRowRule")
+        rule.setFixedHeight(1)
+        return rule
+
+    def _history_row(self, booking: dict) -> QFrame:
+        row = QFrame(self.card)
+        row.setObjectName("fleetHistoryRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(10)
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        text.addWidget(
+            _fleet_text(
+                f"#{booking['ref']} {booking['customer']}",
+                parent=row,
+                size=13,
+                weight=QFont.Weight.DemiBold,
+            )
+        )
+        text.addWidget(
+            Caption(
+                f"{booking['start']:%d %b %Y} → {booking['end']:%d %b %Y}",
+                parent=row,
+                colour=FLEET_MUTED,
+                size=12,
+            )
+        )
+        layout.addLayout(text, 1)
+        layout.addWidget(
+            StatusChip(
+                booking["status"].title(),
+                tone=_STATUS_TONES.get(booking["status"], "neutral"),
+                parent=row,
+            ),
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        return row
+
+    def _inspection_row(self, inspection: dict) -> QFrame:
+        row = QFrame(self.card)
+        row.setObjectName("fleetHistoryRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(10)
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        text.addWidget(
+            _fleet_text(
+                f"#{inspection['ref']} {inspection['type']}",
+                parent=row,
+                size=13,
+                weight=QFont.Weight.DemiBold,
+            )
+        )
+        text.addWidget(
+            Caption(
+                inspection["damage"],
+                parent=row,
+                colour=FLEET_MUTED,
+                size=12,
+            )
+        )
+        layout.addLayout(text, 1)
+        chip_text = (
+            f"{inspection['mileage']:,} km · fuel {inspection['fuel']}"
+            if inspection["mileage"] is not None
+            else f"fuel {inspection['fuel']}"
+        )
+        chip = QLabel(chip_text, row)
+        chip.setObjectName("fleetMetaChip")
+        chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        chip.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
+        layout.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
+
+    def _maintenance_row(self, record: dict) -> QFrame:
+        row = QFrame(self.card)
+        row.setObjectName("fleetHistoryRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(10)
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        text.addWidget(
+            _fleet_text(
+                record["description"],
+                parent=row,
+                size=13,
+                weight=QFont.Weight.DemiBold,
+            )
+        )
+        text.addWidget(
+            Caption(
+                f"{record['start']:%d %b %Y} → {record['end']:%d %b %Y}",
+                parent=row,
+                colour=FLEET_MUTED,
+                size=12,
+            )
+        )
+        layout.addLayout(text, 1)
+        layout.addWidget(
+            StatusChip(
+                record["status"].title(),
+                tone=_STATUS_TONES.get(record["status"], "neutral"),
+                parent=row,
+            ),
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        return row
 
     def _refresh_stats_text(self) -> None:
         stats = self._data["stats"]
@@ -1041,10 +1629,12 @@ class FleetDetailsPanel(_StepBase):
             f"maintenance {pesos(stats['maintenance_cost'])}."
         )
         if stats["utilization"] is None:
+            self._util_bar.setValue(0)
             self._util_caption.setText(
                 f"Last {stats['window_days']}d: unavailable all window (shop/retired)."
             )
         else:
+            self._util_bar.setValue(round(stats["utilization"] * 100))
             self._util_caption.setText(
                 f"Last {stats['window_days']}d: {stats['rented_days']} rented / "
                 f"{stats['available_days']} available = {stats['utilization']:.0%}."
@@ -1069,30 +1659,33 @@ class FleetDetailsPanel(_StepBase):
         )
         self._bytes_by_url = {}
         hero_shown = False
-        for row in self._media_rows:
+        for index, row in enumerate(self._media_rows):
             url = row.get("image_url") or ""
             data = row.get("image_data") or cache_bytes
             if url and data:
                 self._bytes_by_url[url] = data
             if not hero_shown and data:
-                hero = _pixmap(data, 600, 220)
+                hero = _pixmap(data, 620, 300)
                 if hero is not None:
                     self._hero.setPixmap(hero)
                     hero_shown = True
             thumb = _pixmap(data, 96, 72)
             label = QLabel(self.card)
+            label.setObjectName("fleetThumb")
+            label.setProperty("selected", "true" if index == 0 else "false")
+            label.setFixedSize(96, 72)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             if thumb is not None:
                 label.setPixmap(thumb)
             else:
                 label.setText(row.get("view_angle") or "photo")
-            label.setStyleSheet("QLabel { background: #FFFFFF; border: 1px solid #D8CCBB; }")
             label.setCursor(Qt.CursorShape.PointingHandCursor)
             label.mousePressEvent = lambda _e, _u=url: self._show_url(_u)
             self._strip.addWidget(label)
         self._strip.addStretch(1)
         if not hero_shown:
             if cache_bytes:
-                hero = _pixmap(cache_bytes, 600, 220)
+                hero = _pixmap(cache_bytes, 620, 300)
                 if hero is not None:
                     self._hero.setPixmap(hero)
                     return
@@ -1106,7 +1699,7 @@ class FleetDetailsPanel(_StepBase):
             data = _hero_bytes(
                 self._data["make"], self._data["model"], self._data["year"]
             )
-        pix = _pixmap(data, 600, 220)
+        pix = _pixmap(data, 620, 300)
         if pix is not None:
             self._hero.setPixmap(pix)
         else:
@@ -1130,30 +1723,31 @@ class FleetDetailsPanel(_StepBase):
             safe = url.replace("\\", "\\\\").replace('"', "%22")
             view.setHtml(_THREE_HTML.replace("__URL__", safe), QUrl("https://localhost/"))
             self._viewer_host.addWidget(view)
-            link_row = QHBoxLayout()
-            link_row.setContentsMargins(0, 0, 0, 0)
-            link_row.addStretch(1)
-            open_button = QPushButton("Open 3D in browser", self.card)
-            open_button.setObjectName("secondaryButton")
-            open_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
-            link_row.addWidget(open_button)
-            self._viewer_host.addLayout(link_row)
+            self._add_open_3d(url)
         else:
             reason = (
                 "No 3D model cached for this vehicle yet."
                 if not url
                 else "3D viewer unavailable in this build."
             )
-            self._viewer_host.addWidget(Caption(reason, parent=self.card))
+            placeholder = QLabel(reason, self.card)
+            placeholder.setObjectName("fleetViewerPlaceholder")
+            placeholder.setFixedHeight(VIEWER_H)
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setWordWrap(True)
+            self._viewer_host.addWidget(placeholder)
             if url:
-                open_button = QPushButton("Open 3D in browser", self.card)
-                open_button.setObjectName("secondaryButton")
-                open_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
-                wrap = QHBoxLayout()
-                wrap.setContentsMargins(0, 0, 0, 0)
-                wrap.addStretch(1)
-                wrap.addWidget(open_button)
-                self._viewer_host.addLayout(wrap)
+                self._add_open_3d(url)
+
+    def _add_open_3d(self, url: str) -> None:
+        open_button = QPushButton("Open 3D in browser", self.card)
+        open_button.setObjectName("secondaryButton")
+        open_button.setMinimumHeight(38)
+        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(url))
+        )
+        self._viewer_host.addWidget(open_button)
 
     def _on_refresh_media(self) -> None:
         self.refresh_button.setEnabled(False)

@@ -1069,6 +1069,46 @@ def booked_days(
     return blocked
 
 
+def availability_states(
+    session: Session,
+    vehicle: Vehicle,
+    first: date,
+    last: date,
+) -> dict[date, str]:
+    """One display state per day, for the counter's availability strip.
+
+    ``free`` is the default. A pending booking paints ``pending`` and a
+    confirmed/ongoing one paints ``confirmed``; a later confirmed row wins over
+    an earlier pending one when two bookings meet on the same day. The strip is
+    a preview only -- the booking service still owns the real window check.
+    """
+    if last < first:
+        raise ValidationError(
+            "The return date cannot be before the pick-up date.", field="end_date"
+        )
+    states = {
+        first + timedelta(days=offset): "free"
+        for offset in range((last - first).days + 1)
+    }
+    for booking in active_bookings(session, vehicle):
+        state = (
+            "confirmed"
+            if booking.status in ("confirmed", "ongoing")
+            else "pending"
+        )
+        start = max(first, booking.start_date)
+        finish = booking.end_date or booking.start_date
+        if finish <= booking.start_date:
+            finish = booking.start_date + timedelta(days=1)
+        finish = min(last, finish - timedelta(days=1))
+        day = start
+        while day <= finish:
+            if states.get(day) != "confirmed":
+                states[day] = state
+            day += timedelta(days=1)
+    return states
+
+
 def next_available_window(
     session: Session,
     vehicle: Vehicle,

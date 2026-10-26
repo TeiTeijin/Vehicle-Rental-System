@@ -9,17 +9,15 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from PySide6.QtCore import Qt
+
 from app.services import export_service, report_service
-from app.staff import theme
-from app.staff.cards import Caption
-from app.staff.charts import HandDrawnChart
 from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.section_row import ActiveRow
-from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadStateTable
+from app.staff.ui_kit import WarmPanel
 from app.staff.widgets import toast
-from app.utils.money import pesos
 
 PRESETS: tuple[str, ...] = (
     "Custom",
@@ -72,7 +70,12 @@ class ReportsPage(StaffPage):
             "Reports",
             "One question per report, over any period.",
         )
-        from PySide6.QtWidgets import QFrame, QSizePolicy, QVBoxLayout
+        from PySide6.QtWidgets import (
+            QHBoxLayout,
+            QSizePolicy,
+            QStackedWidget,
+            QVBoxLayout,
+        )
 
         today = date.today()
         start, end = _preset_range(DEFAULT_PRESET, today)
@@ -80,40 +83,28 @@ class ReportsPage(StaffPage):
         self._to_date: date = end
         self._report: str = "revenue"
 
-        # -- Bookings recipe: two white main containers on cream ------------
+        # -- two warm cards on the cream page: tools, then the workspace ----
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
 
-        tools = QFrame(self)
-        tools.setObjectName(theme.OBJ_PAGE_PANEL)
-        tools.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        tools_layout.setSpacing(8)
-        tools_layout.addLayout(self._filter_row())
-        tools_layout.addLayout(self._action_row())
+        tools = WarmPanel(self, padding=PAGE_PANEL_PAD)
+        tools.body.setSpacing(0)
+        self._tools_row = self._tool_row()
+        tools.body.addLayout(self._tools_row)
         self.body.addWidget(tools)
         self._tools_panel = tools
 
-        data = QFrame(self)
-        data.setObjectName(theme.OBJ_PAGE_PANEL)
+        data = WarmPanel(self, padding=PAGE_PANEL_PAD)
         data.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        from PySide6.QtWidgets import QHBoxLayout, QStackedWidget
-
-        data_layout = QHBoxLayout(data)
-        data_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        data_layout.setSpacing(16)
+        data.body.setSpacing(0)
+        data_layout = QHBoxLayout()
+        data_layout.setContentsMargins(0, 0, 0, 0)
+        data_layout.setSpacing(20)
         self._list_host = QVBoxLayout()
         self._list_host.setContentsMargins(0, 0, 0, 0)
-        self._list_host.setSpacing(4)
+        self._list_host.setSpacing(2)
         self._rows: dict[str, ActiveRow] = {}
         for key, label in (
             ("revenue", "Revenue"),
@@ -125,7 +116,7 @@ class ReportsPage(StaffPage):
             ("customers", "Customers"),
             ("staff", "Staff takings"),
         ):
-            row = ActiveRow(label, parent=self)
+            row = ActiveRow(label, parent=self, variant="reportNav")
             row.setFixedHeight(44)
             row.setObjectName("reportRow")
             row.clicked.connect(lambda _c=False, k=key: self._pick_report(k))
@@ -133,9 +124,9 @@ class ReportsPage(StaffPage):
             self._list_host.addWidget(row)
         self._list_host.addStretch(1)
         list_wrap, _ = self._wrap_layout(self._list_host)
-        list_wrap.setFixedWidth(190)
+        list_wrap.setFixedWidth(200)
         list_wrap.setObjectName("reportListHost")
-        data_layout.addWidget(list_wrap)
+        data_layout.addWidget(list_wrap, 0, Qt.AlignmentFlag.AlignTop)
         self._stack = QStackedWidget(data)
         self._stack.setObjectName("reportStack")
         from app.staff.pages.report_panels import (
@@ -174,6 +165,7 @@ class ReportsPage(StaffPage):
         for panel in self._panels.values():
             panel.reload_requested = self._reload
         data_layout.addWidget(self._stack, 1)
+        data.body.addLayout(data_layout)
         self.body.addWidget(data, 1)
         self._data_panel = data
         self._rows["revenue"].set_active(True)
@@ -189,69 +181,77 @@ class ReportsPage(StaffPage):
 
     # -- tools ------------------------------------------------------------
 
-    def _filter_row(self):
-        """Shared date range: every report answers over a period."""
+    def _tool_row(self):
+        """Preset, dates, export note, and exports share the reference row."""
         from PySide6.QtCore import QDate
-        from PySide6.QtWidgets import QComboBox, QDateEdit, QHBoxLayout
+        from PySide6.QtWidgets import (
+            QComboBox,
+            QDateEdit,
+            QHBoxLayout,
+            QLabel,
+            QPushButton,
+        )
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
         self.preset_combo = QComboBox(self)
+        self.preset_combo.setObjectName("reportPreset")
         self.preset_combo.addItems(list(PRESETS))
         self.preset_combo.setCurrentText(DEFAULT_PRESET)
         self.preset_combo.setFixedHeight(TOOL_ROW_H)
+        self.preset_combo.setFixedWidth(142)
         self.preset_combo.currentIndexChanged.connect(self._on_preset)
         row.addWidget(self.preset_combo)
         row.addWidget(self._field_label("From"))
         self.from_edit = QDateEdit(self)
+        self.from_edit.setObjectName("reportDate")
         self.from_edit.setCalendarPopup(True)
         self.from_edit.setDisplayFormat("dd MMM yyyy")
         self.from_edit.setDate(
             QDate(self._from_date.year, self._from_date.month, self._from_date.day)
         )
         self.from_edit.setProperty("compact", True)
-        self.from_edit.setMinimumHeight(TOOL_ROW_H)
+        self.from_edit.setFixedHeight(TOOL_ROW_H)
+        self.from_edit.setFixedWidth(140)
         self.from_edit.dateChanged.connect(self._on_dates)
         row.addWidget(self.from_edit)
         row.addWidget(self._field_label("To"))
         self.to_edit = QDateEdit(self)
+        self.to_edit.setObjectName("reportDate")
         self.to_edit.setCalendarPopup(True)
         self.to_edit.setDisplayFormat("dd MMM yyyy")
         self.to_edit.setDate(
             QDate(self._to_date.year, self._to_date.month, self._to_date.day)
         )
         self.to_edit.setProperty("compact", True)
-        self.to_edit.setMinimumHeight(TOOL_ROW_H)
+        self.to_edit.setFixedHeight(TOOL_ROW_H)
+        self.to_edit.setFixedWidth(140)
         self.to_edit.dateChanged.connect(self._on_dates)
         row.addWidget(self.to_edit)
         row.addStretch(1)
-        return row
+        self.export_hint = QLabel(
+            "Every export carries the period and who ran it.", self
+        )
+        self.export_hint.setObjectName("pageSubtitle")
+        row.addWidget(self.export_hint)
+        row.addSpacing(8)
 
-    def _action_row(self):
-        """Export actions, same on every report."""
-        from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton
-
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
         self.pdf_button = QPushButton("Export PDF", self)
-        self.pdf_button.setObjectName("ghostButton")
-        # Concentric with the tools panel (28 - 16 = 12); bottom-left
-        # outer corner only, like the Bookings Confirm button.
-        self.pdf_button.setProperty("corner", "bottomLeft")
+        self.pdf_button.setObjectName("reportExportPdf")
         self.pdf_button.setFixedHeight(TOOL_ROW_H)
+        self.pdf_button.setMinimumWidth(112)
+        self.pdf_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pdf_button.clicked.connect(lambda: self._export("pdf"))
         row.addWidget(self.pdf_button)
+
         self.csv_button = QPushButton("Export CSV", self)
-        self.csv_button.setObjectName("ghostButton")
+        self.csv_button.setObjectName("reportExportCsv")
         self.csv_button.setFixedHeight(TOOL_ROW_H)
+        self.csv_button.setMinimumWidth(112)
+        self.csv_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.csv_button.clicked.connect(lambda: self._export("csv"))
         row.addWidget(self.csv_button)
-        hint = QLabel("Every export carries the period and who ran it.", self)
-        hint.setObjectName("pageSubtitle")
-        row.addWidget(hint)
-        row.addStretch(1)
         return row
 
     def _field_label(self, text: str):

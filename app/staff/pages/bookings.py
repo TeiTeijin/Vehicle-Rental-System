@@ -5,10 +5,9 @@ from datetime import date
 from decimal import Decimal
 from functools import partial
 
-from PySide6.QtCore import QDate, QObject, QRunnable, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QDate, QObject, QRunnable, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDateEdit,
     QFrame,
@@ -17,7 +16,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 from sqlalchemy import String, cast, func, or_, select
@@ -31,6 +29,12 @@ from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
+from app.staff.ui_kit import (
+    SelectionBar,
+    StatusChipRow,
+    WarmHost,
+    WarmPanel,
+)
 from app.staff.widgets import confirm, toast
 from app.staff.workers import emit_safely, loader_pool
 from app.widgets.skeleton import Skeleton
@@ -72,6 +76,31 @@ CHANNEL_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("Online", "online"),
 )
 
+#: Reference filter chips -> the stored booking status each one selects.
+#: ``status_combo`` keeps its old labels (Active/Completed) as the hidden
+#: compatibility bridge, so the chip labels can read like the counter.
+STATUS_CHIP_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("all", "All"),
+    ("pending", "Pending"),
+    ("confirmed", "Confirmed"),
+    ("ongoing", "Checked in"),
+    ("completed", "Checked out"),
+    ("cancelled", "Cancelled"),
+)
+
+#: Stored status -> the index of its row in ``STATUS_FILTERS``.
+_STATUS_FILTER_INDEX = {
+    "all": 0,
+    "pending": 1,
+    "confirmed": 2,
+    "ongoing": 3,
+    "completed": 4,
+    "cancelled": 5,
+}
+
+#: The same mapping in reverse, used when the hidden combo moves.
+_STATUS_FILTER_KEY = {index: key for key, index in _STATUS_FILTER_INDEX.items()}
+
 
 @dataclass
 class BookingFilter:
@@ -91,13 +120,15 @@ def _payment_state(balance) -> str:
     return "Partial"
 
 
-def _booking_rows(context, filtr: BookingFilter):
+def _booking_rows(context, filtr: BookingFilter, cap: int | None = None):
     today = date.today()
-    try:
-        from app.staff import prefs as _prefs
-        cap = _prefs.rows_limit(100)
-    except Exception:
-        cap = 500
+    if cap is None:
+        try:
+            from app.staff import prefs as _prefs
+            cap = _prefs.rows_limit(100)
+        except Exception:
+            cap = 500
+    cap = max(1, int(cap))
     with context.reading() as session:
         stmt = select(Booking).options(
             joinedload(Booking.user),
@@ -156,17 +187,16 @@ def _booking_rows(context, filtr: BookingFilter):
                 (
                     f"#{booking.booking_id}",
                     booking.user.full_name,
-                    f"{vehicle.plate_number} {vehicle.make} {vehicle.model}",
-                    booking.start_date.strftime("%d %b %Y"),
-                    booking.end_date.strftime("%d %b %Y"),
+                    f"{vehicle.make} {vehicle.model}\n{vehicle.plate_number}",
+                    f"{booking.start_date:%d %b %Y}\n"
+                    f"→ {booking.end_date:%d %b %Y}",
                     booking.status,
+                    _payment_state(balance),
                     f"{balance.total_due:,.2f}",
                     f"{balance.amount_paid:,.2f}",
                     f"{balance.balance:,.2f}",
-                    booking.created_at.strftime("%d %b"),
                     channel,
-                    _payment_state(balance),
-                    f"{balance.deposit_held:,.2f}",
+                    booking.created_at.strftime("%d %b"),
                 )
             )
         return rows
@@ -194,17 +224,18 @@ class _BookingsLoader(QRunnable):
     formatted tuples only -- never ORM rows across threads.
     """
 
-    def __init__(self, context, filtr: BookingFilter, gen: int, signals: _BookingsLoadSignals) -> None:
+    def __init__(self, context, filtr: BookingFilter, gen: int, signals: _BookingsLoadSignals, *, cap: int | None = None) -> None:
         super().__init__()
         self._context = context
         self._filtr = filtr
         self._gen = gen
+        self._cap = cap
         self._loaded = signals.loaded  # bound while the page is alive
         self._failed = signals.failed
 
     def run(self) -> None:
         try:
-            rows = _booking_rows(self._context, self._filtr)
+            rows = _booking_rows(self._context, self._filtr, cap=self._cap)
         except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
             emit_safely(self._failed, self._gen, exc)
         else:
@@ -221,68 +252,109 @@ class BookingsPage(StaffPage):
             "Every rental, its state, and what is still owed on it.",
         )
         self._filter = BookingFilter()
-        # Two white main containers (dashboard sheet recipe, 28px): tools
-        # on top, data below, thin gap between. The controls themselves
-        # stay transparent -- only the containers are white. 8+8 split
-        # with the shell gap: sidebar-right (8) + page-left (8) = 16,
-        # visually equal to the window-to-sidebar margin.
+        # Local load-more cap: starts at the counter's rows-per-page pref and
+        # grows by 50 up to 500. Filtering and searching still happen before
+        # this cap in the query.
+        self._row_cap = min(500, max(1, prefs.rows_limit(100)))
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
-        tools = QFrame(self)
-        tools.setObjectName(theme.OBJ_PAGE_PANEL)
-        tools.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        tools_layout.setSpacing(8)
-        tools_layout.addLayout(self._filter_row())
-        tools_layout.addLayout(self._action_row())
-        self.body.addWidget(tools)
+
+        # The page title lives in the sidebar/shell, not in a second heading
+        # above the tools card. Keep the old count label as a hidden
+        # compatibility shim for callers that still read it.
+        self.count_caption = QLabel("", self)
+        self.count_caption.setVisible(False)
+
+        # One transparent host keeps the old `_tools_panel` containment
+        # contract: the white filter card, the hidden combo bridge, the chip
+        # row, and the cream selection bar all live inside it.
+        tools = WarmHost(self)
         self._tools_panel = tools
-        data = QFrame(self)
-        data.setObjectName(theme.OBJ_PAGE_PANEL)
+        self.body.addWidget(tools)
+
+        self.filter_card = WarmPanel(tools)
+        self.filter_card.body.addLayout(self._filter_row())
+        # The old status dropdown remains as an off-screen compatibility
+        # bridge; the visible control is the chip row below.
+        self.status_combo.setVisible(False)
+        self.filter_card.body.addWidget(self.status_combo)
+        self._status_chips = StatusChipRow(
+            STATUS_CHIP_OPTIONS, parent=self.filter_card
+        )
+        self._status_chips.changed.connect(self._on_status_chip)
+        #: Public alias matching the other warm list pages.
+        self.status_chips = self._status_chips
+        self.filter_card.body.addWidget(self._status_chips)
+        tools.body.addWidget(self.filter_card)
+
+        self.selection_bar = SelectionBar(tools)
+        tools.body.addWidget(self.selection_bar)
+        self._action_row()
+
+        data = WarmPanel(self)
+        data.body.setContentsMargins(
+            PAGE_PANEL_PAD,
+            PAGE_PANEL_PAD,
+            PAGE_PANEL_PAD,
+            PAGE_PANEL_PAD,
+        )
+        data.body.setSpacing(8)
         # Takes all leftover height so the data box bottom sits level with
         # the sidebar's bottom edge; tools stays hugged up top.
         data.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        data_layout = QVBoxLayout(data)
-        data_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        data_layout.setSpacing(0)
-        self.count_caption = QLabel("", self)
-        self.count_caption.setObjectName("pageSubtitle")
-        data_layout.addWidget(self.count_caption)
         self.table = LoadStateTable(
             [
-                Column("Ref", ALIGN_RIGHT),
-                Column("Customer", ALIGN_LEFT),
-                Column("Vehicle", ALIGN_LEFT),
-                Column("From", ALIGN_LEFT),
-                Column("To", ALIGN_LEFT),
-                Column("Status"),
-                Column("Total due", ALIGN_RIGHT),
-                Column("Paid", ALIGN_RIGHT),
-                Column("Owed", ALIGN_RIGHT),
-                Column("Booked", ALIGN_LEFT),
-                Column("Channel", ALIGN_LEFT),
-                Column("Payment", ALIGN_LEFT),
-                Column("Deposit", ALIGN_RIGHT),
+                Column("Ref", ALIGN_LEFT, kind="strong", colour="#4C453B"),
+                Column("Customer", ALIGN_LEFT, kind="strong"),
+                Column("Vehicle", ALIGN_LEFT, wrap=True),
+                Column("Dates", ALIGN_LEFT, colour="#4C453B"),
+                Column("Status", ALIGN_LEFT, kind="status"),
+                Column("Payment", ALIGN_LEFT, kind="payment"),
+                Column("Total due", ALIGN_RIGHT, kind="money"),
+                Column("Paid", ALIGN_RIGHT, kind="money"),
+                Column("Owed", ALIGN_RIGHT, kind="money"),
+                Column("Channel", ALIGN_LEFT, kind="muted"),
+                Column("Booked", ALIGN_LEFT, kind="muted"),
             ],
             # Empty until the first async refresh: constructing with the
             # real loader would run ~500 rows synchronously inside
             # show_page, before the skeleton can paint a frame.
             loader=lambda: [],
             empty_message="No bookings yet.",
+            variant="warm",
+            row_height=56,
         )
         self.table.set_loader(partial(_booking_rows, self.context, self._filter))
-        data_layout.addWidget(self.table, 1)
+        data.body.addWidget(self.table, 1)
+
+        footer = QWidget(data)
+        footer.setObjectName("warmTableFooter")
+        footer_row = QHBoxLayout(footer)
+        footer_row.setContentsMargins(4, 8, 4, 0)
+        footer_row.setSpacing(12)
+        self.footer_count = QLabel("", footer)
+        footer_font = QFont("Inter")
+        footer_font.setPixelSize(12)
+        self.footer_count.setFont(footer_font)
+        self.footer_count.setStyleSheet(
+            "color: #6A645C; background: transparent;"
+        )
+        footer_row.addWidget(self.footer_count, 1)
+        self.load_more_button = QPushButton("Load more", footer)
+        self.load_more_button.setObjectName("warmLoadMore")
+        self.load_more_button.setFixedHeight(32)
+        self.load_more_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.load_more_button.clicked.connect(self._load_more)
+        self.load_more_button.hide()
+        footer_row.addWidget(self.load_more_button)
+        self._footer = footer
+        data.body.addWidget(footer)
+
         self.body.addWidget(data, 1)
         self._data_panel = data
+        self._update_footer(0)
         self.table.table.itemSelectionChanged.connect(self._refresh_actions)
         self._selected: Booking | None = None
         self._booking_overlay = None
@@ -331,12 +403,10 @@ class BookingsPage(StaffPage):
         return row
 
     def _build_skeleton(self) -> tuple[QFrame, QFrame]:
-        """Two pagePanel clones mimicking tools + table. Built once."""
-        skel_tools = QFrame(self)
-        skel_tools.setObjectName(theme.OBJ_PAGE_PANEL)
+        """Two warm panel clones mimicking tools + table. Built once."""
+        skel_tools = WarmPanel(self)
         skel_tools.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tools_layout = QVBoxLayout(skel_tools)
-        tools_layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
+        tools_layout = skel_tools.body
         tools_layout.setSpacing(8)
         filter_host = QWidget(skel_tools)
         filter_row = self._skel_row(filter_host)
@@ -351,11 +421,9 @@ class BookingsPage(StaffPage):
         action_row.addStretch(1)
         tools_layout.addWidget(action_host)
 
-        skel_data = QFrame(self)
-        skel_data.setObjectName(theme.OBJ_PAGE_PANEL)
+        skel_data = WarmPanel(self)
         skel_data.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        data_layout = QVBoxLayout(skel_data)
-        data_layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
+        data_layout = skel_data.body
         data_layout.setSpacing(8)
         data_layout.addWidget(self._skel_bar(skel_data))
         for _ in range(BOOKINGS_SKELETON_ROWS):
@@ -386,7 +454,15 @@ class BookingsPage(StaffPage):
         self._load_gen += 1
         gen = self._load_gen
         self._show_skeleton(full=full)
-        self._pool.start(_BookingsLoader(self.context, replace(self._filter), gen, self._load_signals))
+        self._pool.start(
+            _BookingsLoader(
+                self.context,
+                replace(self._filter),
+                gen,
+                self._load_signals,
+                cap=self._row_cap,
+            )
+        )
 
     def _on_rows_loaded(self, gen: int, rows: list) -> None:
         if gen != self._load_gen:
@@ -395,12 +471,13 @@ class BookingsPage(StaffPage):
         self.table.state = LoadState.LOADED if rows else LoadState.EMPTY
         self.table.last_error = None
         self.table._sync_stack()
+        self._paint_owed()
         self._done_gen = gen
         self._hide_skeleton()
-        limit = prefs.rows_limit(100)
         self.count_caption.setText(
-            f"Latest {limit} bookings (showing {len(rows)})."
+            f"Latest {self._row_cap} bookings (showing {len(rows)})."
         )
+        self._update_footer(len(rows))
         if self._pending_focus is not None:
             self.focus_booking(self._pending_focus)
             self._pending_focus = None
@@ -418,70 +495,129 @@ class BookingsPage(StaffPage):
         self.table._sync_stack()
         self._done_gen = gen
         self._hide_skeleton()
+        self._update_footer(0)
         self._refresh_actions()
+
+    # -- load more -------------------------------------------------------
+
+    def _update_footer(self, showing: int) -> None:
+        self.footer_count.setText(
+            f"Showing {showing} of latest {self._row_cap}"
+        )
+        more = showing == self._row_cap and self._row_cap < 500
+        self.load_more_button.setVisible(more)
+
+    def _load_more(self) -> None:
+        if self._row_cap >= 500:
+            return
+        self._row_cap = min(500, self._row_cap + 50)
+        self.load_more_button.hide()
+        self._request_load(full=False)
+
+    def _paint_owed(self) -> None:
+        """Red for money still owed, muted for a settled row."""
+        for row in range(self.table.row_count()):
+            item = self.table.table.item(row, 8)
+            if item is None:
+                continue
+            try:
+                amount = Decimal(item.text().replace(",", ""))
+            except Exception:  # noqa: BLE001 - leave unexpected text alone
+                continue
+            colour = "#9B2C1F" if amount > ZERO else "#7D7265"
+            item.setForeground(QBrush(QColor(colour)))
 
     # -- filter row -----------------------------------------------------
 
-    def _combo(self, items: list[str]) -> QComboBox:
+    def _combo(self, items: list[str], on_change=None) -> QComboBox:
         combo = QComboBox(self)
         combo.addItems(items)
-        combo.currentIndexChanged.connect(lambda _index: self._apply_filters())
+        combo.currentIndexChanged.connect(
+            on_change or (lambda _index: self._apply_filters())
+        )
         return combo
+
+    @staticmethod
+    def _filter_label(text: str, parent: QWidget) -> QLabel:
+        label = QLabel(text, parent)
+        font = QFont("Inter")
+        font.setPixelSize(12)
+        font.setWeight(QFont.Weight.DemiBold)
+        label.setFont(font)
+        label.setStyleSheet(
+            f"color: {theme.MUTED}; background: transparent;"
+        )
+        return label
 
     def _filter_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
         self.search = QLineEdit(self)
-        self.search.setObjectName("searchField")
+        self.search.setObjectName("warmInput")
         self.search.setPlaceholderText("Search ref, customer, plate…")
         self.search.textChanged.connect(lambda _text: self._apply_filters())
-        # Concentric with the tools panel (28 - 16 = 12); panel-facing
-        # outer corner only, inner corners keep the 6px box radius.
-        self.search.setProperty("corner", "topLeft")
-        self.search.setFixedHeight(TOOL_ROW_H)
+        self.search.setFixedHeight(40)
         row.addWidget(self.search, 1)
-        self.status_combo = self._combo([label for label, _codes in STATUS_FILTERS])
-        self.status_combo.setFixedHeight(TOOL_ROW_H)
-        row.addWidget(self.status_combo)
-        self.channel_combo = self._combo([label for label, _code in CHANNEL_FILTERS])
-        self.channel_combo.setFixedHeight(TOOL_ROW_H)
+        self.status_combo = self._combo(
+            [label for label, _codes in STATUS_FILTERS],
+            on_change=self._on_status_combo_changed,
+        )
+        self.status_combo.setFixedHeight(40)
+        self.channel_combo = self._combo(
+            [label for label, _code in CHANNEL_FILTERS]
+        )
+        self.channel_combo.setObjectName("warmInput")
+        self.channel_combo.setFixedHeight(40)
         row.addWidget(self.channel_combo)
-        self.overdue_check = QCheckBox("Overdue only", self)
+        self.overdue_check = QPushButton("Overdue only", self)
+        self.overdue_check.setObjectName("warmCheck")
+        self.overdue_check.setCheckable(True)
         overdue_font = QFont("Inter")
         overdue_font.setPixelSize(12)
         overdue_font.setWeight(QFont.Weight.DemiBold)
         self.overdue_check.setFont(overdue_font)
-        self.overdue_check.setStyleSheet(
-            f"color: {theme.MUTED}; background: transparent;"
-        )
+        self.overdue_check.setFixedHeight(32)
         self.overdue_check.toggled.connect(lambda _on: self._apply_filters())
         row.addWidget(self.overdue_check)
+        row.addWidget(self._filter_label("From", self))
         self.from_edit = QDateEdit(self)
+        self.from_edit.setObjectName("warmInput")
         self.from_edit.setCalendarPopup(True)
         self.from_edit.setDisplayFormat("dd MMM yyyy")
         self.from_edit.setDate(QDate.currentDate().addMonths(-3))
         self.from_edit.dateChanged.connect(lambda _day: self._apply_filters())
-        # Compact vertical padding via QSS (compact=true) + floor height:
-        # keeps the 36px row while giving the yyyy section room.
-        self.from_edit.setProperty("compact", True)
-        self.from_edit.setMinimumHeight(TOOL_ROW_H)
+        self.from_edit.setFixedHeight(40)
         row.addWidget(self.from_edit)
+        row.addWidget(self._filter_label("To", self))
         self.to_edit = QDateEdit(self)
+        self.to_edit.setObjectName("warmInput")
         self.to_edit.setCalendarPopup(True)
         self.to_edit.setDisplayFormat("dd MMM yyyy")
         self.to_edit.setDate(QDate.currentDate().addMonths(3))
         self.to_edit.dateChanged.connect(lambda _day: self._apply_filters())
-        self.to_edit.setProperty("compact", True)
-        self.to_edit.setMinimumHeight(TOOL_ROW_H)
+        self.to_edit.setFixedHeight(40)
         row.addWidget(self.to_edit)
         self.clear_button = QPushButton("Clear", self)
         self.clear_button.setObjectName("ghostButton")
-        self.clear_button.setProperty("corner", "topRight")
-        self.clear_button.setFixedHeight(TOOL_ROW_H)
+        self.clear_button.setFixedHeight(40)
         self.clear_button.clicked.connect(self._clear_filters)
         row.addWidget(self.clear_button)
         return row
+
+    def _on_status_chip(self, key: str) -> None:
+        index = _STATUS_FILTER_INDEX.get(key, 0)
+        if self.status_combo.currentIndex() != index:
+            # The combo's own handler applies the filter and mirrors the chip.
+            self.status_combo.setCurrentIndex(index)
+        else:
+            self._apply_filters()
+
+    def _on_status_combo_changed(self, index: int) -> None:
+        chips = getattr(self, "_status_chips", None)
+        if chips is not None:
+            chips.select(_STATUS_FILTER_KEY.get(index, "all"))
+        self._apply_filters()
 
     def _apply_filters(self) -> None:
         self._filter.search = self.search.text()
@@ -506,45 +642,33 @@ class BookingsPage(StaffPage):
         finally:
             self.search.blockSignals(blocked)
         self.status_combo.setCurrentIndex(0)
+        if hasattr(self, "_status_chips"):
+            self._status_chips.select("all")
         self.channel_combo.setCurrentIndex(0)
         self.overdue_check.setChecked(False)
         self.from_edit.setDate(QDate.currentDate().addMonths(-3))
         self.to_edit.setDate(QDate.currentDate().addMonths(3))
+        # A blocked search signal means a search-only clear would otherwise
+        # leave the old query in place when every other control is already
+        # at its default. One explicit apply covers all combinations.
+        self._apply_filters()
 
     # -- action row -----------------------------------------------------
 
     def _action_button(self, text: str, action: str, *, danger: bool = False) -> QPushButton:
         button = QPushButton(text, self)
-        button.setObjectName("dangerButton" if danger else "ghostButton")
-        button.setFixedHeight(TOOL_ROW_H)
+        button.setFixedHeight(36)
         button.clicked.connect(lambda: self._on_action_button(action))
         return button
 
-    def _action_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+    def _action_row(self):
         self.confirm_button = self._action_button("Confirm", "confirm")
-        # Concentric with the tools panel (28 - 16 = 12); bottom-left
-        # outer corner only.
-        self.confirm_button.setProperty("corner", "bottomLeft")
         self.check_in_button = self._action_button("Check in", "check_in")
         self.check_out_button = self._action_button("Check out", "check_out")
         self.pay_button = self._action_button("Record payment", "record_payment")
         self.extend_button = self._action_button("Extend", "extend")
-        self.cancel_button = self._action_button("Cancel", "cancel", danger=True)
         self.details_button = self._action_button("Details", "details")
-        for button in (
-            self.confirm_button,
-            self.check_in_button,
-            self.check_out_button,
-            self.pay_button,
-            self.extend_button,
-            self.cancel_button,
-            self.details_button,
-        ):
-            row.addWidget(button)
-        row.addStretch(1)
+        self.cancel_button = self._action_button("Cancel booking", "cancel", danger=True)
         self._action_buttons = {
             "confirm": self.confirm_button,
             "check_in": self.check_in_button,
@@ -554,10 +678,31 @@ class BookingsPage(StaffPage):
             "cancel": self.cancel_button,
             "details": self.details_button,
         }
+        for button, kind in (
+            (self.confirm_button, "action"),
+            (self.check_in_button, "action"),
+            (self.check_out_button, "action"),
+            (self.pay_button, "primary"),
+            (self.extend_button, "action"),
+            (self.details_button, "action"),
+            (self.cancel_button, "danger"),
+        ):
+            self.selection_bar.add_action(button, kind=kind)
         self._refresh_actions()
-        return row
+        return self.selection_bar.actions
 
     def _refresh_actions(self) -> None:
+        if not hasattr(self, "_action_buttons"):
+            return
+        booking_id = self.selected_booking_id()
+        self.selection_bar.set_active(booking_id is not None)
+        if booking_id is not None:
+            row = self.table.table.currentRow()
+            customer = self.table.cell_text(row, 1)
+            vehicle = self.table.cell_text(row, 2).splitlines()[0]
+            self.selection_bar.set_parts(
+                f"#{booking_id} · ", customer, vehicle
+            )
         status = self.selected_booking_status()
         for action, button in self._action_buttons.items():
             button.setEnabled(self.action_allowed(action, status))
@@ -612,6 +757,8 @@ class BookingsPage(StaffPage):
         self._refresh_actions()
 
     def selected_booking_id(self) -> int | None:
+        if not hasattr(self, "table"):
+            return None
         row = self.table.table.currentRow()
         if row < 0:
             return None
@@ -629,7 +776,7 @@ class BookingsPage(StaffPage):
         row = table.table.currentRow()
         if row < 0:
             return None
-        label = table.cell_text(row, 5)
+        label = table.cell_text(row, 4)
         return _STATUS_CODES_BY_LABEL.get(label) or label.strip().lower() or None
 
     def selected_booking_dates(self) -> tuple[date, date] | None:
@@ -639,13 +786,16 @@ class BookingsPage(StaffPage):
         row = self.table.table.currentRow()
         if row < 0:
             return None
+        parts = [
+            part.strip().lstrip("→ ").strip()
+            for part in self.table.cell_text(row, 3).splitlines()
+            if part.strip()
+        ]
+        if len(parts) != 2:
+            return None
         try:
-            start = _datetime.strptime(
-                self.table.cell_text(row, 3), "%d %b %Y"
-            ).date()
-            end = _datetime.strptime(
-                self.table.cell_text(row, 4), "%d %b %Y"
-            ).date()
+            start = _datetime.strptime(parts[0], "%d %b %Y").date()
+            end = _datetime.strptime(parts[1], "%d %b %Y").date()
         except ValueError:
             return None
         return start, end
@@ -717,7 +867,9 @@ class BookingsPage(StaffPage):
             self._booking_overlay.deleteLater()
             self._booking_overlay = None
         window = self.window()
-        overlay = FrostedOverlay(window if window is not None else self)
+        overlay = FrostedOverlay(
+            window if window is not None else self, card_width=540
+        )
         overlay.set_content(panel)
         overlay.show_overlay()
         self._booking_overlay = overlay
@@ -755,8 +907,15 @@ class BookingsPage(StaffPage):
                 return False
             floor = int(booking.vehicle.mileage or 0)
             outstanding = payment_service.booking_balance(session, booking).balance
+            customer = booking.user.full_name
+            vehicle_name = f"{booking.vehicle.make} {booking.vehicle.model}"
         panel = CheckInPanel(
-            self, current_mileage=floor, outstanding=outstanding
+            self,
+            current_mileage=floor,
+            outstanding=outstanding,
+            booking_id=booking_id,
+            customer=customer,
+            vehicle=vehicle_name,
         )
         panel.submitted.connect(
             lambda values: self._submit_for(booking_id, "check_in", values)
@@ -787,8 +946,15 @@ class BookingsPage(StaffPage):
                 _toast(self, "That booking no longer exists.", "error")
                 return False
             floor = int(booking.vehicle.mileage or 0)
+            customer = booking.user.full_name
+            vehicle_name = f"{booking.vehicle.make} {booking.vehicle.model}"
         panel = CheckOutPanel(
-            self._outstanding(booking_id), self, pickup_mileage=floor
+            self._outstanding(booking_id),
+            self,
+            pickup_mileage=floor,
+            booking_id=booking_id,
+            customer=customer,
+            vehicle=vehicle_name,
         )
         panel.submitted.connect(
             lambda values: self._submit_check_out(booking_id, values)
@@ -805,12 +971,15 @@ class BookingsPage(StaffPage):
                 if booking is None:
                     toast(self, "That booking no longer exists.", "error")
                     return False
+                balance = payment_service.booking_balance(session, booking)
                 quote = booking_service.checkout_quote(
                     session,
                     booking,
                     actual_return_date=date.today(),
                     damage_charge=values.get("damage_charge"),
                 )
+                customer = booking.user.full_name
+                vehicle_name = f"{booking.vehicle.make} {booking.vehicle.model}"
         except Exception as exc:  # noqa: BLE001 - surfaced as a toast
             message, _field, _kind = describe(exc)
             toast(self, message, "error")
@@ -821,8 +990,22 @@ class BookingsPage(StaffPage):
 
         from app.staff.booking_panels import PaymentPanel
 
+        settlement_total = max(
+            ZERO,
+            balance.total_due
+            + quote.late_fee
+            + quote.damage_charge
+            - quote.deposit_applied,
+        )
         panel = PaymentPanel(
-            quote.balance_due, self, heading="Settle and check out"
+            quote.balance_due,
+            self,
+            heading="Settle and check out",
+            total=settlement_total,
+            paid=balance.amount_paid,
+            booking_id=booking_id,
+            customer=customer,
+            vehicle=vehicle_name,
         )
 
         def _settle(payment: dict) -> None:
@@ -863,6 +1046,8 @@ class BookingsPage(StaffPage):
                 _toast(self, "That booking no longer exists.", "error")
                 return False
             balance = payment_service.booking_balance(session, booking)
+            customer = booking.user.full_name
+            vehicle_name = f"{booking.vehicle.make} {booking.vehicle.model}"
         try:
             self.focus_booking(booking_id)
         except Exception:  # noqa: BLE001 - highlight only, never blocks payment
@@ -873,6 +1058,9 @@ class BookingsPage(StaffPage):
             total=balance.total_due,
             paid=balance.amount_paid,
             show_kind=True,
+            booking_id=booking_id,
+            customer=customer,
+            vehicle=vehicle_name,
         )
         panel.submitted.connect(
             lambda values: self._submit_for(booking_id, "record_payment", values)
@@ -897,11 +1085,31 @@ class BookingsPage(StaffPage):
         return True
 
     def open_cancel(self) -> bool:
-        if self._selected_or_warn() is None:
+        booking_id = self.selected_booking_id()
+        if self._selected_or_warn() is None or booking_id is None:
             return False
         from app.staff.booking_panels import ReasonPanel
+        from app.staff.widgets import toast as _toast
 
-        panel = ReasonPanel(self)
+        with self.context.reading() as session:
+            booking = session.get(Booking, booking_id)
+            if booking is None:
+                _toast(self, "That booking no longer exists.", "error")
+                return False
+            balance = payment_service.booking_balance(session, booking)
+            customer = booking.user.full_name
+            vehicle_name = f"{booking.vehicle.make} {booking.vehicle.model}"
+            paid_so_far = balance.amount_paid + balance.deposit_held
+            refund_due = balance.deposit_held
+
+        panel = ReasonPanel(
+            self,
+            booking_id=booking_id,
+            customer=customer,
+            vehicle=vehicle_name,
+            paid_so_far=paid_so_far,
+            refund_due=refund_due,
+        )
         panel.cancelled.connect(self._hide_overlay)
         panel.submitted.connect(self._on_cancel_reason)
         self._overlay_panel(panel)
@@ -917,8 +1125,20 @@ class BookingsPage(StaffPage):
         booking_id = self._selected_or_warn()
         if booking_id is None:
             return False
+        return self.open_details_for(booking_id)
+
+    def open_details_for(self, booking_id: int) -> bool:
+        """Open details for a known booking id (Payments View booking).
+
+        Deep-linking from another page cannot rely on this table already
+        holding rows: the caller navigates here before the async load lands.
+        """
         from app.staff.booking_panels import BookingDetailsPanel
 
+        try:
+            self.focus_booking(booking_id)
+        except Exception:  # noqa: BLE001 - highlight only, never blocks details
+            pass
         panel = BookingDetailsPanel(self.context, booking_id, self)
         panel.closed.connect(self._on_details_closed)
         self._overlay_panel(panel)
