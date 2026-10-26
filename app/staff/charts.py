@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.staff import theme
@@ -45,7 +52,7 @@ class HandDrawnChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        rect = QRectF(self.rect()).adjusted(40, 26, -12, -24)
+        rect = QRectF(self.rect()).adjusted(52, 26, -14, -24)
         self._paint_title(painter, rect)
         if rect.width() <= 0 or rect.height() <= 0:
             return
@@ -69,6 +76,11 @@ class HandDrawnChart(QWidget):
 
         if self._fill:
             self._paint_fill(painter, rect, points)
+
+        painter.setPen(QPen(QColor("#EFE7D9"), 1.0))
+        for step in (0.25, 0.5, 0.75):
+            y = rect.top() + rect.height() * step
+            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
 
         for offset, width, alpha in ((0.0, 2.0, 255), (1.4, 1.0, 110)):
             pen = QPen(QColor(self._colour))
@@ -100,12 +112,12 @@ class HandDrawnChart(QWidget):
 
     def _paint_title(self, painter: QPainter, rect: QRectF) -> None:
         font = QFont(theme.FONT)
-        font.setPointSizeF(9.0)
+        font.setPointSizeF(10.0)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor(theme.MUTED))
+        painter.setPen(QColor(theme.INK))
         painter.drawText(
-            QRectF(rect.left(), 4, rect.width(), 18),
+            QRectF(rect.left(), 4, rect.width(), 20),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             self._title,
         )
@@ -125,9 +137,9 @@ class HandDrawnChart(QWidget):
         path.lineTo(points[0].x(), rect.bottom())
         path.closeSubpath()
 
-        colour = QColor(self._colour)
+        colour = QColor(theme.TAN)
         top = QColor(colour)
-        top.setAlpha(46)
+        top.setAlpha(58)
         bottom = QColor(colour)
         bottom.setAlpha(0)
 
@@ -142,26 +154,29 @@ class HandDrawnChart(QWidget):
         self, painter: QPainter, rect: QRectF, low: float, high: float
     ) -> None:
         font = QFont(theme.FONT)
-        font.setPointSizeF(7.5)
+        font.setPointSizeF(8.0)
         painter.setFont(font)
         painter.setPen(QColor(theme.MUTED))
 
         painter.drawText(
-            QRectF(0, rect.top() - 8, 36, 16),
+            QRectF(0, rect.top() - 8, 48, 16),
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             f"{high:,.0f}",
         )
         painter.drawText(
-            QRectF(0, rect.bottom() - 8, 36, 16),
+            QRectF(0, rect.bottom() - 8, 48, 16),
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             f"{low:,.0f}",
         )
-        for index, label in enumerate(self._labels):
-            if index >= len(self._values):
-                break
+        # Six ticks at most: a daily series otherwise turns into a smear of
+        # overlapping dates, which is what the reference's sparse axis avoids.
+        count = min(len(self._labels), len(self._values))
+        step = max(1, (count + 5) // 6)
+        for index in range(0, count, step):
+            label = self._labels[index]
             x = rect.left() + (rect.width() * index / max(len(self._values) - 1, 1))
             painter.drawText(
-                QRectF(x - 30, rect.bottom() + 4, 60, 14),
+                QRectF(x - 34, rect.bottom() + 4, 68, 14),
                 Qt.AlignmentFlag.AlignCenter,
                 label,
             )
@@ -188,18 +203,25 @@ class HandDrawnBars(QWidget):
         self._pairs = list(pairs)
         self.update()
 
+    def _value_text(self, value: float) -> str:
+        if "%" in self._title:
+            return f"{value:.0f}%"
+        if "Revenue" in self._title:
+            return f"{value / 1000:,.0f}k"
+        return f"{value:,.0f}"
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(self.rect()).adjusted(40, 26, -12, -24)
+        rect = QRectF(self.rect()).adjusted(36, 58, -16, -28)
 
         font = QFont(theme.FONT)
-        font.setPointSizeF(9.0)
+        font.setPointSizeF(10.0)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor(theme.MUTED))
+        painter.setPen(QColor(theme.INK))
         painter.drawText(
-            QRectF(rect.left(), 4, rect.width(), 18),
+            QRectF(rect.left(), 4, rect.width(), 20),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             self._title,
         )
@@ -208,17 +230,18 @@ class HandDrawnBars(QWidget):
             plain = QFont(theme.FONT)
             plain.setPointSizeF(9.0)
             painter.setFont(plain)
+            painter.setPen(QColor(theme.MUTED))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No data yet")
             return
 
         high = max(value for _label, value in self._pairs) or 1.0
         slot = rect.width() / len(self._pairs)
-        bar_width = min(slot * 0.56, 46.0)
+        bar_width = min(slot * 0.62, 64.0)
 
         for index, (label, value) in enumerate(self._pairs):
             centre = rect.left() + slot * (index + 0.5)
             height = (value / high) * rect.height()
-            wobble = _jitter(label + self._title, index, 1.8)
+            wobble = _jitter(label + self._title, index, 1.6)
             bar = QRectF(
                 centre - bar_width / 2,
                 rect.bottom() - height,
@@ -226,27 +249,42 @@ class HandDrawnBars(QWidget):
                 max(height, 1.5),
             )
 
-            pen = QPen(QColor(self._colour))
-            pen.setWidthF(1.8)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            painter.setBrush(QColor(0, 0, 0, 0))
             path = QPainterPath()
-            path.moveTo(bar.topLeft() + QPointF(wobble, 0))
-            path.lineTo(bar.topRight() + QPointF(wobble, 0))
+            top_left = bar.topLeft() + QPointF(wobble, 0)
+            top_right = bar.topRight() + QPointF(wobble, 0)
+            path.moveTo(bar.bottomLeft())
+            path.lineTo(top_left.x(), top_left.y() + 6)
+            path.quadTo(top_left, top_left + QPointF(6, 0))
+            path.lineTo(top_right.x() - 6, top_right.y())
+            path.quadTo(top_right, top_right + QPointF(0, 6))
             path.lineTo(bar.bottomRight())
-            path.lineTo(bar.bottomLeft())
             path.closeSubpath()
-            painter.drawPath(path)
+            painter.fillPath(path, QColor("#3B3934"))
+
+            value_font = QFont(theme.FONT)
+            value_font.setPointSizeF(8.0)
+            painter.setFont(value_font)
+            painter.setPen(QColor(theme.INK))
+            painter.drawText(
+                QRectF(centre - slot / 2, bar.top() - 20, slot, 16),
+                Qt.AlignmentFlag.AlignCenter,
+                self._value_text(value),
+            )
 
             small = QFont(theme.FONT)
-            small.setPointSizeF(7.0)
+            small.setPointSizeF(7.5)
             painter.setFont(small)
             painter.setPen(QColor(theme.MUTED))
+            metrics = QFontMetrics(small)
+            shown = metrics.elidedText(
+                label,
+                Qt.TextElideMode.ElideRight,
+                max(0, int(slot) - 6),
+            )
             painter.drawText(
                 QRectF(centre - slot / 2, rect.bottom() + 3, slot, 14),
                 Qt.AlignmentFlag.AlignCenter,
-                label,
+                shown,
             )
 
 

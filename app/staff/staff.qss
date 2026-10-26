@@ -1,4 +1,4 @@
-﻿/* STAFF APP
+/* STAFF APP
    Same palette as the customer app (app/ui/styles.qss) so the two windows
    look like one product, plus the semantic colours the operations screens
    need. Object names are defined in app/staff/theme.py and set from Python,
@@ -23,7 +23,7 @@ QLabel, QCheckBox {
 }
 
 /* REPORTS INTERIOR: WHITE EXCEPT THE TABLES
-   The data box is a white pagePanel, but the plain hosts inside it -- the
+   The data box is a warm white card, but the plain hosts inside it -- the
    report-type list, its rows, the stacked pages, the panel roots, and the
    charts (which paint nothing themselves) -- all catch the blanket cream
    above and draw cream blocks inside the white box. Only the data tables
@@ -1752,9 +1752,8 @@ QPushButton#checkAvailability {
 /* ======================================================================
    WARM LIST PAGES AND BOOKING MODALS
    Opt-in: only widgets with variant="warm" or the warm object names below
-   are affected, so Dashboard, Reports, Settings, and sign-in keep the
-   existing sheet look. Values are sampled from the seven booking
-   references (1440x970, 1360px content column).
+   are affected. Dashboard, Settings, and sign-in keep the existing sheet
+   look; Reports opts in through WarmPanel and its report* controls below.
    ====================================================================== */
 
 QFrame#pagePanel[variant="warm"] {
@@ -1922,6 +1921,11 @@ QLabel#tableChip[tone="ok"] {
 QLabel#tableChip[tone="warn"] {
     background: #F7E4C4;
     color: #744A15;
+}
+
+QLabel#tableChip[tone="info"] {
+    background: #DEE6F5;
+    color: #3B5B8C;
 }
 
 QLabel#tableChip[tone="danger"] {
@@ -2332,4 +2336,141 @@ QPushButton#choiceChip[variant="reason"] {
 
 QPushButton#warmCheck {
     min-height: 30px;
+}
+
+/* ======================================================================
+   REPORTS WORKSPACE
+   Scoped to report* object names and the warm metric "report" variant so
+   Dashboard, Settings, and the list pages are untouched.
+   ====================================================================== */
+
+QComboBox#reportPreset,
+QComboBox#reportFilter,
+QDateEdit#reportDate {
+    background: #FFFFFF;
+    border: 1px solid #DCD0C0;
+    border-radius: 8px;
+    color: #171717;
+    font-size: 13px;
+    padding: 4px 10px;
+}
+
+QComboBox#reportPreset:hover,
+QComboBox#reportFilter:hover,
+QDateEdit#reportDate:hover {
+    border-color: #C9BCA6;
+}
+
+QComboBox#reportPreset::drop-down,
+QComboBox#reportFilter::drop-down,
+QDateEdit#reportDate::drop-down {
+    border: none;
+    background: transparent;
+    width: 22px;
+}
+
+QPushButton#reportExportPdf {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 8px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#reportExportPdf:hover {
+    background: #333333;
+    border-color: #333333;
+}
+
+QPushButton#reportExportCsv {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 8px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#reportExportCsv:hover {
+    background: #F6EEDC;
+    border-color: #C9BCA6;
+}
+
+QFrame#reportChartCard {
+    background: #FFFFFF;
+    border: 1px solid #E9DFD1;
+    border-radius: 14px;
+}
+
+QWidget#reportMetricGrid,
+QWidget#reportMetricRow,
+QWidget#reportTableFooter {
+    background: transparent;
+    border: none;
+}
+
+QLabel#reportSummary {
+    background: transparent;
+    color: #7D7265;
+    font-size: 12px;
+}
+
+QLabel#reportFooterCount {
+    background: transparent;
+    color: #6A645C;
+    font-size: 12px;
+}
+
+QFrame#warmMetricTile[tone="highlight"] {
+    background: #EADBBB;
+}
+
+QFrame#warmMetricTile[tone="report"] {
+    background: #EFE6D7;
+}
+
+QFrame#warmMetricTile[report="true"] {
+    border-radius: 12px;
+}
+
+QFrame#warmMetricTile[report="true"] QLabel#metricLabel {
+    color: #7D7265;
+    font-size: 12px;
+}
+
+QFrame#warmMetricTile[report="true"] QLabel#metricValue {
+    color: #171717;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+QCheckBox#reportOverdue {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 14px;
+    spacing: 7px;
+}
+
+QCheckBox#reportOverdue:hover {
+    background: #F6EEDC;
+}
+
+QCheckBox#reportOverdue::indicator {
+    width: 9px;
+    height: 9px;
+    border: 1px solid #C07B72;
+    border-radius: 5px;
+    background: #C07B72;
+}
+
+QCheckBox#reportOverdue::indicator:checked {
+    background: #A8452F;
+    border-color: #A8452F;
 }

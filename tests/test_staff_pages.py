@@ -4256,7 +4256,11 @@ class TestReportsPage:
         page.refresh()
         _wait_for_reports(page)
         assert page.preset_combo.currentText() == "Last 30 days"
-        assert page.table.row_count() == 30
+        # The warm workspace shows a ten-row page; the report still holds all
+        # thirty daily buckets for Load more and for export.
+        assert page.table.row_count() == 10
+        assert page._panels["revenue"].total_row_count == 30
+        assert "1–10 of 30" in page._panels["revenue"].footer_count.text()
         assert "15,000.00" in page.summary.text()
         assert "= rental" in page.summary.text()
 
@@ -4294,7 +4298,8 @@ class TestReportsPage:
         page.from_edit.setDate(page.from_edit.date().addDays(1))
         assert page.preset_combo.currentText() == "Custom"
         _wait_for_reports(page)
-        assert page.table.row_count() == 29
+        assert page._panels["revenue"].total_row_count == 29
+        assert page.table.row_count() == 10
 
     def test_switching_reports_swaps_table_and_summary(self, shell, branch):
         built, context = branch
@@ -4360,7 +4365,8 @@ class TestReportsPage:
         assert "15,000.00" in revenue.summary.text()
         revenue.channel_combo.setCurrentIndex(2)  # Online
         _wait_for_reports(page)
-        assert revenue.table.row_count() == 30
+        assert revenue.total_row_count == 30
+        assert revenue.table.row_count() == 10
         assert revenue.table.cell_text(0, 3) == "0.00"
         page._pick_report("bookings")
         _wait_for_reports(page)
@@ -4595,6 +4601,156 @@ class TestReportsPage:
                 ):
                     found += 1
         assert found == 0, f"{found} cream pixels in the report list"
+
+    # -- warm report workspace -----------------------------------------
+
+    def test_reports_shell_is_two_warm_cards_with_one_tool_row(
+        self, shell, branch
+    ):
+        from app.staff.ui_kit import WarmPanel
+
+        page = ReportsPage(shell)
+        assert isinstance(page._tools_panel, WarmPanel)
+        assert isinstance(page._data_panel, WarmPanel)
+        assert page._tools_panel.property("variant") == "warm"
+        assert page._data_panel.property("variant") == "warm"
+        # Preset, From/To, the export note, and both exports share one row.
+        assert page._tools_panel.body.count() == 1
+        assert page.preset_combo.parent() is page._tools_panel
+        assert page.from_edit.parent() is page._tools_panel
+        assert page.to_edit.parent() is page._tools_panel
+        assert page.pdf_button.parent() is page._tools_panel
+        assert page.csv_button.parent() is page._tools_panel
+        assert page.pdf_button.objectName() == "reportExportPdf"
+        assert page.csv_button.objectName() == "reportExportCsv"
+        assert "period" in page.export_hint.text()
+
+    def test_the_report_nav_is_a_single_black_pill(
+        self, shell, branch, qapp
+    ):
+        from PySide6.QtGui import QColor
+
+        from app.staff import theme
+
+        page = ReportsPage(shell)
+        page.setStyleSheet(theme.load_stylesheet())
+        page.show()
+        page.resize(1440, 1000)
+        qapp_process(page)
+
+        assert all(
+            row.property("variant") == "reportNav"
+            for row in page._rows.values()
+        )
+        active = [key for key, row in page._rows.items() if row.is_active()]
+        assert active == ["revenue"]
+
+        page._pick_report("bookings")
+        qapp_process(page)
+        active = [key for key, row in page._rows.items() if row.is_active()]
+        assert active == ["bookings"]
+        # A pill, not the sidebar's 3px bar: sample ink well right of the
+        # label (inside the pill's body, away from the glyphs).
+        image = page._rows["bookings"].grab().toImage()
+        pixel = image.pixelColor(image.width() - 12, image.height() // 2)
+        assert abs(pixel.red() - QColor(theme.INK).red()) <= 8
+        assert abs(pixel.green() - QColor(theme.INK).green()) <= 8
+        assert abs(pixel.blue() - QColor(theme.INK).blue()) <= 8
+        inert = page._rows["revenue"].grab().toImage()
+        inactive = inert.pixelColor(inert.width() - 12, inert.height() // 2)
+        assert inactive.name() != QColor(theme.INK).name()
+
+    def test_every_panel_uses_the_warm_metric_table_and_chart_kit(
+        self, shell, branch
+    ):
+        from app.staff.charts import HandDrawnBars, HandDrawnChart
+        from app.staff.ui_kit import MetricGrid
+
+        first_tiles = {
+            "revenue": "Revenue",
+            "bookings": "Bookings",
+            "performance": "Top model",
+            "maintenance": "Spent",
+            "receivables": "Owed",
+            "customers": "Repeat customers",
+            "staff": "Taken",
+        }
+        chart_keys = {"revenue", "utilization", "performance", "maintenance"}
+        page = ReportsPage(shell)
+        page.refresh()
+        _wait_for_reports(page)
+        for key, first in first_tiles.items():
+            page._pick_report(key)
+            _wait_for_reports(page)
+            panel = page._panels[key]
+            assert isinstance(panel.metrics, MetricGrid)
+            assert list(panel.metric_tiles)[0] == first
+            assert panel.metric_tiles[first].property("tone") == "highlight"
+            assert panel.table._table.property("variant") == "warm"
+            if key in chart_keys:
+                assert panel.chart_card.objectName() == "reportChartCard"
+                assert isinstance(panel.chart, (HandDrawnChart, HandDrawnBars))
+            else:
+                assert not hasattr(panel, "chart")
+
+        page._pick_report("utilization")
+        _wait_for_reports(page)
+        panel = page._panels["utilization"]
+        assert panel.metric_tiles == {}
+        assert panel.table._table.property("variant") == "warm"
+        assert panel.chart_card.objectName() == "reportChartCard"
+        assert isinstance(panel.chart, HandDrawnBars)
+
+    def test_bookings_panel_renders_metric_values_and_status_chips(
+        self, shell, branch
+    ):
+        built, context = branch
+        with context.session() as session:
+            booking = session.get(Booking, built.out_booking.booking_id)
+            booking.created_at = datetime.combine(TODAY, datetime.min.time())
+        page = ReportsPage(shell)
+        page.refresh()
+        _wait_for_reports(page)
+        page._pick_report("bookings")
+        _wait_for_reports(page)
+        panel = page._panels["bookings"]
+
+        assert panel.metric_tiles["Bookings"].value_label.text() == "1"
+        assert panel.metric_tiles["Completed"].value_label.text() == "0"
+        assert panel.metric_tiles["Ongoing"].value_label.text() == "1"
+        assert panel.metric_tiles["Per booking"].value_label.text().startswith("₱")
+        # Bookings carries its status as a warm chip, not plain text; an
+        # active rental uses the reference's blue info tone.
+        from app.staff.tables import TableChip
+
+        chip = panel.table._table.cellWidget(0, 4).findChild(TableChip)
+        assert chip is not None
+        assert chip.property("tone") == "info"
+        assert panel.table.cell_text(0, 4) == "Active"
+
+    def test_reports_show_ten_rows_and_load_more_keeps_the_full_count(
+        self, shell, branch
+    ):
+        page = ReportsPage(shell)
+        page.refresh()
+        _wait_for_reports(page)
+        panel = page._panels["revenue"]
+
+        assert panel.total_row_count == 30
+        assert panel.table.row_count() == 10
+        assert "1–10 of 30" in panel.footer_count.text()
+        assert panel.load_more_button.isHidden() is False
+
+        panel.load_more_button.click()
+        assert panel.table.row_count() == 20
+        assert "1–20 of 30" in panel.footer_count.text()
+
+        # Load more changes presentation only; the export still carries all
+        # 30 buckets from report_service.
+        _title, _summary, _headers, rows = panel.export_data(
+            page._from_date, page._to_date
+        )
+        assert len(rows) == 30
 
 
 # --------------------------------------------------------------------------
