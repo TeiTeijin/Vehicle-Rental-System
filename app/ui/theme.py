@@ -284,10 +284,17 @@ def _add_password_toggle(edit: QLineEdit) -> None:
     edit.password_action = action  # type: ignore[attr-defined]
 
 
+#: Auth fields get one fixed height. The overlay login card's layout can
+#: otherwise squeeze a QLineEdit below its size hint, which clips the
+#: placeholder ("you@email.com") so only half the text is visible.
+INPUT_HEIGHT = 43
+
+
 def _field(caption: str, placeholder: str, password: bool = False) -> tuple[QLabel, QLineEdit]:
     label = make_label(caption, "fieldLabel")
     edit = QLineEdit()
     edit.setPlaceholderText(placeholder)
+    edit.setFixedHeight(INPUT_HEIGHT)
     if password:
         edit.setEchoMode(QLineEdit.Password)
         _add_password_toggle(edit)
@@ -845,6 +852,10 @@ def _build_signup_step_one(scroll: QScrollArea) -> QWidget:
     #: first paint has no red outlines. Once touched, an empty field is an error.
     touched = {edit: False for edit in REQUIRED}
 
+    #: The email hint waits until the "@" appears (or the field is left), so
+    #: the form does not flag the local part while it is still being typed.
+    email_left = False
+
     def refresh_validation() -> None:
         # Names are simply required; empty + untouched stays neutral.
         for edit in (scroll.first_name, scroll.last_name):
@@ -853,15 +864,23 @@ def _build_signup_step_one(scroll: QScrollArea) -> QWidget:
             else:
                 _set_field_state(edit, "error" if touched[edit] else "")
 
-        # Email: validated on every keystroke, including the moment the
-        # address is missing its "@" (not only on the next edit or on blur).
-        email_ok = _check_field(
-            scroll.email,
-            scroll.email_hint,
-            is_valid_email,
-            'Enter a valid email address - it must contain "@".',
-            empty_is_error=touched[scroll.email],
-        )
+        # Email: while there is no "@" yet, the field stays neutral instead of
+        # showing the hint on every letter. Once the customer types the "@" --
+        # or leaves the field incomplete -- the usual validation takes over.
+        email_text = scroll.email.text().strip()
+        if email_text and "@" not in email_text and not email_left:
+            _set_field_state(scroll.email, "")
+            scroll.email_hint.clear()
+            scroll.email_hint.hide()
+            email_ok = False
+        else:
+            email_ok = _check_field(
+                scroll.email,
+                scroll.email_hint,
+                is_valid_email,
+                'Enter a valid email address - it must contain "@".',
+                empty_is_error=touched[scroll.email],
+            )
 
         # Mobile: exactly 11 digits, beginning with 09.
         phone_ok = _check_field(
@@ -901,13 +920,22 @@ def _build_signup_step_one(scroll: QScrollArea) -> QWidget:
         )
 
     def field_changed(edit: QLineEdit) -> None:
+        nonlocal email_left
         touched[edit] = True
+        if edit is scroll.email:
+            email_left = False
+        refresh_validation()
+
+    def email_finished() -> None:
+        nonlocal email_left
+        email_left = True
         refresh_validation()
 
     scroll.refresh_validation = refresh_validation
     for attr in ("first_name", "last_name", "email", "mobile", "password", "confirm_password"):
         edit = getattr(scroll, attr)
         edit.textChanged.connect(lambda _t, e=edit: field_changed(e))
+    scroll.email.editingFinished.connect(email_finished)
     refresh_validation()
 
     # ----- divider + "already have an account" -----
@@ -1579,6 +1607,7 @@ def field(caption: str, placeholder: str = "", *, password: bool = False) -> QWi
     label = make_label(caption, "fieldLabel")
     edit = QLineEdit()
     edit.setPlaceholderText(placeholder)
+    edit.setFixedHeight(INPUT_HEIGHT)
     if password:
         edit.setEchoMode(QLineEdit.Password)
         _add_password_toggle(edit)
@@ -1832,6 +1861,20 @@ class NavBar(QFrame):
 
 
 # ---------- overlay (auth gate, success) ----------
+class _OverlayCard(QFrame):
+    """The card inside an overlay.
+
+    Its width is fixed by the dialog, but the wrapping labels inside give it
+    a height-for-width. The outer vertical layout then asks for a height at
+    the *backdrop's* width, where the subtitle fits on one line, and allocates
+    that shorter height -- clipping the bottom of fixed-height fields. The
+    card width never changes, so its plain size hint is the honest height.
+    """
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt override
+        return False
+
+
 class OverlayDialog(QDialog):
     """Frameless dialog that dims the window and centres one card.
 
@@ -1863,7 +1906,7 @@ class OverlayDialog(QDialog):
         backdrop.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizeGripEnabled(False)
 
-        frame = QFrame(backdrop)
+        frame = _OverlayCard(backdrop)
         frame.setObjectName(object_name)
         frame.setFixedWidth(card_width)
 

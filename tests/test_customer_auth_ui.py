@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import QPoint
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QWidget
 
 from app.ui import theme
 
@@ -84,12 +84,55 @@ def test_signup_starts_neutral_and_email_hint_does_not_move_fields(signup):
     signup.email.setText("abc")
     QTest.qWait(30)
 
+    # No hint while the customer is still typing the local part.
     assert signup.first_name.property("state") == ""
+    assert signup.email.property("state") == ""
+    assert not signup.email_hint.isVisible()
+
+    # Typing the "@" is what starts the email validation.
+    signup.email.setText("abc@")
+    QTest.qWait(30)
+
     assert signup.email.property("state") == "error"
     assert signup.email_hint.isVisible()
     assert "@" in signup.email_hint.text()
     for field, position in positions_before.items():
         assert _global_pos(field) == position
+
+
+def test_login_popup_fields_keep_their_fixed_height(qapp):
+    from app.ui.auth_gate_dialog import AuthGateDialog
+
+    parent = QWidget()
+    parent.resize(1000, 700)
+    parent.show()
+    dialog = AuthGateDialog(parent)
+    dialog.show()
+    QTest.qWait(80)
+
+    try:
+        assert dialog.email.height() == theme.INPUT_HEIGHT
+        assert dialog.password.height() == theme.INPUT_HEIGHT
+        assert dialog.email.placeholderText() == "you@email.com"
+
+        # The fixed-height field must also fit inside its holder and the card;
+        # otherwise the parent clip hides the bottom border.
+        assert dialog.frame.height() >= dialog.frame.sizeHint().height()
+        for field in (dialog.email, dialog.password):
+            assert field.parentWidget().rect().contains(field.geometry())
+
+        # An inline error makes the card taller. The fields still have to fit.
+        dialog.submit()
+        QTest.qWait(30)
+        assert dialog.error.isVisible()
+        assert dialog.frame.height() >= dialog.frame.sizeHint().height()
+        for field in (dialog.email, dialog.password):
+            assert field.parentWidget().rect().contains(field.geometry())
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        parent.close()
+        parent.deleteLater()
 
 
 def test_mobile_accepts_only_eleven_digits_starting_09(signup):
