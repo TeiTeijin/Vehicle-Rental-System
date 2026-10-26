@@ -423,8 +423,17 @@ class NewRentalPage(StaffPage):
 
         from app.staff.rental_wizard import RentalWizard
 
-        self._selected_vehicle_id = vehicle_id
         overlay = self._details_overlay
+        panel = getattr(overlay, "panel", None)
+        # A failed (or still-running) checker must never fall through to the
+        # wizard's default dates: the clerk asked for a specific window.
+        if panel is not None and (
+            getattr(panel, "_check_failed", False)
+            or getattr(panel, "_checking", False)
+        ):
+            return
+
+        self._selected_vehicle_id = vehicle_id
         window = None
         if overlay is not None:
             self._selected_window = overlay.panel.checked_window

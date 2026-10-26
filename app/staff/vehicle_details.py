@@ -21,6 +21,7 @@ from pathlib import Path
 from PySide6.QtCore import (
     QDate,
     QEvent,
+    QEventLoop,
     QObject,
     QPointF,
     QRectF,
@@ -28,7 +29,6 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
-    QUrl,
     Signal,
     Slot,
 )
@@ -56,17 +56,16 @@ from PySide6.QtWidgets import (
 from app.models import Booking, Maintenance_Record, Vehicle
 from app.services import booking_service, image_cache, vehicle_photos
 from app.services.errors import ConflictError
-from app.staff import icons, theme
+from app.staff import icons, metrics, model_preview, theme
 from app.staff.cards import Caption, Card, MoneyNumber, Pill, SectionLabel
 from app.staff.rental_ui import (
     MODAL_MUTED,
     MODAL_RADIUS,
-    MODAL_SURFACE,
-    MODAL_WIDTH,
     SpecTile,
     StatusChip,
 )
 from app.staff.workers import emit_safely, media_pool
+from app.widgets.spinner import Spinner
 
 #: Hero height inside the details gallery.
 PHOTO_H = 300
@@ -78,7 +77,18 @@ DASH = "\u2014"
 ACTIVE_BOOKING_STATES = ("pending", "confirmed", "ongoing")
 
 #: Overlay card width; the dim fills the whole window around it.
-OVERLAY_CARD_W = MODAL_WIDTH
+OVERLAY_CARD_W = metrics.DETAILS_CARD_W
+
+#: How long a fresh availability check may settle inline before it becomes a
+#: fully background job. Local SQLite answers in a few milliseconds; waiting
+#: that tiny moment keeps the result attached to the click. A remote/slow
+#: check keeps running in the worker with the busy state visible.
+CHECK_INLINE_WAIT_MS = 200
+
+#: Cache variants a missing `front` photo may borrow. Side views never fall
+#: back to the three-quarter shot: showing the wrong side of a car is worse
+#: than showing no photo at all.
+FRONT_FALLBACK_VIEWS = (vehicle_photos.DEFAULT_VIEW, "default", "")
 
 #: Frosted-glass backdrop: blur radius applied to the frozen page snapshot.
 BACKDROP_BLUR_RADIUS = 12
@@ -96,7 +106,7 @@ BACKDROP_RERENDER_MS = 120
 #: Left gallery width; the right column gets the rest of the 900px sheet.
 GALLERY_WIDTH = 380
 
-#: Gallery tabs, in reading order. "3d" opens the WebEngine viewer.
+#: Gallery tabs, in reading order. "3d" launches the external preview.
 GALLERY_VIEWS = vehicle_photos.VIEWS
 GALLERY_LABELS = {
     "front": "Front",
@@ -105,16 +115,8 @@ GALLERY_LABELS = {
     "3d": "3D",
 }
 
-try:  # pragma: no cover - the import is exercised by the real staff app
-    from PySide6.QtWebEngineCore import QWebEngineSettings
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-except ImportError:  # pragma: no cover - Qt built without WebEngine
-    QWebEngineSettings = None
-    QWebEngineView = None
-
-
-#: OrbitControls gives drag-to-rotate and wheel zoom; the reset hook restores
-#: the framed camera. Auto-rotate can be toggled from the Qt controls.
+#: Legacy three.js document kept for import compatibility. The staff gallery no
+#: longer renders it: 3D opens in the separate model-viewer process.
 MODAL_THREE_HTML = """<!doctype html>
 <html><head><meta charset="utf-8">
 <style>
@@ -322,15 +324,70 @@ class _ModelJob(QRunnable):
             emit_safely(self._signals.model_ready, str(path))
 
 
+class _AvailabilitySignals(QObject):
+    finished = Signal(int, object)
+
+
+class _AvailabilityJob(QRunnable):
+    """The booking conflict query, never on the GUI thread."""
+
+    def __init__(
+        self,
+        context,
+        vehicle_id: int,
+        start,
+        end,
+        generation: int,
+        signals: _AvailabilitySignals,
+    ) -> None:
+        super().__init__()
+        self._context = context
+        self._vehicle_id = vehicle_id
+        self._start = start
+        self._end = end
+        self._generation = generation
+        self._signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            with self._context.reading() as session:
+                vehicle = session.get(Vehicle, self._vehicle_id)
+                if vehicle is None:
+                    raise ConflictError("That vehicle no longer exists.")
+                booking_service.assert_available(
+                    session, vehicle, self._start, self._end
+                )
+                rate = vehicle.daily_rate or 0
+        except ConflictError as exc:
+            emit_safely(
+                self._signals.finished,
+                self._generation,
+                {"ok": False, "message": str(exc)},
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced in the GUI
+            emit_safely(
+                self._signals.finished,
+                self._generation,
+                {"ok": None, "error": exc},
+            )
+        else:
+            emit_safely(
+                self._signals.finished,
+                self._generation,
+                {"ok": True, "rate": rate},
+            )
+
+
 # -- gallery ------------------------------------------------------------------
 
 
 class Gallery(QWidget):
-    """Photo views plus the interactive 3D tab.
+    """Photo views plus the ready-card hand-off to the external 3D preview.
 
     Only the active photo is fetched over the network; thumbnails use the
-    shared on-disk cache. The 3D viewer is created lazily on the first click,
-    because a WebEngine per modal is heavy.
+    shared on-disk cache. Nothing here creates a QWebEngineView: the 3D tab
+    shows a ready card and launches the separate preview process.
     """
 
     def __init__(
@@ -340,12 +397,17 @@ class Gallery(QWidget):
         model: str,
         year: int,
         *,
+        views: tuple[str, ...] | None = None,
         autoload: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("modalGallery")
-        self.views = GALLERY_VIEWS
+        self.views = (
+            tuple(views)
+            if views is not None
+            else vehicle_photos.views_for(ref)
+        )
         self.view_buttons: dict[str, QToolButton] = {}
         self._ref = ref
         self._make = make
@@ -355,7 +417,8 @@ class Gallery(QWidget):
         self._photos: dict[str, QImage] = {}
         self._model_path: str | None = None
         self._model_requested = False
-        self._web_view = None
+        self._model_loading = False
+        self._loading_views: set[str] = set()
         self._autoload = autoload
         self._signals = _MediaSignals(self)
         self._signals.photo_ready.connect(self._on_photo_ready)
@@ -384,20 +447,16 @@ class Gallery(QWidget):
         self.badge.setObjectName("galleryBadge")
         controls.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
         controls.addStretch(1)
+        # Compatibility attributes only: the external preview owns its own
+        # controls, so these must never be shown in the staff gallery.
         self.auto_button = QPushButton("Auto-rotate", self.hero)
         self.auto_button.setObjectName("viewerControl")
-        self.auto_button.setCheckable(True)
-        self.auto_button.setChecked(True)
-        self.auto_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.auto_button.toggled.connect(self._toggle_auto_rotate)
         self.auto_button.hide()
         self.reset_button = QPushButton("Reset", self.hero)
         self.reset_button.setObjectName("viewerControlLight")
-        self.reset_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.reset_button.clicked.connect(self._reset_view)
+        self.reset_button.hide()
         controls.addWidget(self.auto_button, 0, Qt.AlignmentFlag.AlignTop)
         controls.addWidget(self.reset_button, 0, Qt.AlignmentFlag.AlignTop)
-        self.reset_button.hide()
         self.badge.hide()
         hero_layout.addLayout(controls)
 
@@ -411,6 +470,58 @@ class Gallery(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
         self._stack.addWidget(self.image_label)
+
+        self.model_card = QFrame(self._stage)
+        self.model_card.setObjectName("gallery3DCard")
+        self.model_card.setStyleSheet(
+            "QFrame#gallery3DCard { background: #F7F1E6;"
+            " border: 1px solid #E6DECD; border-radius: 12px; }"
+            " QFrame#gallery3DCard QLabel { background: transparent; }"
+        )
+        card_layout = QVBoxLayout(self.model_card)
+        card_layout.setContentsMargins(24, 22, 24, 22)
+        card_layout.setSpacing(8)
+        card_layout.addStretch(1)
+        cube = QLabel(self.model_card)
+        cube.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cube.setPixmap(_cube_pixmap(48))
+        card_layout.addWidget(cube)
+        ready = QLabel("3D model ready", self.model_card)
+        ready.setObjectName("gallery3DTitle")
+        ready.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = ready.font()
+        font.setPixelSize(16)
+        font.setWeight(QFont.Weight.DemiBold)
+        ready.setFont(font)
+        card_layout.addWidget(ready)
+        description = Caption(
+            "Opens in a separate preview window, so a display or 3D engine "
+            "problem can never close the rental desk.",
+            parent=self.model_card,
+            colour=MODAL_MUTED,
+            size=11,
+        )
+        description.setWordWrap(True)
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(description)
+        self.model_note = QLabel("", self.model_card)
+        self.model_note.setObjectName("galleryHint")
+        self.model_note.setWordWrap(True)
+        self.model_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self.model_note)
+        self.open_3d_button = QPushButton("Open 3D preview", self.model_card)
+        self.open_3d_button.setObjectName("secondaryButton")
+        self.open_3d_button.setMinimumHeight(36)
+        self.open_3d_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_3d_button.clicked.connect(self._open_preview)
+        card_layout.addWidget(self.open_3d_button)
+        card_layout.addStretch(1)
+        self._stack.addWidget(self.model_card)
+        self._stack.setCurrentWidget(self.image_label)
+
+        self.spinner = Spinner(self._stage, size=26)
+        self.spinner.raise_()
+
         hero_layout.addWidget(self._stage, 1)
 
         self.hint = QLabel("Drag to rotate \u00b7 scroll to zoom", self.hero)
@@ -428,7 +539,11 @@ class Gallery(QWidget):
         for view in self.views:
             button = QToolButton(self)
             button.setObjectName("galleryTab")
-            button.setText(GALLERY_LABELS[view])
+            button.setText(
+                GALLERY_LABELS.get(
+                    view, vehicle_photos.VIEW_LABELS.get(view, view)
+                )
+            )
             button.setCheckable(True)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setIconSize(QSize(46, 26))
@@ -438,10 +553,8 @@ class Gallery(QWidget):
             )
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             if view == "3d":
-                button.setIcon(icons.icon("vehicle", MODAL_MUTED, 20))
-                button.setIconSize(QSize(26, 26))
-                # A cube reads more clearly than a car for the 3D tab.
                 button.setIcon(_icon_from_pixmap(_cube_pixmap(26)))
+                button.setIconSize(QSize(26, 26))
             else:
                 thumb = self._thumb_pixmap(view)
                 if thumb is not None:
@@ -467,6 +580,20 @@ class Gallery(QWidget):
 
     # -- tabs ----------------------------------------------------------
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._place_spinner()
+
+    def _place_spinner(self) -> None:
+        spinner = getattr(self, "spinner", None)
+        if spinner is None:
+            return
+        spinner.move(
+            max(0, (self._stage.width() - spinner.width()) // 2),
+            max(0, (self._stage.height() - spinner.height()) // 2),
+        )
+        spinner.raise_()
+
     def _thumb_pixmap(self, view: str) -> QPixmap | None:
         data = self._cached_bytes(view)
         if data is None:
@@ -477,13 +604,20 @@ class Gallery(QWidget):
         return _fit_image(image, 46, 26)
 
     def _cached_bytes(self, view: str) -> bytes | None:
+        """Exact view first; only `front` may borrow the three-quarter shot."""
         try:
             cached = image_cache.load(self._make, self._model, self._year, view)
-            if cached is None:
+            if cached is not None and getattr(cached, "data", None):
+                return cached.data
+            if view != "front":
+                return None
+            for variant in FRONT_FALLBACK_VIEWS:
                 cached = image_cache.load(
-                    self._make, self._model, self._year, "front34"
+                    self._make, self._model, self._year, variant
                 )
-            return cached.data if cached is not None else None
+                if cached is not None and getattr(cached, "data", None):
+                    return cached.data
+            return None
         except Exception:  # noqa: BLE001
             return None
 
@@ -495,10 +629,23 @@ class Gallery(QWidget):
         if image is None:
             return False
         self._photos[view] = image
-        self.image_label.set_image(image)
+        if view == self._current and view != "3d":
+            self.image_label.set_image(image)
         return True
 
+    def _is_loading(self) -> bool:
+        if self._current == "3d":
+            return self._model_loading
+        return self._current in self._loading_views
+
+    def _sync_spinner(self) -> None:
+        self.spinner.set_running(self._is_loading())
+        if self.spinner.is_running():
+            self._place_spinner()
+
     def _start_photo(self, view: str) -> None:
+        self._loading_views.add(view)
+        self._sync_spinner()
         job = _PhotoJob(self._ref, view, self._signals)
         media_pool().start(job)
 
@@ -514,17 +661,20 @@ class Gallery(QWidget):
         self.auto_button.hide()
         self.reset_button.hide()
         self.hint.hide()
-        if self._web_view is not None:
-            self._stack.setCurrentWidget(self.image_label)
+        self._stack.setCurrentWidget(self.image_label)
         self._show_photo(view)
+        self._sync_spinner()
 
     def _show_photo(self, view: str) -> None:
         image = self._photos.get(view)
         if image is not None:
             self.image_label.set_image(image)
             self.image_label.setText("")
+            self._sync_spinner()
             return
         if self._load_cached(view):
+            self.image_label.setText("")
+            self._sync_spinner()
             return
         if self._current == view:
             self.image_label.clear_image()
@@ -533,9 +683,13 @@ class Gallery(QWidget):
 
     @Slot(str, bytes)
     def _on_photo_ready(self, view: str, data: bytes) -> None:
+        self._loading_views.discard(view)
         image = _decode(data)
         if image is None:
-            self._on_photo_failed(view)
+            if self._current == view:
+                self.image_label.clear_image()
+                self.image_label.setText("No photo available for this vehicle")
+            self._sync_spinner()
             return
         self._photos[view] = image
         if view != "3d":
@@ -546,82 +700,62 @@ class Gallery(QWidget):
         if self._current == view:
             self.image_label.set_image(image)
             self.image_label.setText("")
+        self._sync_spinner()
 
     @Slot(str)
     def _on_photo_failed(self, view: str) -> None:
-        if self._current != view:
-            return
-        self.image_label.clear_image()
-        self.image_label.setText("No photo available for this vehicle")
+        self._loading_views.discard(view)
+        if self._current == view:
+            self.image_label.clear_image()
+            self.image_label.setText("No photo available for this vehicle")
+        self._sync_spinner()
 
     # -- 3D ------------------------------------------------------------
 
-    def _show_3d(self) -> None:
-        self.badge.setText("Interactive 3D")
-        self.badge.show()
-        self.auto_button.show()
-        self.reset_button.show()
-        self.hint.show()
-        view = self._ensure_viewer()
-        if view is None:
-            self._stack.setCurrentWidget(self.image_label)
-            self.image_label.clear_image()
-            self.image_label.setText("3D viewer unavailable in this build.")
-            self.auto_button.setEnabled(False)
-            self.reset_button.setEnabled(False)
-            return
-        if self._model_path is None:
-            self._stack.setCurrentWidget(self.image_label)
-            self.image_label.clear_image()
-            self.image_label.setText("Loading the 3D model\u2026")
-            if not self._model_requested:
-                self._model_requested = True
-                media_pool().start(_ModelJob(self._ref, self._signals))
-            return
-        self._stack.setCurrentWidget(view)
+    def _preview_label(self) -> str:
+        parts = (self._make, self._model, str(self._year or ""))
+        return " ".join(part for part in parts if part).strip()
 
-    def _ensure_viewer(self):
-        if self._web_view is not None:
-            return self._web_view
-        if QWebEngineView is None:
-            return None
-        view = QWebEngineView(self._stage)
-        view.setObjectName("modelViewer")
-        if QWebEngineSettings is not None:
-            settings = view.settings()
-            settings.setAttribute(
-                QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls,
-                True,
-            )
-            settings.setAttribute(
-                QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
-                True,
-            )
-        view.page().setBackgroundColor(QColor(MODAL_SURFACE))
-        self._stage.layout().addWidget(view)
-        self._web_view = view
-        return view
+    def _show_3d(self) -> None:
+        self.badge.setText("3D preview")
+        self.badge.show()
+        self.auto_button.hide()
+        self.reset_button.hide()
+        self.hint.hide()
+        if self._model_path:
+            self.model_note.setText("")
+            self.open_3d_button.setEnabled(True)
+            self._stack.setCurrentWidget(self.model_card)
+            self._sync_spinner()
+            return
+        self._stack.setCurrentWidget(self.image_label)
+        self.image_label.clear_image()
+        self.image_label.setText("Loading the 3D model\u2026")
+        if not self._model_requested:
+            self._model_requested = True
+            self._model_loading = True
+            media_pool().start(_ModelJob(self._ref, self._signals))
+        self._sync_spinner()
 
     @Slot(str)
     def _on_model_ready(self, path: str) -> None:
         self._model_path = path
-        view = self._ensure_viewer()
-        if view is None:
-            self._on_model_failed()
+        self._model_loading = False
+        if self._current != "3d":
+            # The user moved on while the download ran: never steal their tab.
+            self._sync_spinner()
             return
-        source = Path(path)
-        url = QUrl.fromLocalFile(str(source)).toString()
-        url = url.replace("\\", "\\\\").replace('"', '\\"')
-        document = MODAL_THREE_HTML.replace("__URL__", url)
-        view.setHtml(document, QUrl.fromLocalFile(str(source.parent) + "/"))
-        self._stack.setCurrentWidget(view)
-        self.auto_button.setEnabled(True)
-        self.reset_button.setEnabled(True)
+        self.model_note.setText("")
+        self.open_3d_button.setEnabled(True)
+        self._stack.setCurrentWidget(self.model_card)
+        self._sync_spinner()
 
     @Slot()
     def _on_model_failed(self) -> None:
         self._model_requested = False
+        self._model_loading = False
         if self._current != "3d":
+            self._sync_spinner()
             return
         self._stack.setCurrentWidget(self.image_label)
         self.image_label.clear_image()
@@ -629,21 +763,20 @@ class Gallery(QWidget):
             "No 3D model for this vehicle yet.\n"
             "Use the photo views to inspect the body."
         )
-        self.auto_button.setEnabled(False)
-        self.reset_button.setEnabled(False)
+        self._sync_spinner()
 
-    def _toggle_auto_rotate(self, checked: bool) -> None:
-        if self._web_view is not None:
-            self._web_view.page().runJavaScript(
-                f"window.__setAutoRotate && window.__setAutoRotate({str(checked).lower()});"
+    def _open_preview(self) -> None:
+        if not self._model_path:
+            self.model_note.setText("No 3D model is available for this vehicle.")
+            return
+        if model_preview.launch_model_preview(
+            Path(self._model_path), self._preview_label()
+        ):
+            self.model_note.setText("The 3D preview opened in its own window.")
+        else:
+            self.model_note.setText(
+                "Could not open the 3D preview. Try again in a moment."
             )
-
-    def _reset_view(self) -> None:
-        if self._web_view is not None:
-            self._web_view.page().runJavaScript(
-                "window.__resetView && window.__resetView();"
-            )
-        self.auto_button.setChecked(True)
 
 
 def _icon_from_pixmap(
@@ -685,6 +818,13 @@ class VehicleDetailsPanel(QWidget):
         self._autoload = autoload
         #: Last clean availability check, as (start, end) dates; None until checked.
         self.checked_window: tuple[QDate, QDate] | None = None
+        #: Runtime checker state: a generation token drops stale worker landings.
+        self._check_generation = 0
+        self._checking = False
+        self._check_failed = False
+        self._pending_window: tuple[QDate, QDate] | None = None
+        self._check_signals = _AvailabilitySignals(self)
+        self._check_signals.finished.connect(self._on_check_finished)
 
         self.spec_values: dict[str, str] = {}
         self.spec_tiles: dict[str, SpecTile] = {}
@@ -1056,7 +1196,15 @@ class VehicleDetailsPanel(QWidget):
         self.check_button.setMinimumHeight(36)
         self.check_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_button.clicked.connect(self._on_check)
-        column.addWidget(self.check_button)
+        check_row = QHBoxLayout()
+        check_row.setContentsMargins(0, 0, 0, 0)
+        check_row.setSpacing(8)
+        check_row.addWidget(self.check_button, 1)
+        self.check_spinner = Spinner(self.column, size=18)
+        check_row.addWidget(
+            self.check_spinner, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        column.addLayout(check_row)
 
         self.check_error = QLabel("", self.column)
         self.check_error.setObjectName(theme.OBJ_ERROR)
@@ -1139,14 +1287,44 @@ class VehicleDetailsPanel(QWidget):
 
     def _reset_check(self) -> None:
         self.checked_window = None
+        self._check_generation += 1
+        self._checking = False
+        self._pending_window = None
+        spinner = getattr(self, "check_spinner", None)
+        if spinner is not None:
+            spinner.stop()
+        button = getattr(self, "check_button", None)
+        if button is not None:
+            button.setEnabled(True)
+            button.setText("Check availability")
+        rent = getattr(self, "rent_button", None)
+        if rent is not None:
+            # A previous failure keeps Rent gated until a check succeeds.
+            rent.setEnabled(not self._check_failed)
         self.check_bar.setVisible(False)
         self.check_result.setVisible(False)
         self.check_amount.setVisible(False)
         self.check_error.setVisible(False)
 
-    def _on_check(self) -> None:
-        from app.domain.rental_calculator import RentalCalculator
+    def _fail_check(self, message: str, *, conflict: bool = False) -> None:
+        """A check that did not produce a clean window gates Rent."""
+        self.checked_window = None
+        self._check_failed = True
+        self.check_error.setText("" if conflict else message)
+        self.check_error.setVisible(not conflict)
+        self.check_bar.setVisible(conflict)
+        if conflict:
+            self.check_result.setText(message)
+            self.check_result.setVisible(True)
+            self.check_bar.setProperty("tone", "danger")
+            self._polish(self.check_bar)
+            self.check_amount.setVisible(False)
+        else:
+            self.check_result.setVisible(False)
+            self.check_amount.setVisible(False)
+        self.rent_button.setEnabled(False)
 
+    def _on_check(self) -> None:
         start = self.start_edit.date()
         end = self.end_edit.date()
         today = QDate.currentDate()
@@ -1156,46 +1334,112 @@ class VehicleDetailsPanel(QWidget):
         elif start < today:
             error = "Start is in the past."
         if error:
-            self.checked_window = None
-            self.check_error.setText(error)
-            self.check_error.setVisible(True)
-            self.check_bar.setVisible(False)
-            self.check_result.setVisible(False)
+            self._fail_check(error)
             return
         self.check_error.setVisible(False)
 
-        start_py, end_py = start.toPython(), end.toPython()
+        self.checked_window = None
+        self._check_generation += 1
+        generation = self._check_generation
+        self._checking = True
+        self._pending_window = (start, end)
+        self.check_bar.setVisible(False)
+        self.check_result.setVisible(False)
+        self.check_amount.setVisible(False)
+        self.check_button.setEnabled(False)
+        self.check_button.setText("Checking availability\u2026")
+        self.check_spinner.start()
+        # Rent cannot produce a wizard while the window is unverified.
+        self.rent_button.setEnabled(False)
+
+        job = _AvailabilityJob(
+            self._context,
+            self._vehicle_id,
+            start.toPython(),
+            end.toPython(),
+            generation,
+            self._check_signals,
+        )
+        media_pool().start(job)
+        self._wait_for_check()
+
+    def _wait_for_check(self) -> None:
+        """Let a fast check settle while the event loop keeps painting.
+
+        The query itself is already on the media pool. Local SQLite answers in
+        a few milliseconds, so waiting that moment keeps the result attached to
+        the click; anything slower exits this loop and keeps the busy state
+        until the worker lands.
+        """
+        if not self._checking:
+            return
+        loop = QEventLoop(self)
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(CHECK_INLINE_WAIT_MS)
+        timer.timeout.connect(loop.quit)
+
+        def _stop(*_args) -> None:
+            loop.quit()
+
+        self._check_signals.finished.connect(_stop)
+        timer.start()
         try:
-            with self._context.reading() as session:
-                vehicle = session.get(Vehicle, self._vehicle_id)
-                if vehicle is None:
-                    raise ConflictError("That vehicle no longer exists.")
-                booking_service.assert_available(
-                    session, vehicle, start_py, end_py
-                )
-                rate = vehicle.daily_rate or 0
-        except ConflictError as exc:
-            self.checked_window = None
-            self.check_result.setText(f"Not available \u2014 {exc}")
+            loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        finally:
+            timer.stop()
+            try:
+                self._check_signals.finished.disconnect(_stop)
+            except (RuntimeError, TypeError):
+                pass
+            loop.deleteLater()
+
+    @Slot(int, object)
+    def _on_check_finished(self, generation: int, result: dict) -> None:
+        if generation != self._check_generation:
+            return
+        self._checking = False
+        self.check_spinner.stop()
+        self.check_button.setEnabled(True)
+        self.check_button.setText("Check availability")
+
+        if result.get("ok") is True:
+            from app.domain.rental_calculator import RentalCalculator
+
+            window = self._pending_window
+            if window is None:
+                self._fail_check("The checked dates were lost. Check again.")
+                return
+            start, end = window
+            days = RentalCalculator.rental_days(
+                start.toPython(), end.toPython()
+            )
+            self.checked_window = window
+            self._check_failed = False
+            self.check_result.setText(
+                f"Available for these dates \u00b7 "
+                f"{days} day{'s' if days != 1 else ''}"
+            )
             self.check_result.setVisible(True)
-            self.check_bar.setProperty("tone", "danger")
+            self.check_bar.setProperty("tone", "ok")
             self._polish(self.check_bar)
-            self.check_amount.setVisible(False)
+            self.check_amount.set_amount((result.get("rate") or 0) * days)
+            self.check_amount.setVisible(True)
             self.check_bar.setVisible(True)
+            self.check_error.setVisible(False)
+            self.rent_button.setEnabled(True)
             return
 
-        days = RentalCalculator.rental_days(start_py, end_py)
-        self.checked_window = (start, end)
-        self.check_result.setText(
-            f"Available for these dates \u00b7 "
-            f"{days} day{'s' if days != 1 else ''}"
-        )
-        self.check_result.setVisible(True)
-        self.check_bar.setProperty("tone", "ok")
-        self._polish(self.check_bar)
-        self.check_amount.set_amount(rate * days)
-        self.check_amount.setVisible(True)
-        self.check_bar.setVisible(True)
+        if result.get("ok") is False:
+            self._fail_check(
+                f"Not available \u2014 {result.get('message') or 'booked'}",
+                conflict=True,
+            )
+            return
+
+        error = result.get("error")
+        detail = f": {error}" if error else "."
+        self._fail_check(f"Couldn't check availability{detail}")
 
     @staticmethod
     def _polish(widget: QWidget) -> None:
@@ -1203,6 +1447,10 @@ class VehicleDetailsPanel(QWidget):
         widget.style().polish(widget)
 
     def _on_rent(self) -> None:
+        # A failed or still-running check must never open the wizard with a
+        # fallback window that differs from what the clerk asked for.
+        if self._checking or self._check_failed:
+            return
         self.rent_requested.emit(self._vehicle_id)
 
 
@@ -1236,6 +1484,7 @@ class VehicleDetailsDialog(QDialog):
         self.start_edit = getattr(panel, "start_edit", None)
         self.end_edit = getattr(panel, "end_edit", None)
         self.check_button = getattr(panel, "check_button", None)
+        self.check_spinner = getattr(panel, "check_spinner", None)
         self.check_error = getattr(panel, "check_error", None)
         self.check_result = getattr(panel, "check_result", None)
         self.close_button = panel.close_button
@@ -1410,9 +1659,25 @@ class VehicleDetailsOverlay(QWidget):
         self.backdrop.clear()
         self.hide()
 
+    def _details_width(self) -> int:
+        """Card width capped by the window, with a gutter on both sides.
+
+        The real window never gets narrower than 900px; the fallback to the
+        design width below that keeps standalone/test hosts sane.
+        """
+        window_width = self._window.width()
+        if window_width < metrics.WINDOW_MIN_W:
+            return OVERLAY_CARD_W
+        available = window_width - 2 * metrics.DETAILS_OVERLAY_MARGIN
+        return max(
+            metrics.DETAILS_CARD_MIN_W,
+            min(OVERLAY_CARD_W, available),
+        )
+
     def _fit(self) -> None:
         self.setGeometry(self._window.rect())
         self.backdrop.setGeometry(self.rect())
+        self.scroll.setFixedWidth(self._details_width())
         self.scroll.setMaximumHeight(max(320, self._window.height() - 96))
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming

@@ -8,7 +8,7 @@ card, inline validation, page toasts results):
   registration + insurance expiry).
 - BulkPanel: rate or status across a class/category set, with a live
   preview line and an exception guard for per-vehicle rates.
-- FleetDetailsPanel: gallery + embedded 3D viewer + refresh, booking
+- FleetDetailsPanel: gallery + external 3D preview + refresh, booking
   history with current/next pin, inspections, maintenance + cost, and
   stats with a 30/90/365 utilization switcher.
 """
@@ -17,9 +17,10 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt, QTimer, QUrl, Signal, QObject, QRunnable
-from PySide6.QtGui import QDesktopServices, QFont, QImage, QPixmap
+from PySide6.QtCore import QDate, Qt, QTimer, Signal, QObject, QRunnable
+from PySide6.QtGui import QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -39,15 +40,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-try:  # Optional: viewer degrades to a link when WebEngine is absent.
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-except ImportError:  # noqa: BLE001
-    QWebEngineView = None
-
 from app.models import Booking, Vehicle
-from app.services import fleet_service, image_cache, media_service
+from app.services import fleet_service, image_cache, media_service, vehicle_photos
 from app.services.vehicle_service import TRANSMISSIONS, FUEL_TYPES, VEHICLE_CLASSES, VEHICLE_CLASS_LABELS
-from app.staff import theme
+from app.staff import model_preview, theme
 from app.staff.cards import Caption, Card, MoneyNumber
 from app.staff.feedback import describe
 from app.staff.rental_ui import SpecTile, StatusChip
@@ -518,6 +514,22 @@ def _download(url: str, timeout: int = 10) -> bytes | None:
     if resp.status_code != 200 or not resp.content:
         return None
     return resp.content
+
+
+def _store_model_glb(vehicle, data: bytes | None) -> str:
+    """Write downloaded GLB bytes where the preview process can open them."""
+    if not data:
+        return ""
+    try:
+        key = image_cache._identity(
+            vehicle.make, vehicle.model, vehicle.year, "3d"
+        )
+        path = image_cache.CACHE_DIR / f"{key}.glb"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except OSError:
+        return ""
+    return str(path)
 
 
 # -- add / edit form --------------------------------------------------------
@@ -1138,16 +1150,24 @@ class _MediaRefresh(QRunnable):
                     include_3d=True,
                     force=self._force,
                 )
-                snapshot = [
-                    {
-                        "view_angle": r.view_angle,
-                        "image_url": r.image_url,
-                        "model_3d_url": media_service.playable_model_url(session, r),
-                        "is_watermarked": r.is_watermarked,
-                        "image_data": _download(r.image_url),
-                    }
-                    for r in rows
-                ]
+                snapshot = []
+                model_glb = ""
+                for r in rows:
+                    model_url = media_service.playable_model_url(session, r)
+                    if model_url and not model_glb:
+                        model_glb = _store_model_glb(
+                            vehicle, _download(model_url)
+                        )
+                    snapshot.append(
+                        {
+                            "view_angle": r.view_angle,
+                            "image_url": r.image_url,
+                            "model_3d_url": model_url,
+                            "model_glb": model_glb,
+                            "is_watermarked": r.is_watermarked,
+                            "image_data": _download(r.image_url),
+                        }
+                    )
         except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
             emit_safely(self._failed, exc)
         else:
@@ -1711,43 +1731,86 @@ class FleetDetailsPanel(_FleetSheet):
                 return row["model_3d_url"]
         return ""
 
+    def _model_glb_path(self) -> str:
+        for row in self._media_rows:
+            path = row.get("model_glb")
+            if path and Path(path).is_file():
+                return path
+        return ""
+
     def _fill_viewer(self) -> None:
         while self._viewer_host.count():
             item = self._viewer_host.takeAt(0)
             if item.widget() is not None:
                 item.widget().deleteLater()
+        path = self._model_glb_path()
         url = self._model_url()
-        if url and QWebEngineView is not None:
-            view = QWebEngineView(self.card)
-            view.setFixedHeight(VIEWER_H)
-            safe = url.replace("\\", "\\\\").replace('"', "%22")
-            view.setHtml(_THREE_HTML.replace("__URL__", safe), QUrl("https://localhost/"))
-            self._viewer_host.addWidget(view)
-            self._add_open_3d(url)
-        else:
-            reason = (
-                "No 3D model cached for this vehicle yet."
-                if not url
-                else "3D viewer unavailable in this build."
+        if path:
+            ready = QFrame(self.card)
+            ready.setObjectName("fleetViewerReady")
+            ready_lay = QVBoxLayout(ready)
+            ready_lay.setContentsMargins(16, 14, 16, 14)
+            ready_lay.setSpacing(6)
+            title = _fleet_text(
+                "3D model ready",
+                parent=ready,
+                size=14,
+                weight=QFont.Weight.DemiBold,
             )
-            placeholder = QLabel(reason, self.card)
-            placeholder.setObjectName("fleetViewerPlaceholder")
-            placeholder.setFixedHeight(VIEWER_H)
-            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            placeholder.setWordWrap(True)
-            self._viewer_host.addWidget(placeholder)
-            if url:
-                self._add_open_3d(url)
+            ready_lay.addWidget(title)
+            caption = Caption(
+                "Opens in a separate preview window, so a 3D display problem "
+                "cannot close the desk.",
+                parent=ready,
+                colour=FLEET_MUTED,
+                size=12,
+            )
+            caption.setWordWrap(True)
+            ready_lay.addWidget(caption)
+            self._viewer_note = QLabel("", ready)
+            self._viewer_note.setObjectName("fleetViewerPlaceholder")
+            self._viewer_note.setWordWrap(True)
+            ready_lay.addWidget(self._viewer_note)
+            self.open_3d_button = QPushButton("Open 3D preview", ready)
+            self.open_3d_button.setObjectName("secondaryButton")
+            self.open_3d_button.setMinimumHeight(38)
+            self.open_3d_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.open_3d_button.clicked.connect(self._open_3d_preview)
+            ready_lay.addWidget(self.open_3d_button)
+            self._viewer_host.addWidget(ready)
+            return
 
-    def _add_open_3d(self, url: str) -> None:
-        open_button = QPushButton("Open 3D in browser", self.card)
-        open_button.setObjectName("secondaryButton")
-        open_button.setMinimumHeight(38)
-        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        open_button.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(url))
+        reason = (
+            "No 3D model cached for this vehicle yet."
+            if not url
+            else "The 3D model could not be downloaded. Refresh photos + 3D "
+            "to retry."
         )
-        self._viewer_host.addWidget(open_button)
+        placeholder = QLabel(reason, self.card)
+        placeholder.setObjectName("fleetViewerPlaceholder")
+        placeholder.setMinimumHeight(72)
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setWordWrap(True)
+        self._viewer_host.addWidget(placeholder)
+        self.open_3d_button = None
+
+    def _open_3d_preview(self) -> None:
+        path = self._model_glb_path()
+        if not path:
+            if getattr(self, "_viewer_note", None) is not None:
+                self._viewer_note.setText(
+                    "No 3D model is available. Refresh photos + 3D to retry."
+                )
+            return
+        label = self._data.get("name") or f"Vehicle #{self._vehicle_id}"
+        if model_preview.launch_model_preview(Path(path), label):
+            self._viewer_note.setText(
+                "The 3D preview opened in its own window."
+            )
+        else:
+            self._viewer_note.setText(
+                "Could not open the 3D preview. Try again in a moment."
+            )
 
     def _on_refresh_media(self) -> None:
         self.refresh_button.setEnabled(False)

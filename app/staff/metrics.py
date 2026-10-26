@@ -81,6 +81,16 @@ BTN_PAD_X = 18
 PILL_HEIGHT = 28
 PILL_RADIUS = 999  # a stadium, not a circle
 
+# -- the check-details overlay ---------------------------------------------
+#: Design width of the details card. The overlay shrinks it to fit the window
+#: (the app's minimum width is 900) rather than forcing a fixed 900px column
+#: off the side of a smaller window.
+DETAILS_CARD_W = 900
+#: Gutter between the window edge and the details card.
+DETAILS_OVERLAY_MARGIN = 24
+#: Never shrink the card below this even on a broken/very small host.
+DETAILS_CARD_MIN_W = 360
+
 # -- vehicle cards ----------------------------------------------------------
 #: The "Check details" button radius; the image and card corners derive from it.
 VEHICLE_BTN_RADIUS = 8

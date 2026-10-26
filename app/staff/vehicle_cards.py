@@ -496,6 +496,18 @@ class VehicleCard(QFrame):
     def _emit_details(self) -> None:
         self.details_requested.emit(self.vehicle.vehicle_id)
 
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        # The whole card is the details affordance, not just the button that
+        # fades in over the photo. Child presses that are ignored (photo,
+        # labels, the surface) bubble up to this handler; the button accepts
+        # its own click, so a button press still emits exactly once.
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self.rect().contains(event.position().toPoint())
+        ):
+            self._emit_details()
+        super().mouseReleaseEvent(event)
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         top = 0 if self._hovered else HOVER_LIFT
