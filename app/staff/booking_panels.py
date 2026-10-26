@@ -1191,6 +1191,28 @@ class PaymentPanel(BookingModal):
                 )
             )
 
+        due_row = QHBoxLayout()
+        due_row.setContentsMargins(0, 0, 0, 0)
+        due_row.setSpacing(8)
+        self.amount_due_caption = _label(
+            "Amount due",
+            parent=self.content_host,
+            size=12,
+            weight=QFont.Weight.DemiBold,
+            colour=WARM_MUTED,
+        )
+        self.amount_due_label = _label(
+            pesos(self._outstanding),
+            parent=self.content_host,
+            size=14,
+            weight=QFont.Weight.Bold,
+        )
+        self.amount_due_label.setObjectName("warmAmountDue")
+        due_row.addWidget(self.amount_due_caption)
+        due_row.addStretch(1)
+        due_row.addWidget(self.amount_due_label)
+        self.body.addLayout(due_row)
+
         amount_host = QFrame(self.content_host)
         amount_host.setObjectName("warmAmountBox")
         amount_host.setFixedHeight(50)
@@ -1211,8 +1233,17 @@ class PaymentPanel(BookingModal):
         self.amount_edit.setText(f"{self._outstanding:,.2f}")
         amount_row.addWidget(self.amount_edit, 1)
         self.body.addWidget(
-            FormField("Amount", amount_host, parent=self.content_host)
+            FormField("Amount to collect", amount_host, parent=self.content_host)
         )
+
+        self.amount_hint = Caption(
+            "Prefilled with the rental balance. The security deposit is "
+            "separate.",
+            parent=self.content_host,
+        )
+        self.amount_hint.setObjectName("warmAmountHint")
+        self.amount_hint.setWordWrap(True)
+        self.body.addWidget(self.amount_hint)
 
         self.quick_amount_chips = ChipGroup(
             self._QUICK_AMOUNTS,
@@ -1309,15 +1340,24 @@ class PaymentPanel(BookingModal):
             self.ref_edit.clear()
 
     def _refresh_total_button(self) -> None:
+        if self._outstanding <= ZERO:
+            self.go_button.setText("Nothing to collect")
+            self.go_button.setEnabled(False)
+            return
         raw = self.amount_edit.text().strip()
         try:
             value = money(raw, field="amount")
         except Exception:  # noqa: BLE001 - the button is a hint only
             self.go_button.setText("Record payment")
+            self.go_button.setEnabled(False)
             return
         self.go_button.setText(f"Record ₱{value:,.2f}")
+        self.go_button.setEnabled(value > ZERO)
 
     def _on_go(self) -> None:
+        if self._outstanding <= ZERO:
+            self.set_error("There is nothing to collect on this booking.")
+            return
         if (
             self.method_combo.currentText() == "gcash"
             and not self.ref_edit.text().strip()
