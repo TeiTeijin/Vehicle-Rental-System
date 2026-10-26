@@ -253,13 +253,24 @@ def confirm_modal(
     detail: str = "",
     destructive: bool = False,
     confirm_text: str = "Yes",
+    pref: str | None = None,
 ) -> bool:
     """Blocking confirmation on the app's warm frosted overlay.
 
     Same Yes/No semantics as :func:`confirm`, but the question is a 540px
     white sheet with the standard modal header, footer, and frosted glass
     instead of an OS message box. Escape and an outside click count as No.
+    ``pref`` honours the same Settings confirmation toggles as
+    :func:`confirm`.
     """
+    if pref:
+        try:
+            from app.staff import prefs as _prefs
+
+            if not bool(_prefs.get(pref)):
+                return True
+        except Exception:
+            pass
     from app.staff.overlay import FrostedOverlay, WARM_FROST
     from app.staff.ui_kit import ConfirmPanel
 

@@ -227,6 +227,25 @@ def test_confirm_panel_default_button_is_not_destructive(qapp):
     assert panel.confirm_button.objectName() == "modalPrimary"
 
 
+def test_confirm_modal_honours_the_settings_toggle(qapp, monkeypatch):
+    from app.staff import prefs
+
+    monkeypatch.setattr(prefs, "get", lambda _key: False)
+    parent = QWidget()
+    try:
+        assert (
+            confirm_modal(
+                parent,
+                "Retire DEM-108?",
+                pref="behavior/confirm_retire",
+            )
+            is True
+        )
+        assert parent.findChildren(FrostedOverlay) == []
+    finally:
+        parent.deleteLater()
+
+
 def test_confirm_panel_buttons_emit_confirmed_and_cancelled(qapp):
     panel = ConfirmPanel("Discard this rental?")
     seen: list[str] = []
