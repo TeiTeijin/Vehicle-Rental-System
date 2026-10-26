@@ -130,6 +130,38 @@ def test_default_table_stays_unchanged(qapp):
     assert table._table.wordWrap() is False
 
 
+def test_warm_table_inspection_and_damage_chip_kinds(qapp):
+    table = LoadStateTable(
+        [
+            Column("Type", ALIGN_LEFT, kind="inspection"),
+            Column("Damage", ALIGN_LEFT, kind="damage"),
+        ],
+        lambda: [
+            ("Pre Rental", "None recorded"),
+            ("Post Rental", "Scratched bumper"),
+        ],
+        variant="warm",
+    )
+
+    pre_chip = table._table.cellWidget(0, 0).findChild(TableChip)
+    post_chip = table._table.cellWidget(1, 0).findChild(TableChip)
+    assert pre_chip.property("tone") == "pre"
+    assert post_chip.property("tone") == "post"
+    # No damage stays plain, muted text; a real note becomes a danger chip.
+    assert table._table.cellWidget(0, 1) is None
+    assert table.cell_text(0, 1) == "None recorded"
+    damage_chip = table._table.cellWidget(1, 1).findChild(TableChip)
+    assert damage_chip.property("tone") == "danger"
+    assert damage_chip.text() == "Scratched bumper"
+
+
+def test_inspection_chip_tones_are_scoped_to_the_warm_table(qapp):
+    css = theme.load_stylesheet()
+    assert 'QLabel#tableChip[tone="pre"]' in css
+    assert 'QLabel#tableChip[tone="post"]' in css
+    assert "QLabel#warmCardTitle" in css
+
+
 def test_overlay_card_width_override(qapp):
     window = QWidget()
     overlay = FrostedOverlay(window, card_width=540)

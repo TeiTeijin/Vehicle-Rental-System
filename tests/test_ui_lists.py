@@ -1,4 +1,4 @@
-"""Warm list-page pass for Fleet, Customers, Maintenance, and Payments.
+"""Warm list-page pass for Fleet, Customers, Maintenance, Payments, and Inspections.
 
 These tests pin the presentation contract added by the staff-UI pass
 without weakening the existing behaviour suites in
@@ -24,6 +24,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from app.database import Base  # noqa: E402
 from app.models import (  # noqa: E402
     Booking,
+    Inspection_Report,
     Maintenance_Record,
     Payment,
     Users,
@@ -43,10 +44,11 @@ from app.staff.pages.customers import (  # noqa: E402
     CustomersPage,
 )
 from app.staff.pages.fleet import FleetPage  # noqa: E402
+from app.staff.pages.inspections import InspectionsPage  # noqa: E402
 from app.staff.pages.maintenance import MaintenancePage  # noqa: E402
 from app.staff.pages.payments import PaymentsPage  # noqa: E402
 from app.staff.shell import StaffShell  # noqa: E402
-from app.staff.tables import LoadState  # noqa: E402
+from app.staff.tables import LoadState, TableChip  # noqa: E402
 from app.staff.ui_kit import SelectionBar, WarmHost, WarmPanel  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
 
@@ -172,6 +174,43 @@ class _Branch:
                         recorded_by=self.counter.user_id,
                         reference_no="GC-1002",
                         created_at=datetime(2026, 1, 2, 10, 5),
+                    ),
+                ]
+            )
+
+            # The Inspections page audits these through their booking.
+            self.booking = Booking(
+                user_id=self.customer.user_id,
+                vehicle_id=self.out_car.vehicle_id,
+                start_date=TODAY - timedelta(days=2),
+                end_date=TODAY + timedelta(days=1),
+                total_cost=Decimal("7500.00"),
+                status="ongoing",
+                created_at=datetime(2026, 1, 2, 8, 0),
+            )
+            session.add(self.booking)
+            session.flush()
+            session.add_all(
+                [
+                    Inspection_Report(
+                        booking_id=self.booking.booking_id,
+                        inspection_type="pre-rental",
+                        inspected_by=self.counter.user_id,
+                        mileage_reading=10_000,
+                        fuel_level="full",
+                        damage_notes=None,
+                        photo_url=None,
+                        inspected_at=datetime(2026, 1, 2, 9, 0),
+                    ),
+                    Inspection_Report(
+                        booking_id=self.booking.booking_id,
+                        inspection_type="post-rental",
+                        inspected_by=self.counter.user_id,
+                        mileage_reading=10_240,
+                        fuel_level="half",
+                        damage_notes="Small chip above the rear wiper.",
+                        photo_url=None,
+                        inspected_at=datetime(2026, 1, 2, 10, 0),
                     ),
                 ]
             )
@@ -333,6 +372,24 @@ def _wait_for_maintenance(page, timeout_ms: int = 15000) -> None:
     )
 
 
+def _wait_for_inspections(page, timeout_ms: int = 15000) -> None:
+    timer = getattr(page, "_search_timer", None)
+    if timer is not None and timer.isActive():
+        timer.stop()
+        page._apply_filters()
+    page._pool.waitForDone(timeout_ms)
+    deadline = time.monotonic() + timeout_ms / 1000
+    controller = page._table_async
+    while (
+        controller.done_gen != controller.load_gen
+        and time.monotonic() < deadline
+    ):
+        QTest.qWait(5)
+    assert controller.done_gen == controller.load_gen, (
+        "inspections reload never landed"
+    )
+
+
 @pytest.fixture
 def fleet_page(shell, branch):
     page = FleetPage(shell)
@@ -380,6 +437,14 @@ def payments_page(shell, branch):
     page = PaymentsPage(shell)
     page.refresh()
     _wait_for_payments(page)
+    return page
+
+
+@pytest.fixture
+def inspections_page(shell, branch):
+    page = InspectionsPage(shell)
+    page.refresh()
+    _wait_for_inspections(page)
     return page
 
 
@@ -759,3 +824,139 @@ def test_payments_selection_bar_names_the_selected_row(payments_page):
     assert booking_id in summary
     assert "Ana Reyes" in summary
     assert "Ref" in summary
+
+
+# Inspections
+# --------------------------------------------------------------------------
+
+
+def test_inspections_page_uses_the_warm_audit_recipe(inspections_page):
+    page = inspections_page
+    assert page._tools_panel.property("variant") == "warmHost"
+    assert page._filter_card.property("variant") == "warm"
+    assert page._data_panel.property("variant") == "warm"
+    assert page.table._table.property("variant") == "warm"
+    assert page.table._table.alternatingRowColors() is False
+    assert page.data_title.text() == "Inspections"
+    assert not page.count_caption.isHidden()
+    assert "latest" in page.count_caption.text().lower()
+    assert page.hint_label.text() == (
+        "Reports are written at check-in / check-out."
+    )
+    assert page.type_chips.selected == "all"
+    assert page.selection_bar.parentWidget() is page._tools_panel
+    assert page.open_button.objectName() == "barPrimary"
+    assert page.body.spacing() == CARD_GUTTER
+
+
+def test_inspection_type_chips_and_combo_stay_in_step(inspections_page):
+    page = inspections_page
+    assert set(page.type_chips.buttons) == {
+        "all",
+        "pre-rental",
+        "post-rental",
+    }
+
+    page.type_chips.buttons["pre-rental"].click()
+    _wait_for_inspections(page)
+    assert page.type_combo.currentText() == "Pre rental"
+    assert page.table.row_count() == 1
+    assert page.table.cell_text(0, 3) == "Pre Rental"
+
+    page.type_combo.setCurrentIndex(2)  # Post rental
+    _wait_for_inspections(page)
+    assert page.type_chips.selected == "post-rental"
+    assert page.table.row_count() == 1
+    assert page.table.cell_text(0, 3) == "Post Rental"
+
+    page.type_chips.buttons["all"].click()
+    _wait_for_inspections(page)
+    assert page.table.row_count() == 2
+
+
+def test_inspection_damage_toggle_keeps_its_red_dot_and_filters(
+    inspections_page,
+):
+    page = inspections_page
+    assert page.damage_check.objectName() == "warmCheck"
+    assert not page.damage_check.icon().isNull()
+
+    page.damage_check.setChecked(True)
+    _wait_for_inspections(page)
+    assert page.table.row_count() == 1
+    assert page.table.cell_text(0, 7) == "Small chip above the rear wiper."
+
+    page.clear_button.click()
+    _wait_for_inspections(page)
+    assert page.damage_check.isChecked() is False
+    assert page.table.row_count() == 2
+
+
+def test_inspection_selection_bar_names_the_report_and_opens_booking(
+    inspections_page, branch
+):
+    page = inspections_page
+    built, _context = branch
+    assert page.selection_bar.property("active") in (False, 0)
+    assert not page.open_button.isEnabled()
+
+    _select_row(page.table, 3, "Post Rental")
+    page._refresh_actions()
+
+    summary = page.selection_bar.summary_label.text()
+    assert f"#{built.booking.booking_id}" in summary
+    assert "Ana Reyes" in summary
+    assert "Toyota Vios" in summary
+    assert page.open_button.isEnabled()
+    assert page.selection_bar.property("active") is True
+
+    page.table.table.setCurrentItem(None)
+    page._refresh_actions()
+    assert not page.open_button.isEnabled()
+    assert "Select a row" in page.selection_bar.summary_label.text()
+
+
+def test_inspection_type_and_damage_chips_are_tinted(inspections_page):
+    page = inspections_page
+
+    pre_row = _select_row(page.table, 3, "Pre Rental")
+    pre_chip = page.table.table.cellWidget(pre_row, 3).findChild(TableChip)
+    assert pre_chip.property("tone") == "pre"
+
+    post_row = _select_row(page.table, 3, "Post Rental")
+    post_chip = page.table.table.cellWidget(post_row, 3).findChild(TableChip)
+    assert post_chip.property("tone") == "post"
+
+    damaged_row = _select_row(
+        page.table, 7, "Small chip above the rear wiper."
+    )
+    damage_chip = page.table.table.cellWidget(damaged_row, 7).findChild(
+        TableChip
+    )
+    assert damage_chip.property("tone") == "danger"
+
+    clean_row = _select_row(page.table, 7, "None recorded")
+    assert page.table.table.cellWidget(clean_row, 7) is None
+
+
+def test_inspection_footer_range_and_load_more(inspections_page):
+    page = inspections_page
+    assert page.table.row_count() == 2
+    assert page.footer_count.text() == "1–2 of 2"
+    assert page.load_more_button.isHidden()
+    assert "showing 2" in page.count_caption.text()
+
+    # One row per page makes the Load more wiring visible without needing a
+    # hundred seeded reports.
+    page._page_size = 1
+    page._request_load()
+    _wait_for_inspections(page)
+    assert page.table.row_count() == 1
+    assert not page.load_more_button.isHidden()
+    assert page.footer_count.text() == "1 of 2"
+
+    page.load_more_button.click()
+    _wait_for_inspections(page)
+    assert page.table.row_count() == 2
+    assert page.footer_count.text() == "1–2 of 2"
+    assert page.load_more_button.isHidden()

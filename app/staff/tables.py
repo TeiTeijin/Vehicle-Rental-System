@@ -37,8 +37,8 @@ class Column:
     title: str
     align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
     stretch: bool = False
-    #: Warm-table presentation: ``text``, ``status``, ``payment``, ``muted``,
-    #: ``strong``, or ``money``.
+    #: Warm-table presentation: ``text``, ``status``, ``payment``,
+    #: ``inspection``, ``damage``, ``muted``, ``strong``, or ``money``.
     kind: str = "text"
     weight: QFont.Weight | None = None
     colour: str | None = None
@@ -332,6 +332,27 @@ class LoadStateTable(QWidget):
         finally:
             self._table.setUpdatesEnabled(True)
 
+    def _chip_item(
+        self,
+        row: int,
+        column: int,
+        column_spec: Column,
+        text: str,
+        *,
+        tone: str,
+    ) -> QTableWidgetItem:
+        """Chip in a cell widget plus an invisible item for column sizing."""
+        chip = TableChip(text, tone=tone)
+        self._table.setCellWidget(
+            row, column, ChipCell(chip, align=column_spec.align)
+        )
+        # ResizeToContents measures the item, not the cell widget. Keep the
+        # label in the (invisible) item so the chip gets its width.
+        placeholder = QTableWidgetItem(f"{text}  ")
+        placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
+        placeholder.setTextAlignment(column_spec.align)
+        return placeholder
+
     def _make_item(self, row: int, column: int, value) -> QTableWidgetItem:
         column_spec = self._columns[column]
         warm = self._variant == "warm"
@@ -374,6 +395,31 @@ class LoadStateTable(QWidget):
             placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
             placeholder.setTextAlignment(column_spec.align)
             return placeholder
+        if warm and column_spec.kind == "inspection":
+            text = "" if value is None else str(value)
+            lowered = text.strip().lower()
+            if lowered.startswith("pre"):
+                tone = "pre"
+            elif lowered.startswith("post"):
+                tone = "post"
+            else:
+                tone = "neutral"
+            return self._chip_item(
+                row, column, column_spec, text, tone=tone
+            )
+        if warm and column_spec.kind == "damage":
+            text = "" if value is None else str(value)
+            clean = text.strip().lower()
+            if not clean or clean in ("-", "none", "none recorded"):
+                # No damage is ordinary text, not a chip: a neutral sentence
+                # reads calmer than a pill and keeps the red chips meaningful.
+                item = QTableWidgetItem(text or "None recorded")
+                item.setTextAlignment(column_spec.align)
+                item.setForeground(QBrush(QColor("#7D7265")))
+                return item
+            return self._chip_item(
+                row, column, column_spec, text, tone="danger"
+            )
 
         item = QTableWidgetItem("" if value is None else str(value))
         item.setTextAlignment(column_spec.align)
