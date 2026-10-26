@@ -19,8 +19,8 @@ from __future__ import annotations
 import time
 from datetime import date
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -51,6 +51,94 @@ GRANULARITIES: tuple[str, ...] = ("Day", "Week", "Month")
 
 #: Reuse an identical utilization report for this long. Exports bypass it.
 UTILIZATION_CACHE_SECONDS = 60
+
+#: Report tiles keep their 20px value type when there is room, then step
+#: down until the figure (cents included) fits the tile at the 900px window.
+METRIC_MAX_PX = 20
+METRIC_MIN_PX = 12
+METRIC_TILE_HEIGHT = 76
+
+
+class _ReportMetricGrid(MetricGrid):
+    """Metric grid whose values shrink to fit instead of silently clipping.
+
+    `MetricGrid` gives every report value ``wordWrap`` and a 20px font, but a
+    wrapped label's minimum width is the longest unbreakable run -- a peso
+    amount has none -- so at the app's 900px minimum the tile clips the last
+    digits. Fit to the width the layout actually gives the label; if even the
+    smallest size cannot fit one line, allow two lines and grow the tile just
+    enough for them. The 1440px layout still gets the full 20px type.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Texts land one at a time from render_report; fitting on the next
+        # event turn measures after the layout has distributed the new widths.
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(0)
+        self._fit_timer.timeout.connect(self._fit_values)
+
+    def set_value(self, label: str, text: str) -> None:
+        super().set_value(label, text)
+        self._fit_timer.start()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._fit_timer.start()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        self._fit_timer.start()
+
+    def _fit_values(self) -> None:
+        for row in self.rows:
+            for tile in row.tiles.values():
+                self._fit_tile(tile)
+
+    def _fit_tile(self, tile) -> None:
+        label = tile.value_label
+        text = label.text()
+        width = label.width()
+        if width <= 1:
+            return
+        base = QFont(label.font())
+        chosen = METRIC_MIN_PX
+        for size in range(METRIC_MAX_PX, METRIC_MIN_PX - 1, -1):
+            candidate = QFont(base)
+            candidate.setPixelSize(size)
+            if QFontMetrics(candidate).horizontalAdvance(text) <= width - 2:
+                chosen = size
+                break
+
+        font = QFont(base)
+        font.setPixelSize(chosen)
+        fits_one_line = (
+            QFontMetrics(font).horizontalAdvance(text) <= width - 2
+        )
+        if fits_one_line:
+            if label.wordWrap():
+                label.setWordWrap(False)
+            if label.minimumHeight():
+                label.setMinimumHeight(0)
+            if tile.minimumHeight() != METRIC_TILE_HEIGHT:
+                tile.setMinimumHeight(METRIC_TILE_HEIGHT)
+        else:
+            if not label.wordWrap():
+                label.setWordWrap(True)
+            needed = QFontMetrics(font).boundingRect(
+                QRect(0, 0, width, 10_000),
+                Qt.TextFlag.TextWordWrap,
+                text,
+            ).height()
+            label.setMinimumHeight(needed)
+            tile.setMinimumHeight(
+                max(METRIC_TILE_HEIGHT, 8 + 16 + 1 + needed + 8)
+            )
+
+        if getattr(label, "_report_font_px", None) != chosen:
+            label.setStyleSheet(f"font-size: {chosen}px;")
+            label._report_font_px = chosen
 
 
 def _stacked_vehicle(label: str) -> str:
@@ -123,7 +211,7 @@ class _PanelBase(QWidget):
 
     def _add_metrics(self, rows: list[list[tuple[str, str, bool]]]) -> None:
         """Build the cream metric rows; the first tile is the headline."""
-        self.metrics = MetricGrid(self)
+        self.metrics = _ReportMetricGrid(self)
         for spec in rows:
             row = self.metrics.row()
             for label, value, highlight in spec:

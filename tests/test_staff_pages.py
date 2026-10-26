@@ -5027,6 +5027,116 @@ class TestReportsPage:
         assert page.csv_button.objectName() == "reportExportCsv"
         assert "period" in page.export_hint.text()
 
+    @staticmethod
+    def _tool_rects(page):
+        from PySide6.QtCore import QPoint, QRect
+
+        controls = {
+            "preset": page.preset_combo,
+            "From label": page.from_label,
+            "From date": page.from_edit,
+            "To label": page.to_label,
+            "To date": page.to_edit,
+            "export note": page.export_hint,
+            "Export PDF": page.pdf_button,
+            "Export CSV": page.csv_button,
+        }
+        return {
+            name: QRect(
+                widget.mapTo(page._tools_panel, QPoint(0, 0)), widget.size()
+            )
+            for name, widget in controls.items()
+        }
+
+    def _assert_tools_do_not_overlap(self, page) -> None:
+        rects = self._tool_rects(page)
+        panel = page._tools_panel.rect()
+        for name, rect in rects.items():
+            assert rect.width() > 0 and rect.height() > 0, name
+            assert panel.contains(rect), f"{name} sits outside the tools panel"
+        names = list(rects)
+        for index, name in enumerate(names):
+            for other in names[index + 1:]:
+                assert not rects[name].intersects(rects[other]), (
+                    f"{name} overlaps {other}: {rects[name]} / {rects[other]}"
+                )
+        assert page.export_hint.width() >= page.export_hint.sizeHint().width(), (
+            "the export note is clipped"
+        )
+
+    def test_report_tools_do_not_overlap_at_the_minimum_window(
+        self, shell, branch, qapp
+    ):
+        from PySide6.QtCore import QPoint
+
+        shell._on_signed_in(shell.context.user)
+        shell.resize(900, 640)
+        shell.show()
+        assert shell.show_page("reports") is True
+        page = shell._page_widgets["reports"]
+        _wait_for_reports(page)
+        qapp_process(shell)
+        qapp_process(page)
+
+        self._assert_tools_do_not_overlap(page)
+        # The note and exports moved below the filters instead of being
+        # squeezed under the combo/date fields.
+        def y(widget):
+            return widget.mapTo(page._tools_panel, QPoint(0, 0)).y()
+
+        assert y(page.export_hint) > y(page.to_edit)
+        assert y(page.pdf_button) > y(page.to_edit)
+        assert y(page.csv_button) > y(page.to_edit)
+
+        # Money values must keep every digit (and both cents) at this width.
+        panel = page._panels["revenue"]
+        panel.metrics.set_value("Revenue", "₱680,233.30")
+        panel.metrics.set_value("Rental", "₱680,046.30")
+        qapp_process(shell)
+        qapp_process(page)
+        for name in ("Revenue", "Rental"):
+            label = panel.metric_tiles[name].value_label
+            assert label.text() == (
+                "₱680,233.30" if name == "Revenue" else "₱680,046.30"
+            )
+            needed = label.fontMetrics().horizontalAdvance(label.text())
+            assert needed <= label.width(), (
+                f"{name} value needs {needed}px but has {label.width()}px"
+            )
+        for row in panel.metrics.rows:
+            for tile in row.tiles.values():
+                assert tile.geometry().right() <= row.width(), (
+                    f"{tile.label.text()} tile overflows its row"
+                )
+
+    def test_report_toolbar_stays_on_one_row_at_reference_width(
+        self, shell, branch, qapp
+    ):
+        from PySide6.QtCore import QPoint
+
+        shell._on_signed_in(shell.context.user)
+        shell.resize(1440, 900)
+        shell.show()
+        assert shell.show_page("reports") is True
+        page = shell._page_widgets["reports"]
+        _wait_for_reports(page)
+        qapp_process(shell)
+        qapp_process(page)
+
+        self._assert_tools_do_not_overlap(page)
+        def y(widget):
+            return widget.mapTo(page._tools_panel, QPoint(0, 0)).y()
+
+        assert y(page.export_hint) == y(page.preset_combo)
+        assert y(page.pdf_button) == y(page.preset_combo)
+        assert y(page.csv_button) == y(page.preset_combo)
+        panel = page._panels["revenue"]
+        panel.metrics.set_value("Revenue", "₱680,233.30")
+        qapp_process(shell)
+        qapp_process(page)
+        label = panel.metric_tiles["Revenue"].value_label
+        assert label.font().pixelSize() == 20
+
     def test_the_report_nav_is_a_single_black_pill(
         self, shell, branch, qapp
     ):

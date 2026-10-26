@@ -64,6 +64,10 @@ def _preset_range(preset: str, today: date) -> tuple[date, date] | None:
 class ReportsPage(StaffPage):
     HEADER = False
 
+    #: Below this page width the single-row toolbar's fixed-width controls
+    #: would overlap, so the note and exports move to a second row.
+    TOOLS_WRAP_BELOW = 1120
+
     def __init__(self, shell) -> None:
         super().__init__(
             shell,
@@ -182,7 +186,13 @@ class ReportsPage(StaffPage):
     # -- tools ------------------------------------------------------------
 
     def _tool_row(self):
-        """Preset, dates, export note, and exports share the reference row."""
+        """Preset, dates, export note, and exports; wraps at narrow widths.
+
+        At the 1440px reference everything shares one row. At the app's
+        900px minimum the fixed-width controls alone exceed the panel, so
+        the note and the two export buttons move to a second row rather than
+        being squeezed underneath the combo and date fields.
+        """
         from PySide6.QtCore import QDate
         from PySide6.QtWidgets import (
             QComboBox,
@@ -190,11 +200,24 @@ class ReportsPage(StaffPage):
             QHBoxLayout,
             QLabel,
             QPushButton,
+            QVBoxLayout,
         )
 
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
+        second = QHBoxLayout()
+        second.setContentsMargins(0, 0, 0, 0)
+        second.setSpacing(8)
+        outer.addLayout(row)
+        outer.addLayout(second)
+        self._tools_primary = row
+        self._tools_secondary = second
+        self._tools_compact = None
+
         self.preset_combo = QComboBox(self)
         self.preset_combo.setObjectName("reportPreset")
         self.preset_combo.addItems(list(PRESETS))
@@ -202,8 +225,8 @@ class ReportsPage(StaffPage):
         self.preset_combo.setFixedHeight(TOOL_ROW_H)
         self.preset_combo.setFixedWidth(142)
         self.preset_combo.currentIndexChanged.connect(self._on_preset)
-        row.addWidget(self.preset_combo)
-        row.addWidget(self._field_label("From"))
+        self.from_label = self._field_label("From")
+        self.to_label = self._field_label("To")
         self.from_edit = QDateEdit(self)
         self.from_edit.setObjectName("reportDate")
         self.from_edit.setCalendarPopup(True)
@@ -215,8 +238,6 @@ class ReportsPage(StaffPage):
         self.from_edit.setFixedHeight(TOOL_ROW_H)
         self.from_edit.setFixedWidth(140)
         self.from_edit.dateChanged.connect(self._on_dates)
-        row.addWidget(self.from_edit)
-        row.addWidget(self._field_label("To"))
         self.to_edit = QDateEdit(self)
         self.to_edit.setObjectName("reportDate")
         self.to_edit.setCalendarPopup(True)
@@ -228,14 +249,10 @@ class ReportsPage(StaffPage):
         self.to_edit.setFixedHeight(TOOL_ROW_H)
         self.to_edit.setFixedWidth(140)
         self.to_edit.dateChanged.connect(self._on_dates)
-        row.addWidget(self.to_edit)
-        row.addStretch(1)
         self.export_hint = QLabel(
             "Every export carries the period and who ran it.", self
         )
         self.export_hint.setObjectName("pageSubtitle")
-        row.addWidget(self.export_hint)
-        row.addSpacing(8)
 
         self.pdf_button = QPushButton("Export PDF", self)
         self.pdf_button.setObjectName("reportExportPdf")
@@ -243,7 +260,6 @@ class ReportsPage(StaffPage):
         self.pdf_button.setMinimumWidth(112)
         self.pdf_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pdf_button.clicked.connect(lambda: self._export("pdf"))
-        row.addWidget(self.pdf_button)
 
         self.csv_button = QPushButton("Export CSV", self)
         self.csv_button.setObjectName("reportExportCsv")
@@ -251,8 +267,47 @@ class ReportsPage(StaffPage):
         self.csv_button.setMinimumWidth(112)
         self.csv_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.csv_button.clicked.connect(lambda: self._export("csv"))
-        row.addWidget(self.csv_button)
-        return row
+
+        self._arrange_tools(self._tools_must_wrap())
+        return outer
+
+    def _tools_must_wrap(self) -> bool:
+        return self.width() < self.TOOLS_WRAP_BELOW
+
+    def _arrange_tools(self, wrap: bool) -> None:
+        """Place the same controls in one row or in filters + actions rows."""
+        for layout in (self._tools_primary, self._tools_secondary):
+            while layout.count():
+                layout.takeAt(0)
+        row = self._tools_primary
+        row.addWidget(self.preset_combo)
+        row.addWidget(self.from_label)
+        row.addWidget(self.from_edit)
+        row.addWidget(self.to_label)
+        row.addWidget(self.to_edit)
+        row.addStretch(1)
+        if wrap:
+            second = self._tools_secondary
+            second.addWidget(self.export_hint)
+            second.addStretch(1)
+            second.addWidget(self.pdf_button)
+            second.addWidget(self.csv_button)
+        else:
+            row.addWidget(self.export_hint)
+            row.addSpacing(8)
+            row.addWidget(self.pdf_button)
+            row.addWidget(self.csv_button)
+        self._tools_compact = wrap
+        row.invalidate()
+        self._tools_secondary.invalidate()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        if getattr(self, "_tools_primary", None) is None:
+            return
+        wrap = self._tools_must_wrap()
+        if wrap != self._tools_compact:
+            self._arrange_tools(wrap)
 
     def _field_label(self, text: str):
         from PySide6.QtWidgets import QLabel
