@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -222,7 +223,16 @@ class ChipGroup(_ExclusiveChips):
 
 
 class SelectionBar(QFrame):
-    """Cream bar naming the selected row and holding its actions."""
+    """Cream bar naming the selected row and holding its actions.
+
+    The summary keeps its natural width and the action strip scrolls
+    horizontally when the page is too narrow for every button. Buttons are
+    never squeezed below their size hint: a half-width "Record payment"
+    reads as a clipped action, not a compact one. This is shared by every
+    page, so a narrow window behaves the same everywhere.
+    """
+
+    ACTION_HEIGHT = 36
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -237,11 +247,49 @@ class SelectionBar(QFrame):
         self.summary_label = QLabel("Select a row to act on it.", self)
         self.summary_label.setObjectName("selectionSummary")
         self.summary_label.setTextFormat(Qt.TextFormat.RichText)
-        row.addWidget(self.summary_label, 1)
-        self.actions = QHBoxLayout()
+        # No stretch: the summary keeps its text width and the scroll area
+        # absorbs the rest. The QLabel still shrinks toward its minimum hint
+        # on very narrow pages, but the prompt itself stays readable.
+        row.addWidget(self.summary_label)
+
+        self.actions_host = QWidget(self)
+        self.actions_host.setObjectName("selectionActionsHost")
+        self.actions = QHBoxLayout(self.actions_host)
         self.actions.setContentsMargins(0, 0, 0, 0)
         self.actions.setSpacing(12)
-        row.addLayout(self.actions)
+        # Keeps actions right-aligned when the strip is wider than its
+        # buttons, as the summary-stretch layout used to do.
+        self.actions.addStretch(1)
+
+        self.actions_scroll = QScrollArea(self)
+        self.actions_scroll.setObjectName("selectionActions")
+        self.actions_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.actions_scroll.setWidgetResizable(True)
+        self.actions_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.actions_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.actions_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.actions_scroll.setFixedHeight(self.ACTION_HEIGHT)
+        self.actions_scroll.setWidget(self.actions_host)
+        self.actions_scroll.horizontalScrollBar().rangeChanged.connect(
+            self._sync_action_scroll_height
+        )
+        row.addWidget(self.actions_scroll, 1)
+
+    def _sync_action_scroll_height(self, *_range) -> None:
+        """Reserve room for the bar only when it is actually shown.
+
+        QScrollArea's default minimum height is 60px, which would make the
+        whole selection bar taller even at 1440px where nothing scrolls.
+        """
+        bar = self.actions_scroll.horizontalScrollBar()
+        extra = bar.sizeHint().height() if bar.maximum() > 0 else 0
+        self.actions_scroll.setFixedHeight(self.ACTION_HEIGHT + extra)
 
     def set_summary(self, text: str) -> None:
         self.summary_label.setText(text)

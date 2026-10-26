@@ -1808,6 +1808,39 @@ QFrame#selectionBar {
     border-radius: 14px;
 }
 
+/* Narrow windows scroll the action strip instead of squeezing buttons
+   below their size hint. The bar wears the page cream; it is not a box. */
+QScrollArea#selectionActions {
+    background: transparent;
+    border: none;
+}
+
+QScrollArea#selectionActions QWidget#selectionActionsHost,
+QScrollArea#selectionActions QWidget#qt_scrollarea_viewport {
+    background: transparent;
+}
+
+QScrollArea#selectionActions QScrollBar:horizontal {
+    background: transparent;
+    height: 6px;
+    margin: 0;
+}
+
+QScrollArea#selectionActions QScrollBar::handle:horizontal {
+    background: #CDBFA8;
+    border-radius: 3px;
+    min-width: 30px;
+}
+
+QScrollArea#selectionActions QScrollBar::handle:horizontal:hover {
+    background: #B9A98F;
+}
+
+QScrollArea#selectionActions QScrollBar::add-line:horizontal,
+QScrollArea#selectionActions QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
 QLabel#selectionSummary {
     background: transparent;
     color: #4D4A42;

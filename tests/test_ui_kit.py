@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt  # noqa: E402
-from PySide6.QtGui import QWheelEvent  # noqa: E402
+from PySide6.QtGui import QFontMetrics, QWheelEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
@@ -76,6 +76,50 @@ def test_selection_bar_summary_accepts_rich_parts(qapp):
     text = bar.summary_label.text()
     assert "BK-1042" in text
     assert "Toyota Vios" in text
+
+
+def test_selection_bar_keeps_actions_full_size_at_narrow_width(qapp):
+    bar = SelectionBar()
+    buttons: list[QPushButton] = []
+    for text, kind in (
+        ("Confirm", "action"),
+        ("Check in", "action"),
+        ("Check out", "action"),
+        ("Record payment", "primary"),
+        ("Extend", "action"),
+        ("Details", "action"),
+        ("Cancel booking", "danger"),
+    ):
+        button = QPushButton(text)
+        bar.add_action(button, kind=kind)
+        buttons.append(button)
+
+    bar.resize(560, bar.sizeHint().height())
+    bar.show()
+    qapp.processEvents()
+
+    # A clipped action button is worse than a scrollbar: keep the size hint
+    # and let the strip scroll.
+    for button in buttons:
+        assert button.width() >= button.sizeHint().width()
+        assert button.height() >= bar.ACTION_HEIGHT
+    assert bar.summary_label.width() >= bar.summary_label.sizeHint().width()
+
+    scroll = bar.actions_scroll
+    scrollbar = scroll.horizontalScrollBar()
+    assert (
+        scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+    assert scrollbar.maximum() > 0
+
+    # The last action is reachable once the strip is scrolled to the end.
+    scrollbar.setValue(scrollbar.maximum())
+    qapp.processEvents()
+    last = buttons[-1]
+    position = last.mapTo(scroll.viewport(), QPoint(0, 0))
+    assert position.x() >= 0
+    assert position.x() + last.width() <= scroll.viewport().width() + 1
 
 
 def test_metric_tile_updates(qapp):
@@ -150,6 +194,35 @@ def test_default_table_stays_unchanged(qapp):
     assert table._table.wordWrap() is False
 
 
+def test_wide_table_exposes_horizontal_scroll_instead_of_clipping(qapp):
+    columns = [Column(f"Column {index}", ALIGN_LEFT) for index in range(12)]
+    row = tuple(f"value {index}" for index in range(12))
+    table = LoadStateTable(columns, lambda: [row], variant="warm")
+    table.resize(320, 220)
+    table.show()
+    qapp.processEvents()
+
+    widget = table.table
+    assert (
+        widget.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+    header = widget.horizontalHeader()
+    assert header.length() > widget.viewport().width()
+
+    scrollbar = widget.horizontalScrollBar()
+    assert scrollbar.maximum() > 0
+    scrollbar.setValue(scrollbar.maximum())
+    qapp.processEvents()
+
+    last = widget.columnCount() - 1
+    assert header.sectionViewportPosition(last) >= 0
+    assert (
+        header.sectionViewportPosition(last) + header.sectionSize(last)
+        <= widget.viewport().width() + 1
+    )
+
+
 def test_warm_table_inspection_and_damage_chip_kinds(qapp):
     table = LoadStateTable(
         [
@@ -173,6 +246,22 @@ def test_warm_table_inspection_and_damage_chip_kinds(qapp):
     damage_chip = table._table.cellWidget(1, 1).findChild(TableChip)
     assert damage_chip.property("tone") == "danger"
     assert damage_chip.text() == "Scratched bumper"
+
+
+def test_inspection_chip_fits_the_post_rental_label(qapp):
+    table = LoadStateTable(
+        [Column("Type", ALIGN_LEFT, kind="inspection")],
+        lambda: [("Post Rental",)],
+        variant="warm",
+    )
+    table.resize(300, 160)
+    table.show()
+    qapp.processEvents()
+
+    chip = table._table.cellWidget(0, 0).findChild(TableChip)
+    assert chip is not None
+    text_width = QFontMetrics(chip.font()).horizontalAdvance(chip.text())
+    assert chip.contentsRect().width() >= text_width
 
 
 def test_inspection_chip_tones_are_scoped_to_the_warm_table(qapp):

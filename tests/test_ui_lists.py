@@ -542,7 +542,7 @@ def test_fleet_selection_bar_names_the_vehicle_and_keeps_the_action_rules(
         page.bulk_button,
         page.retire_button,
     ):
-        assert button.parentWidget() is page.selection_bar
+        assert button.parentWidget() is page.selection_bar.actions_host
 
 
 def test_fleet_table_and_skeleton_use_the_warm_variant(fleet_page):
@@ -813,8 +813,11 @@ def test_payments_selection_bar_names_the_selected_row(payments_page):
     assert "owed" in summary
     assert page.collect_button.isEnabled()
     assert page.view_booking_button.isEnabled()
-    assert page.collect_button.parentWidget() is page.selection_bar
-    assert page.view_booking_button.parentWidget() is page.selection_bar
+    assert page.collect_button.parentWidget() is page.selection_bar.actions_host
+    assert (
+        page.view_booking_button.parentWidget()
+        is page.selection_bar.actions_host
+    )
 
     # Selecting a payment row clears the other card, so the bar names that
     # payment's own booking, not whatever outstanding row was selected first.

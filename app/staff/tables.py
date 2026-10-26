@@ -271,10 +271,11 @@ class LoadStateTable(QWidget):
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setWordWrap(warm)
-        # No bar widgets at all for a cleaner look (same pattern as the
-        # sidebar): wheel / keys / scrollToItem keep working.
+        # Keep the chrome minimal, but never hide a horizontal overflow:
+        # wide tables (Customers, Inspections) must expose their last
+        # columns instead of clipping them out of reach.
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         if warm:
             table.setProperty("variant", "warm")
             if self._row_height:
@@ -365,6 +366,7 @@ class LoadStateTable(QWidget):
         text: str,
         *,
         tone: str,
+        pad: int = 2,
     ) -> QTableWidgetItem:
         """Chip in a cell widget plus an invisible item for column sizing."""
         chip = TableChip(text, tone=tone)
@@ -373,7 +375,7 @@ class LoadStateTable(QWidget):
         )
         # ResizeToContents measures the item, not the cell widget. Keep the
         # label in the (invisible) item so the chip gets its width.
-        placeholder = QTableWidgetItem(f"{text}  ")
+        placeholder = QTableWidgetItem(f"{text}{' ' * pad}")
         placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
         placeholder.setTextAlignment(column_spec.align)
         return placeholder
@@ -441,8 +443,10 @@ class LoadStateTable(QWidget):
                 tone = "post"
             else:
                 tone = "neutral"
+            # "Post Rental" is the widest handover label; two pad spaces
+            # left its chip one pixel shy of the text after side padding.
             return self._chip_item(
-                row, column, column_spec, text, tone=tone
+                row, column, column_spec, text, tone=tone, pad=6
             )
         if warm and column_spec.kind == "damage":
             text = "" if value is None else str(value)
