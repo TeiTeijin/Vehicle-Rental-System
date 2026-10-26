@@ -200,8 +200,9 @@ CELL_MAX = 18
 CELL_GAP = 5
 #: 8px, per the brief.
 CELL_RADIUS = 8
-#: Left gutter for the Mon/Wed/Fri labels.
-HEATMAP_LABEL_GUTTER = 30
+#: Left gutter for the Mon/Wed/Fri labels. Room for the widest label ("Wed")
+#: at AXIS_SIZE_LARGE plus a quiet gap before the first cell column.
+HEATMAP_LABEL_GUTTER = 38
 #: Room for the month row above the cells and the "Less/More" legend below.
 HEATMAP_TOP = 18
 HEATMAP_BOTTOM = 20

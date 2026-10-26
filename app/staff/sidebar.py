@@ -169,8 +169,11 @@ class Sidebar(QFrame):
         self._scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+        # At the 640px window minimum the nav list is taller than the rail.
+        # As-needed rather than always-off keeps every page reachable there,
+        # while a roomy window still shows the clean, bar-less rail.
         self._scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self._scroll.viewport().setObjectName("sidebarViewport")
         self._scroll.setStyleSheet(

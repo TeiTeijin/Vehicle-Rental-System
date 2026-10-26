@@ -523,8 +523,7 @@ class ActivityHeatmap(_AnimatedCanvas):
                 names = ("Mon", "Wed", "Fri")
                 painter.setPen(QColor(MUTED))
                 painter.drawText(
-                    QRectF(0, grid_top + row * (cell + CELL_GAP),
-                           HEATMAP_LABEL_GUTTER - 8, cell),
+                    self._weekday_rect(grid_top, row, cell),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                     names[row // 2],
                 )
@@ -611,6 +610,20 @@ class ActivityHeatmap(_AnimatedCanvas):
             QRectF(more_x, y, more_w, box),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "More",
+        )
+
+    @staticmethod
+    def _weekday_rect(grid_top: float, row: int, cell: float) -> QRectF:
+        """Room for the full weekday word, right-aligned against the cells.
+
+        The rect used to be 22px wide, narrower than "Mon"/"Wed" at 12px, so
+        Qt rendered the clipped "von"/"Ned".
+        """
+        return QRectF(
+            0,
+            grid_top + row * (cell + CELL_GAP),
+            HEATMAP_LABEL_GUTTER - 8,
+            cell,
         )
 
     # -- hover --------------------------------------------------------------
@@ -880,8 +893,10 @@ class SalesTargetChart(_AnimatedCanvas):
 
 def _compact(value: float) -> str:
     if value >= 1_000_000:
-        text = f"{value / 1_000_000:.1f}M"
-        return f"₱{text[:-2] if text.endswith('.0M') else text}"
+        text = f"{value / 1_000_000:.1f}"
+        if text.endswith(".0"):
+            text = text[:-2]
+        return f"₱{text}M"
     if value >= 1_000:
         return f"₱{value / 1_000:,.0f}k"
     return f"₱{value:,.0f}"
