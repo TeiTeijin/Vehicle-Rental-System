@@ -36,6 +36,7 @@ from app.staff.theme import (
     MUTED,
     PAPER,
     PROP_DARK,
+    SURFACE_HOVER,
     TEXT,
 )
 
@@ -125,20 +126,35 @@ class IconButton(QWidget):
         self._icon_size = icon_size
         self._background = background
         self._outline = outline
+        self._checked = False
         self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         if tooltip:
             self.setToolTip(tooltip)
 
+    def set_checked(self, checked: bool) -> None:
+        """Mark a toggle-style icon button as active.
+
+        Used by the transactions search icon: the field it reveals must stay
+        visibly associated with the button that opened it.
+        """
+        self._checked = bool(checked)
+        self.update()
+
+    def is_checked(self) -> bool:
+        return self._checked
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            hovered = self.underMouse() or self.hasFocus()
+            hovered = self.underMouse() or self.hasFocus() or self._checked
             bg = self._background
             if bg is None:
                 bg = INK_HOVER if hovered else "transparent"
+            elif self._checked:
+                bg = SURFACE_HOVER
             if self._outline is not None:
                 painter.setBrush(
                     QColor(INK_HOVER if hovered else "#00000000")
@@ -158,6 +174,8 @@ class IconButton(QWidget):
                 )
                 painter.drawRoundedRect(self.rect(), radius, radius)
             colour = self._colour or (TEXT if not self._dark_parent() else PAPER)
+            if self._checked:
+                colour = TEXT
             glyph = icons.pixmap(self._name, colour, self._icon_size)
             painter.drawPixmap(
                 (self.width() - glyph.width()) // 2,
@@ -448,9 +466,11 @@ class ElidedLabel(QLabel):
         colour: str = TEXT,
         size: int = 14,
         weight: QFont.Weight = QFont.Weight.Medium,
+        tooltip_full: bool = False,
     ) -> None:
         super().__init__(parent)
         self._full = text
+        self._tooltip_full = tooltip_full
         font = QFont("Inter")
         font.setPixelSize(size)
         font.setWeight(weight)
@@ -473,6 +493,9 @@ class ElidedLabel(QLabel):
         return self._full
 
     def _refresh(self) -> None:
+        if self._tooltip_full:
+            # The elided form must never be the only way to read a name.
+            self.setToolTip(self._full)
         available = self.width()
         if available <= 0 or not self._full:
             super().setText(self._full)

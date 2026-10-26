@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+from collections.abc import Callable
+
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -87,6 +90,11 @@ class StaffPage(QWidget):
             tooltip="More",
             parent=self,
         )
+        self.overflow_button.setObjectName(theme.OBJ_PAGE_OVERFLOW)
+        # Built lazily: a page with no actions must not own a QMenu at all.
+        self.overflow_menu: QMenu | None = None
+        self._overflow_specs: list[tuple[str, Callable[[], None]]] = []
+        self.overflow_button.clicked.connect(self._show_overflow_menu)
         self.avatar = Avatar(self)
 
         header = QHBoxLayout()
@@ -175,6 +183,72 @@ class StaffPage(QWidget):
             self._header.hide()
 
         self._loaded = False
+        # Default empty: the page shows it only after `_sync_overflow` finds
+        # actions, which subclasses may only have built after this returns.
+        self.overflow_button.hide()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        # Resolved on show, never inside `__init__`: a subclass may not have
+        # finished setting up the attributes its actions read yet.
+        self._sync_overflow()
+        super().showEvent(event)
+
+    def overflow_actions(self) -> list[tuple[str, Callable[[], None]]]:
+        """Header-menu actions for this page; empty by default.
+
+        A page with nothing useful to put here gets no More button at all --
+        a control that opens an empty menu is worse than no control.
+        """
+        return []
+
+    def _ensure_overflow_menu(self) -> QMenu:
+        if self.overflow_menu is None:
+            menu = QMenu(self)
+            menu.setStyleSheet(
+                f"QMenu {{ background: {theme.PAPER}; border: 1px solid "
+                f"{theme.BORDER}; border-radius: 8px; padding: 4px; }}"
+                f"QMenu::item {{ padding: 7px 22px; color: {theme.TEXT}; }}"
+                f"QMenu::item:selected {{ background: {theme.SURFACE}; }}"
+            )
+            self.overflow_menu = menu
+        return self.overflow_menu
+
+    def _sync_overflow(self) -> None:
+        self._overflow_specs = list(self.overflow_actions())
+        if not self._overflow_specs:
+            if self.overflow_menu is not None:
+                self.overflow_menu.clear()
+            self.overflow_button.hide()
+            return
+
+        menu = self._ensure_overflow_menu()
+        menu.clear()
+        for label, _callback in self._overflow_specs:
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, action_label=label: self._run_overflow_action(
+                    action_label
+                )
+            )
+        self.overflow_button.show()
+
+    def _run_overflow_action(self, label: str) -> None:
+        # Resolve the callback on click, not when the menu was built, so a
+        # page that swaps a handler keeps working.
+        for current_label, callback in self.overflow_actions():
+            if current_label == label:
+                callback()
+                return
+
+    def _show_overflow_menu(self) -> None:
+        # Rebuild on open so an action added after construction still appears.
+        self._sync_overflow()
+        if not self._overflow_specs or self.overflow_menu is None:
+            return
+        anchor = self.overflow_button.mapToGlobal(
+            QPoint(0, self.overflow_button.height())
+        )
+        self.overflow_menu.popup(anchor)
 
     @property
     def scroll_area(self) -> QScrollArea:

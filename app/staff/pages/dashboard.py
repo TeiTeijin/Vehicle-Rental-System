@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, timedelta
 from decimal import Decimal
 import time
 
-from PySide6.QtCore import QObject, QRunnable, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, QRunnable, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
     QSizePolicy,
     QSpacerItem,
     QVBoxLayout,
@@ -52,9 +57,22 @@ from app.staff.metrics import (
     TARGET_SIZE,
     WIDE_CONTENT_W,
 )
+from app.staff.feedback import describe
 from app.staff.pages.base import StaffPage
 from app.staff.workers import emit_safely, loader_pool
 from app.utils.money import ZERO
+
+#: Filter-menu order and keys for the Recent Transactions card.
+TRANSACTION_FILTERS = (
+    ("all", "All"),
+    ("cash", "Cash"),
+    ("card", "Card"),
+    ("gcash", "GCash"),
+    ("refunded", "Refunded"),
+    ("pending", "Pending"),
+)
+
+_FILTER_KEYS = {key for key, _label in TRANSACTION_FILTERS}
 
 
 class _CardGrid(QWidget):
@@ -188,7 +206,7 @@ class _DashboardLoader(QRunnable):
                     session,
                     today=date.today(),
                     weeks=dashboard_service.HEATMAP_WEEKS,
-                    recent=5,
+                    recent=dashboard_service.RECENT_TRANSACTIONS,
                     monthly=True,
                 )
         except Exception as exc:  # noqa: BLE001 - forwarded to the GUI slot
@@ -205,6 +223,16 @@ class DashboardPage(StaffPage):
 
         #: Set False to land every value immediately.
         self.animate = animate
+
+        #: Nothing is read until `refresh_async`/`refresh` returns figures.
+        self._load_state = "loading"
+        self._recent_transactions: list = []
+        self._transaction_query = ""
+        self._transaction_filter_key = "all"
+
+        # -- the banner -----------------------------------------------------
+        self.status_banner = self._build_status_banner()
+        self.body.addWidget(self.status_banner)
 
         # -- the cards ------------------------------------------------------
         self.grid = _CardGrid(self)
@@ -225,6 +253,9 @@ class DashboardPage(StaffPage):
         ):
             self.grid.add(card)
 
+        self._render_transactions_message("Loading transactions…")
+        self._show_status("Loading dashboard…", error=False)
+
         self._first_load = True
         self._animations_pending = False
         self._pool = loader_pool()
@@ -236,6 +267,69 @@ class DashboardPage(StaffPage):
         self._last_figures = None
         self._last_loaded_at = 0.0
         self._load_error = None
+        # Safe here: every attribute the action list reads now exists.
+        self._sync_overflow()
+
+    # -- loading and error state -------------------------------------------
+
+    def _build_status_banner(self) -> QFrame:
+        banner = QFrame(self)
+        banner.setObjectName("dashboardStatus")
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
+
+        self.status_label = QLabel()
+        self.status_label.setWordWrap(True)
+        font = QFont("Inter")
+        font.setPixelSize(13)
+        font.setWeight(QFont.Weight.Medium)
+        self.status_label.setFont(font)
+        self.status_label.setStyleSheet("background: transparent;")
+
+        self.retry_button = QPushButton("Try again")
+        self.retry_button.setObjectName("retryButton")
+        self.retry_button.clicked.connect(self.retry_load)
+        self.retry_button.hide()
+
+        layout.addWidget(self.status_label, 1)
+        layout.addWidget(self.retry_button)
+        banner.hide()
+        return banner
+
+    @property
+    def load_state(self) -> str:
+        """``loading``, ``loaded``, or ``failed`` -- for tests and the banner."""
+        return self._load_state
+
+    def _show_status(self, message: str, *, error: bool) -> None:
+        border = theme.DANGER if error else theme.BORDER
+        colour = theme.DANGER if error else theme.MUTED
+        self.status_banner.setStyleSheet(
+            f"QFrame#dashboardStatus {{ background: {theme.PAPER}; "
+            f"border: 1px solid {border}; border-radius: 12px; }}"
+        )
+        self.status_label.setStyleSheet(
+            f"color: {colour}; background: transparent;"
+        )
+        self.status_label.setText(message)
+        self.retry_button.setVisible(error)
+        self.status_banner.show()
+
+    def _begin_loading(self) -> None:
+        was_failed = self._load_state == "failed"
+        self._load_state = "loading"
+        # A refresh over existing data needs no banner: the cards stay useful.
+        if self._last_figures is None or was_failed:
+            self._show_status("Loading dashboard…", error=False)
+            if self._last_figures is None:
+                self._render_transactions_message("Loading transactions…")
+
+    def retry_load(self) -> None:
+        self._load_error = None
+        # Bypass the refresh TTL without discarding the figures still on screen.
+        self._last_loaded_at = 0.0
+        self.refresh_async()
 
     # -- card construction -------------------------------------------------
 
@@ -280,8 +374,10 @@ class DashboardPage(StaffPage):
         # A minimum, not a fixed height: the row grows with the window.
         card.setMinimumHeight(ROW1_H)
 
+        # A dash, not ₱0.00: no figures have been read yet, and a zero that
+        # looks like a measurement is worse than an honest placeholder.
         self.revenue_value = HeroNumber(
-            "₱0.00", size=HERO_SIZE, colour=theme.TEXT
+            "—", size=HERO_SIZE, colour=theme.TEXT
         )
         self.revenue_trend = TrendLabel()
 
@@ -289,6 +385,12 @@ class DashboardPage(StaffPage):
         self.revenue_period = QComboBox()
         self.revenue_period.setObjectName("revenuePeriod")
         self.revenue_period.setCursor(Qt.CursorShape.PointingHandCursor)
+        # The control is filled asynchronously, so it must keep sizing itself.
+        # The default policy measures once, while empty, and then clips the
+        # longer day labels added later.
+        self.revenue_period.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
         self.revenue_period.currentIndexChanged.connect(
             self._on_revenue_day_changed
         )
@@ -421,38 +523,109 @@ class DashboardPage(StaffPage):
         self.transactions_list.setColumnStretch(0, 1)
         self._transaction_rows: list[QWidget] = []
 
+        self.transaction_search = QLineEdit()
+        self.transaction_search.setPlaceholderText("Search transactions")
+        self.transaction_search.setClearButtonEnabled(True)
+        self.transaction_search.setAccessibleName("Search transactions")
+        self.transaction_search.textChanged.connect(
+            self._on_transaction_query_changed
+        )
+        self.transaction_search.hide()
+
+        self.transaction_search_button = IconButton(
+            "search",
+            colour=theme.MUTED,
+            background=theme.SURFACE,
+            tooltip="Search transactions",
+        )
+        self.transaction_search_button.clicked.connect(
+            self.toggle_transaction_search
+        )
+
+        self.transaction_filter_button = IconButton(
+            "sliders",
+            colour=theme.MUTED,
+            background=theme.SURFACE,
+            tooltip="Filter transactions",
+        )
+        self.transaction_filter_button.clicked.connect(
+            self._show_transaction_filter_menu
+        )
+        self.transaction_filter = QMenu(self)
+        self._filter_actions = {}
+        for key, label in TRANSACTION_FILTERS:
+            action = self.transaction_filter.addAction(label)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, filter_key=key: self.set_transaction_filter(
+                    filter_key
+                )
+            )
+            self._filter_actions[key] = action
+        self._filter_actions["all"].setChecked(True)
+
         body = self._card_header(
             card,
             "Recent Transactions",
             dark=False,
             buttons=(
-                IconButton(
-                    "search",
-                    colour=theme.MUTED,
-                    background=theme.SURFACE,
-                    tooltip="Search transactions",
-                ),
-                IconButton(
-                    "sliders",
-                    colour=theme.MUTED,
-                    background=theme.SURFACE,
-                    tooltip="Filter",
-                ),
+                self.transaction_search_button,
+                self.transaction_filter_button,
             ),
         )
+        body.addWidget(self.transaction_search)
         body.addLayout(self.transactions_list, 1)
         card.layout().addLayout(body)
         return card
+
+    def toggle_transaction_search(self) -> None:
+        showing = self.transaction_search.isHidden()
+        self.transaction_search.setVisible(showing)
+        self.transaction_search_button.set_checked(showing)
+        if showing:
+            self.transaction_search.setFocus()
+        else:
+            # A hidden query would keep filtering invisibly.
+            self.set_transaction_query("")
+
+    def _show_transaction_filter_menu(self) -> None:
+        anchor = self.transaction_filter_button.mapToGlobal(
+            QPoint(0, self.transaction_filter_button.height())
+        )
+        self.transaction_filter.popup(anchor)
+
+    def _on_transaction_query_changed(self, text: str) -> None:
+        self._transaction_query = text
+        self._apply_transaction_view()
+
+    def set_transaction_query(self, text: str) -> None:
+        """Test hook: narrow the loaded transactions by free text."""
+        text = text or ""
+        self._transaction_query = text
+        if self.transaction_search.text() != text:
+            self.transaction_search.setText(text)
+        else:
+            self._apply_transaction_view()
+
+    def set_transaction_filter(self, key: str) -> None:
+        """Test hook: apply one of All, Cash, Card, GCash, Refunded, Pending."""
+        normalised = (key or "all").strip().lower()
+        if normalised not in _FILTER_KEYS:
+            normalised = "all"
+        self._transaction_filter_key = normalised
+        for filter_key, action in self._filter_actions.items():
+            action.setChecked(filter_key == normalised)
+        self._apply_transaction_view()
 
     def _build_target_card(self) -> Card:
         card = Card(dark=False)
         card.setMinimumHeight(ROW2_H)
 
         self.target_value = HeroNumber(
-            "₱0", size=TARGET_SIZE, colour=theme.TEXT
+            "—", size=TARGET_SIZE, colour=theme.TEXT
         )
         self.target_pill = Pill(
-            "0% of target",
+            "—",
             colour=theme.TEXT,
             background=theme.SURFACE,
             height=24,
@@ -478,6 +651,9 @@ class DashboardPage(StaffPage):
 
     # -- data -------------------------------------------------------------
 
+    def overflow_actions(self) -> list[tuple[str, Callable[[], None]]]:
+        return [("Refresh dashboard", self.refresh_async)]
+
     def refresh(self) -> None:
         """Synchronous refresh, kept for tests and explicit reloads."""
         super().refresh()
@@ -487,26 +663,29 @@ class DashboardPage(StaffPage):
                 session,
                 today=today,
                 weeks=dashboard_service.HEATMAP_WEEKS,
-                recent=5,
+                recent=dashboard_service.RECENT_TRANSACTIONS,
                 monthly=True,
             )
         self._apply_figures(figures)
 
-    def refresh_async(self) -> None:
+    def refresh_async(self, *, force: bool = False) -> None:
         """Refresh without blocking the GUI thread.
 
         The shell uses this for navigation and the auto-refresh timer. A
-        recent result is reused for the configured refresh interval.
+        recent result is reused for the configured refresh interval; the retry
+        button passes ``force`` so the failed read is actually repeated.
         """
         super().refresh()
         ttl_ms = prefs.dashboard_refresh_ms()
         if (
-            self._last_figures is not None
+            not force
+            and self._last_figures is not None
             and ttl_ms > 0
             and (time.monotonic() - self._last_loaded_at) * 1000 < ttl_ms
         ):
             self._apply_figures(self._last_figures)
             return
+        self._begin_loading()
         self._load_gen += 1
         self._pool.start(
             _DashboardLoader(self.context, self._load_gen, self._load_signals)
@@ -523,6 +702,14 @@ class DashboardPage(StaffPage):
             return
         self._load_error = exc
         self._done_gen = gen
+        self._load_state = "failed"
+        message, _field, _kind = describe(exc)
+        self._show_status(
+            f"Could not load the dashboard. {message}", error=True
+        )
+        if self._last_figures is None:
+            # Never leave a "loading" row behind after the load has failed.
+            self._render_transactions_message("Could not load transactions.")
 
     def _apply_figures(self, figures) -> None:
         self._fill_revenue(figures)
@@ -530,6 +717,9 @@ class DashboardPage(StaffPage):
         self._fill_activity(figures)
         self._fill_transactions(figures)
         self._fill_target(figures)
+        self._load_state = "loaded"
+        self._load_error = None
+        self.status_banner.hide()
         self._first_load = False
         self._last_figures = figures
         self._last_loaded_at = time.monotonic()
@@ -561,6 +751,8 @@ class DashboardPage(StaffPage):
             index = 0
         self.revenue_period.setCurrentIndex(index)
         self.revenue_period.blockSignals(False)
+        # Re-measure after the async fill; the longest label is known now.
+        self.revenue_period.adjustSize()
         self._show_revenue_day(target)
 
     def _fill_channels(self, figures) -> None:
@@ -601,33 +793,98 @@ class DashboardPage(StaffPage):
         self._transaction_rows.clear()
 
     def _fill_transactions(self, figures) -> None:
+        # Fetch more than the card can show (the service reads 50) so the
+        # search and filter controls have something to narrow.
+        self._recent_transactions = list(figures.recent)
+        self._apply_transaction_view()
+
+    def _render_transactions_message(self, text: str) -> None:
+        self._clear_transactions()
+        empty = QLabel(text)
+        font = QFont("Inter")
+        font.setPixelSize(13)
+        empty.setFont(font)
+        empty.setStyleSheet(
+            f"color: {theme.MUTED}; background: transparent;"
+        )
+        self.transactions_list.addWidget(empty, 0, 0, 1, 4)
+        self._transaction_rows.append(empty)
+
+    def _apply_transaction_view(self) -> None:
         self._clear_transactions()
 
-        rows = list(figures.recent)
+        rows = list(self._recent_transactions)
         if not rows:
-            empty = QLabel("No payments recorded yet.")
-            font = QFont("Inter")
-            font.setPixelSize(13)
-            empty.setFont(font)
-            empty.setStyleSheet(
-                f"color: {theme.MUTED}; background: transparent;"
-            )
-            self.transactions_list.addWidget(empty, 0, 0, 1, 4)
-            self._transaction_rows.append(empty)
+            if self._load_state == "loading":
+                message = "Loading transactions…"
+            elif self._load_state == "failed":
+                message = "Could not load transactions."
+            else:
+                message = "No payments recorded yet."
+            self._render_transactions_message(message)
             return
 
-        for row, entry in enumerate(rows):
+        query = (self._transaction_query or "").strip().lower()
+        matches = [
+            entry
+            for entry in rows
+            if self._transaction_matches(entry, query)
+        ]
+        if not matches:
+            self._render_transactions_message("No matching transactions.")
+            return
+
+        shown = matches[: dashboard_service.RECENT_VISIBLE]
+        for row, entry in enumerate(shown):
             self._transaction_row(entry, row)
         # A trailing spacer holds the rows at the top; `_clear_transactions` drains it.
         self.transactions_list.addItem(
             QSpacerItem(
                 0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
             ),
-            len(rows),
+            len(shown),
             0,
             1,
             4,
         )
+
+    def _transaction_matches(self, entry, query: str) -> bool:
+        key = self._transaction_filter_key
+        status = (getattr(entry, "status", "") or "").strip().lower()
+
+        if key in {"cash", "card", "gcash"} and entry.method != key:
+            return False
+        if key == "pending" and status != "pending":
+            return False
+        if key == "refunded" and not (
+            entry.refunded or status == "refunded"
+        ):
+            return False
+        if not query:
+            return True
+
+        amount = abs(Decimal(str(entry.amount)))
+        method_label = theme.METHOD_LABELS.get(
+            entry.method, entry.method.title()
+        )
+        channel_label = theme.CHANNEL_LABELS.get(entry.channel, "Unrecorded")
+        haystack = " ".join(
+            (
+                entry.customer or "",
+                entry.method or "",
+                method_label,
+                entry.channel or "",
+                channel_label,
+                status,
+                theme.status_label(status),
+                f"{amount:.2f}",
+                f"{amount:,.2f}",
+                pesos(amount),
+                _signed_pesos(amount, entry.refunded),
+                "refunded" if entry.refunded else "",
+            )
+        ).lower()
+        return all(token in haystack for token in query.split())
 
     def _transaction_row(self, entry, row: int) -> None:
         name = ElidedLabel(
@@ -635,6 +892,7 @@ class DashboardPage(StaffPage):
             colour=theme.TEXT,
             size=14,
             weight=QFont.Weight.Medium,
+            tooltip_full=True,
         )
 
         method = Caption(

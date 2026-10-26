@@ -649,7 +649,8 @@ class ActivityHeatmap(_AnimatedCanvas):
             f"{count} {word} · {day:%b %-d}",
             self,
         )
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Read-only: the cell has a tooltip but nothing to click.
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         QToolTip.hideText()
@@ -865,7 +866,8 @@ class SalesTargetChart(_AnimatedCanvas):
             f"{month.label} {_compact(float(month.total))}",
             self,
         )
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Read-only: the chip is a readout, not a control.
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         QToolTip.hideText()

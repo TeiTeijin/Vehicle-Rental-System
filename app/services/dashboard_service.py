@@ -18,6 +18,13 @@ HEATMAP_WEEKS = 16
 #: Days offered by the picker, plus one so the oldest has a prior day.
 REVENUE_DAYS = 14
 
+#: Rows fetched for Recent Transactions, so search and filters have something
+#: to work with without a second query.
+RECENT_TRANSACTIONS = 50
+
+#: Rows the card draws after filtering. A narrow card cannot show more.
+RECENT_VISIBLE = 5
+
 #: Statuses that mean money actually arrived.
 _MONEY_IN = ("paid",)
 
