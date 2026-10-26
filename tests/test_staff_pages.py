@@ -8060,6 +8060,73 @@ class TestRentalModalRedesign:
             overlay.hide_overlay()
             overlay.deleteLater()
 
+    @pytest.mark.parametrize("width,height", [(900, 640), (900, 600)])
+    def test_checker_is_reachable_when_the_overlay_is_short(
+        self, qapp, shell, branch, width, height
+    ):
+        """At the minimum sizes the whole card scrolls to the checker.
+
+        Regression: the right-hand column used to sit inside its own scroll
+        area. The overlay's scroll then stopped above "Check a period" even at
+        its maximum, because the nested scroll was the only thing that could
+        reveal the date fields and Check availability button.
+        """
+        built, context = branch
+        today = date.today()
+        vid = _add_vehicle(context, make="Honda", model="Civic", plate="HON-903")
+        with context.session() as session:
+            for offset in (3, 8):
+                session.add(
+                    Booking(
+                        user_id=built.customer.user_id,
+                        vehicle_id=vid,
+                        start_date=today + timedelta(days=offset),
+                        end_date=today + timedelta(days=offset + 2),
+                        total_cost=Decimal("7500.00"),
+                        status="confirmed",
+                        created_at=datetime(2026, 9, 1, 10, 0),
+                    )
+                )
+            session.add(
+                Maintenance_Record(
+                    vehicle_id=vid,
+                    description="Wheel alignment",
+                    start_date=today - timedelta(days=20),
+                    end_date=today - timedelta(days=19),
+                    status="completed",
+                )
+            )
+
+        shell.resize(width, height)
+        shell.show()
+        page = NewRentalPage(shell)
+        page.resize(width, height)
+        page.show()
+        page.refresh()
+        qapp_process(page)
+        page._open_vehicle_details(vid)
+        qapp_process(page)
+        overlay = page._details_overlay
+        try:
+            scroll = overlay.scroll
+            bar = scroll.verticalScrollBar()
+            assert bar.maximum() > 0
+            bar.setValue(bar.maximum())
+            qapp_process(page)
+            viewport = scroll.viewport().rect()
+            for widget in (
+                overlay.panel.check_heading,
+                overlay.panel.check_button,
+            ):
+                assert widget.isVisible()
+                bottom = widget.mapTo(
+                    scroll.viewport(), widget.rect().bottomLeft()
+                )
+                assert viewport.contains(bottom)
+        finally:
+            overlay.hide_overlay()
+            overlay.deleteLater()
+
     def test_details_3d_tab_exposes_drag_auto_rotate_and_reset(
         self, qapp, shell, branch
     ):

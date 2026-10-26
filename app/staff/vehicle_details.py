@@ -2,9 +2,9 @@
 
 The counter modal is one warm sheet: a header with the vehicle identity, a
 photo/3D gallery on the left, specifications and availability on the right,
-and a footer that keeps Close and Rent this vehicle in reach. The whole card
-is fixed to the window height; only the right-hand column scrolls, exactly
-like the reference.
+and a footer that keeps Close and Rent this vehicle in reach. The overlay's
+single scroll surface owns the whole card, so every section stays reachable
+at the minimum window size.
 
 The content lives in `VehicleDetailsPanel` so it can be shown two ways:
 
@@ -834,7 +834,6 @@ class VehicleDetailsPanel(QWidget):
         self.card.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.card.setMinimumHeight(560)
         outer.addWidget(self.card, 1)
 
         self._build()
@@ -1018,20 +1017,13 @@ class VehicleDetailsPanel(QWidget):
         self.photo = self.gallery.image_label
         body_lay.addWidget(self.gallery, 1)
 
-        scroll = QScrollArea(body)
-        scroll.setObjectName("modalColumnScroll")
-        scroll.viewport().setObjectName("modalColumnViewport")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet(
-            "QScrollArea#modalColumnScroll { background: transparent; border: none; }"
-            " QScrollArea#modalColumnScroll QWidget#modalColumnViewport {"
-            " background: transparent; border: none; }"
-        )
-        self.column = QWidget(scroll)
-        self.column.setObjectName("modalColumnViewport")
+        # The counter card is one scroll surface. An inner scroll on the
+        # right-hand column hides the availability checker behind a second,
+        # nested scrollbar at the minimum window size; letting the overlay's
+        # own scroll own the whole card keeps every section reachable with a
+        # single scroll.
+        self.column = QWidget(body)
+        self.column.setObjectName("rentalModalBody")
         column = QVBoxLayout(self.column)
         column.setContentsMargins(0, 0, 10, 10)
         column.setSpacing(14)
@@ -1092,8 +1084,7 @@ class VehicleDetailsPanel(QWidget):
 
         self._build_checker(column)
         column.addStretch(1)
-        scroll.setWidget(self.column)
-        body_lay.addWidget(scroll, 1)
+        body_lay.addWidget(self.column, 1)
         self.card.layout().addWidget(body, 1)
 
         self.spec_values = {key: value for key, value in data["specs"]}
