@@ -36,9 +36,12 @@ BACKDROP_RERENDER_MS = 120
 class FrostedOverlay(QWidget):
     """Window-embedded modal glass with swappable card content."""
 
-    def __init__(self, window: QWidget) -> None:
+    def __init__(
+        self, window: QWidget, *, card_width: int = OVERLAY_CARD_W
+    ) -> None:
         super().__init__(window)
         self._window = window
+        self._card_width = int(card_width or OVERLAY_CARD_W)
         #: False while a wizard owns the overlay: Escape and outside clicks
         #: must not throw away a half-filled rental.
         self._dismissible = True
@@ -87,11 +90,18 @@ class FrostedOverlay(QWidget):
             " QScrollArea#frostedScroll QWidget#frostedViewport {"
             " background: transparent; border: none; }"
         )
-        self.scroll.setFixedWidth(OVERLAY_CARD_W)
+        self.scroll.setFixedWidth(self._card_width)
         middle.addWidget(self.scroll)
         middle.addStretch(1)
         outer.addLayout(middle, 1)
         self.hide()
+
+    def set_card_width(self, width: int) -> None:
+        """Resize the content column; the backdrop follows on the next fit."""
+        self._card_width = int(width or OVERLAY_CARD_W)
+        self.scroll.setFixedWidth(self._card_width)
+        if self.isVisible():
+            self._fit()
 
     def set_dismissible(self, flag: bool) -> None:
         """Allow or refuse Escape/outside-click closing.

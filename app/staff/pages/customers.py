@@ -7,7 +7,6 @@ from functools import partial
 from PySide6.QtCore import QObject, QRunnable, QTimer, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QLabel,
@@ -29,6 +28,13 @@ from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
+from app.staff.ui_kit import (
+    PageHeading,
+    SelectionBar,
+    StatusChipRow,
+    WarmHost,
+    WarmPanel,
+)
 from app.staff.widgets import confirm, toast
 from app.staff.workers import emit_safely, loader_pool
 from app.utils.money import ZERO, money
@@ -44,6 +50,16 @@ LICENCE_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("Expiring soon", "expiring"),
     ("Expired", "expired"),
     ("Not on file", "missing"),
+)
+
+#: Same buckets as chips. Kept in the reference's short wording; the
+#: hidden combo keeps the original labels so old callers still match.
+LICENCE_CHIP_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("all", "All"),
+    ("valid", "Valid"),
+    ("expiring", "Expiring"),
+    ("expired", "Expired"),
+    ("missing", "Not on file"),
 )
 
 #: Actions a plain staff member may perform. Anything else is admin.
@@ -250,63 +266,63 @@ class CustomersPage(StaffPage):
             "Everyone who rents, and whether their licence is still good.",
         )
         self._filter = CustomerFilter()
-        # Two white main containers (bookings recipe, 28px): tools on top,
-        # data below, thin gap between. 8+8 split with the shell gap.
+        # One page recipe: title, warm tools host (white filter card plus
+        # cream selection bar), warm table card. The shell gap and the
+        # page body's rhythm are unchanged.
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
-        tools = QFrame(self)
-        tools.setObjectName(theme.OBJ_PAGE_PANEL)
-        tools.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        self.heading = PageHeading("Customers", parent=self)
+        # The old count caption is the heading's inline subtitle now.
+        self.count_caption = self.heading.subtitle_label
+        self.body.addWidget(self.heading)
+
+        self._tools_panel = WarmHost(self)
+        self._filter_card = WarmPanel(self._tools_panel)
+        self._filter_card.body.addLayout(self._filter_row())
+        self.licence_chips = StatusChipRow(
+            LICENCE_CHIP_OPTIONS, parent=self._filter_card
         )
-        tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        tools_layout.setSpacing(8)
-        tools_layout.addLayout(self._filter_row())
-        tools_layout.addLayout(self._flag_row())
-        tools_layout.addLayout(self._action_row())
-        self.body.addWidget(tools)
-        self._tools_panel = tools
-        data = QFrame(self)
-        data.setObjectName(theme.OBJ_PAGE_PANEL)
+        self._filter_card.body.addWidget(self.licence_chips)
+        self.licence_chips.changed.connect(self._on_licence_chip)
+        self._filter_card.body.addLayout(self._flag_row())
+        self._tools_panel.body.addWidget(self._filter_card)
+
+        self.selection_bar = SelectionBar(self._tools_panel)
+        self._selection_bar = self.selection_bar
+        self._build_actions()
+        self._tools_panel.body.addWidget(self.selection_bar)
+        self.body.addWidget(self._tools_panel)
+
+        data = WarmPanel(self)
         data.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        data_layout = QVBoxLayout(data)
-        data_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        data_layout.setSpacing(0)
-        self.count_caption = QLabel("", self)
-        self.count_caption.setObjectName("pageSubtitle")
-        data_layout.addWidget(self.count_caption)
+        data.body.setSpacing(0)
         self.table = LoadStateTable(
             [
-                Column("Name", ALIGN_LEFT),
+                Column("Name", ALIGN_LEFT, kind="strong"),
                 Column("Email", ALIGN_LEFT),
-                Column("Phone", ALIGN_LEFT),
+                Column("Phone", ALIGN_LEFT, kind="muted"),
                 Column("Licence no.", ALIGN_LEFT),
                 Column("Licence", ALIGN_LEFT),
                 Column("Blocked"),
-                Column("Rentals", ALIGN_RIGHT),
-                Column("Owed", ALIGN_RIGHT),
-                Column("Source", ALIGN_LEFT),
+                Column("Rentals", ALIGN_RIGHT, kind="muted"),
+                Column("Owed", ALIGN_RIGHT, kind="money"),
+                Column("Source", ALIGN_LEFT, kind="muted"),
                 Column("Flag", ALIGN_LEFT),
-                Column("Off", ALIGN_LEFT),
-                Column("Since", ALIGN_LEFT),
+                Column("Off", ALIGN_LEFT, kind="muted"),
+                Column("Since", ALIGN_LEFT, kind="muted"),
             ],
             # Empty until the first async refresh.
             loader=lambda: [],
             empty_message="No customers yet.",
+            variant="warm",
         )
         self.table.set_loader(partial(_customer_rows, self.context, self._filter))
-        data_layout.addWidget(self.table, 1)
+        data.body.addWidget(self.table, 1)
         self.body.addWidget(data, 1)
         self._data_panel = data
         self.table.table.itemSelectionChanged.connect(self._refresh_actions)
-        self._customer_overlay = None
         self._customer_overlay = None
 
         # -- async reload machinery (whole-page shimmer) ------------------
@@ -326,6 +342,7 @@ class CustomersPage(StaffPage):
         self.body.addWidget(self._skel_data, 1)
         self._skel_tools.hide()
         self._skel_data.hide()
+        self._refresh_actions()
 
     # -- whole-page skeleton (tools + table shimmer) --------------------
 
@@ -352,6 +369,7 @@ class CustomersPage(StaffPage):
         """Two pagePanel clones mimicking tools + table. Built once."""
         skel_tools = QFrame(self)
         skel_tools.setObjectName(theme.OBJ_PAGE_PANEL)
+        skel_tools.setProperty("variant", "warm")
         skel_tools.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tools_layout = QVBoxLayout(skel_tools)
         tools_layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
@@ -371,6 +389,7 @@ class CustomersPage(StaffPage):
 
         skel_data = QFrame(self)
         skel_data.setObjectName(theme.OBJ_PAGE_PANEL)
+        skel_data.setProperty("variant", "warm")
         skel_data.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         data_layout = QVBoxLayout(skel_data)
         data_layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
@@ -440,16 +459,17 @@ class CustomersPage(StaffPage):
     def _combo(self, items: list[str]) -> QComboBox:
         combo = QComboBox(self)
         combo.addItems(items)
-        combo.currentIndexChanged.connect(lambda _index: self._apply_filters())
         return combo
 
-    def _check(self, text: str) -> QCheckBox:
-        check = QCheckBox(text, self)
+    def _check(self, text: str) -> QPushButton:
+        check = QPushButton(text, self)
+        check.setObjectName("warmCheck")
+        check.setCheckable(True)
         font = QFont("Inter")
         font.setPixelSize(12)
         font.setWeight(QFont.Weight.DemiBold)
         check.setFont(font)
-        check.setStyleSheet(f"color: {theme.MUTED}; background: transparent;")
+        check.setFixedHeight(30)
         check.toggled.connect(lambda _on: self._apply_filters())
         return check
 
@@ -468,6 +488,10 @@ class CustomersPage(StaffPage):
         self.licence_combo = self._combo([label for label, _code in LICENCE_FILTERS])
         self.licence_combo.setFixedHeight(TOOL_ROW_H)
         row.addWidget(self.licence_combo)
+        self.licence_combo.hide()
+        self.licence_combo.currentIndexChanged.connect(
+            self._on_licence_combo_changed
+        )
         self.blocked_check = self._check("Blocked only")
         row.addWidget(self.blocked_check)
         self.clear_button = QPushButton("Clear", self)
@@ -491,6 +515,29 @@ class CustomersPage(StaffPage):
         row.addStretch(1)
         return row
 
+    def _licence_key(self, index: int) -> str:
+        _label, code = LICENCE_FILTERS[index]
+        return code or "all"
+
+    def _sync_licence_chip(self, index: int) -> None:
+        self.licence_chips.select(self._licence_key(index))
+
+    def _on_licence_combo_changed(self, index: int) -> None:
+        self._sync_licence_chip(index)
+        self._apply_filters()
+
+    def _on_licence_chip(self, key: str) -> None:
+        index = next(
+            i for i in range(len(LICENCE_FILTERS))
+            if self._licence_key(i) == key
+        )
+        blocked = self.licence_combo.blockSignals(True)
+        try:
+            self.licence_combo.setCurrentIndex(index)
+        finally:
+            self.licence_combo.blockSignals(blocked)
+        self._apply_filters()
+
     def _apply_filters(self) -> None:
         self._filter.search = self.search.text()
         _label, code = LICENCE_FILTERS[self.licence_combo.currentIndex()]
@@ -512,13 +559,19 @@ class CustomersPage(StaffPage):
             self.search.clear()
         finally:
             self.search.blockSignals(blocked)
-        self.licence_combo.setCurrentIndex(0)
+        self.licence_chips.select("all")
+        blocked_combo = self.licence_combo.blockSignals(True)
+        try:
+            self.licence_combo.setCurrentIndex(0)
+        finally:
+            self.licence_combo.blockSignals(blocked_combo)
         self.blocked_check.setChecked(False)
         self.active_check.setChecked(False)
         self.balance_check.setChecked(False)
         self.flagged_check.setChecked(False)
+        self._apply_filters()
 
-    # -- action row -----------------------------------------------------
+    # -- selection bar --------------------------------------------------
 
     def _action_button(self, text: str, *, danger: bool = False) -> QPushButton:
         button = QPushButton(text, self)
@@ -526,13 +579,10 @@ class CustomersPage(StaffPage):
         button.setFixedHeight(TOOL_ROW_H)
         return button
 
-    def _action_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+    def _build_actions(self) -> None:
         self.add_button = self._action_button("Add")
-        # Concentric with the tools panel (28 - 16 = 12); bottom-left
-        # outer corner only.
+        # Kept for the old concentric-corner contract; the selection bar
+        # supplies the actual rounded style now.
         self.add_button.setProperty("corner", "bottomLeft")
         self.add_button.clicked.connect(self.open_add)
         self.edit_button = self._action_button("Edit")
@@ -545,18 +595,23 @@ class CustomersPage(StaffPage):
         self.deactivate_button.clicked.connect(self._on_deactivate_button)
         self.export_button = self._action_button("Export PDF")
         self.export_button.clicked.connect(self.open_export)
+        self._action_buttons = [
+            self.add_button,
+            self.edit_button,
+            self.details_button,
+            self.settle_button,
+            self.export_button,
+            self.deactivate_button,
+        ]
         for button in (
             self.add_button,
             self.edit_button,
             self.details_button,
             self.settle_button,
-            self.deactivate_button,
             self.export_button,
         ):
-            row.addWidget(button)
-        row.addStretch(1)
-        self._refresh_actions()
-        return row
+            self.selection_bar.add_action(button)
+        self.selection_bar.add_action(self.deactivate_button, kind="danger")
 
     def can(self, action: str) -> bool:
         if self.context.is_admin:
@@ -565,20 +620,29 @@ class CustomersPage(StaffPage):
 
     def _refresh_actions(self) -> None:
         table = getattr(self, "table", None)
-        has_row = self.selected_email() is not None if table is not None else False
+        selected = self.selected_email() if table is not None else None
+        has_row = selected is not None
+        self.selection_bar.set_active(has_row)
         self.add_button.setEnabled(self.can("add"))
         self.edit_button.setEnabled(self.context.is_admin and has_row)
         self.details_button.setEnabled(has_row)
         self.settle_button.setEnabled(self.can("settle") and has_row)
         self.deactivate_button.setEnabled(self.context.is_admin and has_row)
         self.export_button.setEnabled(has_row)
+        if has_row:
+            row = self.table.table.currentRow()
+            name = self.table.cell_text(row, 0) if row >= 0 else ""
+            licence = self.table.cell_text(row, 3) if row >= 0 else ""
+            if not licence or licence == "-":
+                licence = self.table.cell_text(row, 1) if row >= 0 else ""
+            self.selection_bar.set_parts("", name, licence)
         active = self._selected_active()
         if active is False:
             self.deactivate_button.setText("Reactivate")
-            self.deactivate_button.setObjectName("ghostButton")
+            self.deactivate_button.setObjectName("barAction")
         else:
             self.deactivate_button.setText("Deactivate")
-            self.deactivate_button.setObjectName("dangerButton")
+            self.deactivate_button.setObjectName("barDanger")
         self.deactivate_button.style().unpolish(self.deactivate_button)
         self.deactivate_button.style().polish(self.deactivate_button)
 

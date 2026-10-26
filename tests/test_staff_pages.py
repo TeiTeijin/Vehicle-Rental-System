@@ -4824,6 +4824,8 @@ class TestBookingsPageActions:
     def test_details_panel_shows_reference_branches_and_times(self, shell, branch):
         from datetime import time
 
+        from PySide6.QtWidgets import QLabel
+
         from app.models import Branch as BranchRow
         from app.staff.booking_panels import BookingDetailsPanel
 
@@ -4847,11 +4849,9 @@ class TestBookingsPageActions:
             booking.return_branch_id = counter.branch_id
 
         panel = BookingDetailsPanel(context, built.upcoming.booking_id)
-        texts = [
-            panel._body.itemAt(i).widget().text()
-            for i in range(panel._body.count())
-            if panel._body.itemAt(i).widget() is not None
-        ]
+        # The warm panel nests facts in columns, tiles, and notices; the
+        # contract is that the facts are visible somewhere in the sheet.
+        texts = [label.text() for label in panel.findChildren(QLabel)]
         joined = "\n".join(texts)
         assert "RW-DETAILS42" in joined
         assert "10:00" in joined and "18:00" in joined
@@ -5402,18 +5402,17 @@ class TestBookingsPageActions:
             receipt_service.RECEIPTS_DIR = old_dir
 
     def test_details_panel_builds_sections(self, shell, branch):
+        from PySide6.QtWidgets import QLabel
+
         from app.staff.booking_panels import BookingDetailsPanel
 
         _built, context = branch
         panel = BookingDetailsPanel(context, _built.finished.booking_id)
-        texts = [
-            panel._body.itemAt(i).widget().text()
-            for i in range(panel._body.count())
-            if panel._body.itemAt(i).widget() is not None
-        ]
+        texts = [label.text() for label in panel.findChildren(QLabel)]
         joined = "\n".join(texts)
-        assert "Booking" in joined and "Customer" in joined
-        assert "Money" in joined and "No penalties." in joined
+        lowered = joined.lower()
+        assert "booking" in lowered and "customer" in lowered
+        assert "money" in lowered and "No penalties." in joined
         panel.deleteLater()
 
     def test_extend_panel_previews_old_and_new(self, shell, branch):

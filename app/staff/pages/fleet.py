@@ -7,7 +7,6 @@ from functools import partial
 from PySide6.QtCore import QObject, QRunnable, QTimer, Signal, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QLabel,
@@ -29,6 +28,13 @@ from app.staff.feedback import describe
 from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW_H
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
+from app.staff.ui_kit import (
+    PageHeading,
+    SelectionBar,
+    StatusChipRow,
+    WarmHost,
+    WarmPanel,
+)
 from app.staff.widgets import confirm, toast
 from app.staff.workers import emit_safely, loader_pool, media_pool
 from app.widgets.skeleton import Skeleton
@@ -42,6 +48,13 @@ STATUS_FILTERS: tuple[tuple[str, tuple[str, ...] | None], ...] = (
     ("Reserved", ("reserved",)),
     ("Maintenance", ("maintenance",)),
     ("Retired", ("retired",)),
+)
+
+#: The same filters as chips; keys are the stored vehicle status codes so
+#: the hidden combo and the chips share one source of truth.
+STATUS_CHIP_OPTIONS: tuple[tuple[str, str], ...] = tuple(
+    ("all" if codes is None else codes[0], "All" if codes is None else label)
+    for label, codes in STATUS_FILTERS
 )
 
 
@@ -179,56 +192,57 @@ class FleetPage(StaffPage):
             "Every vehicle, whether it is out, and what is stopping it.",
         )
         self._filter = FleetFilter()
-        # Two white main containers (bookings recipe, 28px): tools on top,
-        # data below, thin gap between. 8+8 split with the shell gap.
+        # One page recipe: title, warm tools host (white filter card plus
+        # cream selection bar), warm table card. The shell gap and the
+        # page body's rhythm are unchanged.
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
-        tools = QFrame(self)
-        tools.setObjectName(theme.OBJ_PAGE_PANEL)
-        tools.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        self.heading = PageHeading("Fleet", parent=self)
+        # The old count caption is the heading's inline subtitle now.
+        self.count_caption = self.heading.subtitle_label
+        self.body.addWidget(self.heading)
+
+        self._tools_panel = WarmHost(self)
+        self._filter_card = WarmPanel(self._tools_panel)
+        self._filter_card.body.addLayout(self._filter_row())
+        self.status_chips = StatusChipRow(
+            STATUS_CHIP_OPTIONS, parent=self._filter_card
         )
-        tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        tools_layout.setSpacing(8)
-        tools_layout.addLayout(self._filter_row())
-        tools_layout.addLayout(self._action_row())
-        self.body.addWidget(tools)
-        self._tools_panel = tools
-        data = QFrame(self)
-        data.setObjectName(theme.OBJ_PAGE_PANEL)
+        self._filter_card.body.addWidget(self.status_chips)
+        self.status_chips.changed.connect(self._on_status_chip)
+        self._tools_panel.body.addWidget(self._filter_card)
+
+        self.selection_bar = SelectionBar(self._tools_panel)
+        self._selection_bar = self.selection_bar
+        self._build_actions()
+        self._tools_panel.body.addWidget(self.selection_bar)
+        self.body.addWidget(self._tools_panel)
+
+        data = WarmPanel(self)
         data.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        data_layout = QVBoxLayout(data)
-        data_layout.setContentsMargins(
-            PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD
-        )
-        data_layout.setSpacing(0)
-        self.count_caption = QLabel("", self)
-        self.count_caption.setObjectName("pageSubtitle")
-        data_layout.addWidget(self.count_caption)
+        data.body.setSpacing(0)
         self.table = LoadStateTable(
             [
                 Column("Plate", ALIGN_LEFT),
-                Column("Vehicle", ALIGN_LEFT),
-                Column("Year", ALIGN_RIGHT),
-                Column("Rate / day", ALIGN_RIGHT),
-                Column("Odometer", ALIGN_RIGHT),
-                Column("Status"),
+                Column("Vehicle", ALIGN_LEFT, kind="strong"),
+                Column("Year", ALIGN_RIGHT, kind="muted"),
+                Column("Rate / day", ALIGN_RIGHT, kind="money"),
+                Column("Odometer", ALIGN_RIGHT, kind="muted"),
+                Column("Status", kind="status"),
                 Column("Due back", ALIGN_RIGHT),
-                Column("Overdue"),
+                Column("Overdue", ALIGN_RIGHT, kind="muted"),
                 Column("Blocked by", ALIGN_LEFT),
             ],
             # Empty until the first async refresh: constructing with the
             # real loader would run synchronously inside show_page.
             loader=lambda: [],
             empty_message="No vehicles yet. Add one from the admin tools.",
+            variant="warm",
         )
         self.table.set_loader(partial(_fleet_rows, self.context, self._filter))
-        data_layout.addWidget(self.table, 1)
+        data.body.addWidget(self.table, 1)
         self.body.addWidget(data, 1)
         self._data_panel = data
         self.table.table.itemSelectionChanged.connect(self._refresh_actions)
@@ -256,6 +270,7 @@ class FleetPage(StaffPage):
         self.body.addWidget(self._skel_data, 1)
         self._skel_tools.hide()
         self._skel_data.hide()
+        self._refresh_actions()
 
     # -- whole-page skeleton (tools + table shimmer) --------------------
 
@@ -282,6 +297,7 @@ class FleetPage(StaffPage):
         """Two pagePanel clones mimicking tools + table. Built once."""
         skel_tools = QFrame(self)
         skel_tools.setObjectName(theme.OBJ_PAGE_PANEL)
+        skel_tools.setProperty("variant", "warm")
         skel_tools.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tools_layout = QVBoxLayout(skel_tools)
         tools_layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
@@ -301,6 +317,7 @@ class FleetPage(StaffPage):
 
         skel_data = QFrame(self)
         skel_data.setObjectName(theme.OBJ_PAGE_PANEL)
+        skel_data.setProperty("variant", "warm")
         skel_data.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         data_layout = QVBoxLayout(skel_data)
         data_layout.setContentsMargins(PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD, PAGE_PANEL_PAD)
@@ -372,7 +389,6 @@ class FleetPage(StaffPage):
     def _combo(self, items: list[str]) -> QComboBox:
         combo = QComboBox(self)
         combo.addItems(items)
-        combo.currentIndexChanged.connect(lambda _index: self._apply_filters())
         return combo
 
     def _filter_row(self) -> QHBoxLayout:
@@ -391,14 +407,18 @@ class FleetPage(StaffPage):
         self.status_combo = self._combo([label for label, _codes in STATUS_FILTERS])
         self.status_combo.setFixedHeight(TOOL_ROW_H)
         row.addWidget(self.status_combo)
-        self.attention_check = QCheckBox("Needs attention", self)
+        self.status_combo.hide()
+        self.status_combo.currentIndexChanged.connect(
+            self._on_status_combo_changed
+        )
+        self.attention_check = QPushButton("Needs attention", self)
+        self.attention_check.setObjectName("warmCheck")
+        self.attention_check.setCheckable(True)
         attention_font = QFont("Inter")
         attention_font.setPixelSize(12)
         attention_font.setWeight(QFont.Weight.DemiBold)
         self.attention_check.setFont(attention_font)
-        self.attention_check.setStyleSheet(
-            f"color: {theme.MUTED}; background: transparent;"
-        )
+        self.attention_check.setFixedHeight(32)
         self.attention_check.toggled.connect(lambda _on: self._apply_filters())
         row.addWidget(self.attention_check)
         self.clear_button = QPushButton("Clear", self)
@@ -408,6 +428,28 @@ class FleetPage(StaffPage):
         self.clear_button.clicked.connect(self._clear_filters)
         row.addWidget(self.clear_button)
         return row
+
+    def _status_key(self, index: int) -> str:
+        _label, codes = STATUS_FILTERS[index]
+        return codes[0] if codes else "all"
+
+    def _sync_status_chip(self, index: int) -> None:
+        self.status_chips.select(self._status_key(index))
+
+    def _on_status_combo_changed(self, index: int) -> None:
+        self._sync_status_chip(index)
+        self._apply_filters()
+
+    def _on_status_chip(self, key: str) -> None:
+        index = next(
+            i for i in range(len(STATUS_FILTERS)) if self._status_key(i) == key
+        )
+        blocked = self.status_combo.blockSignals(True)
+        try:
+            self.status_combo.setCurrentIndex(index)
+        finally:
+            self.status_combo.blockSignals(blocked)
+        self._apply_filters()
 
     def _apply_filters(self) -> None:
         self._filter.search = self.search.text()
@@ -427,10 +469,16 @@ class FleetPage(StaffPage):
             self.search.clear()
         finally:
             self.search.blockSignals(blocked)
-        self.status_combo.setCurrentIndex(0)
+        self.status_chips.select("all")
+        blocked_combo = self.status_combo.blockSignals(True)
+        try:
+            self.status_combo.setCurrentIndex(0)
+        finally:
+            self.status_combo.blockSignals(blocked_combo)
         self.attention_check.setChecked(False)
+        self._apply_filters()
 
-    # -- action row -----------------------------------------------------
+    # -- selection bar --------------------------------------------------
 
     def _action_button(self, text: str, *, danger: bool = False) -> QPushButton:
         button = QPushButton(text, self)
@@ -438,13 +486,10 @@ class FleetPage(StaffPage):
         button.setFixedHeight(TOOL_ROW_H)
         return button
 
-    def _action_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+    def _build_actions(self) -> None:
         self.add_button = self._action_button("Add")
-        # Concentric with the tools panel (28 - 16 = 12); bottom-left
-        # outer corner only.
+        # Kept for the old concentric-corner contract; the selection bar
+        # supplies the actual rounded style now.
         self.add_button.setProperty("corner", "bottomLeft")
         self.add_button.clicked.connect(self.open_add)
         self.edit_button = self._action_button("Edit")
@@ -455,34 +500,39 @@ class FleetPage(StaffPage):
         self.bulk_button.clicked.connect(self.open_bulk)
         self.retire_button = self._action_button("Retire", danger=True)
         self.retire_button.clicked.connect(self._on_retire_button)
-        for button in (
+        self._action_buttons = [
             self.add_button,
             self.edit_button,
             self.details_button,
             self.bulk_button,
             self.retire_button,
-        ):
-            row.addWidget(button)
-        row.addStretch(1)
-        self._refresh_actions()
-        return row
+        ]
+        for button in self._action_buttons[:-1]:
+            self.selection_bar.add_action(button)
+        self.selection_bar.add_action(self.retire_button, kind="danger")
 
     def _refresh_actions(self) -> None:
         admin = self.context.is_admin
         table = getattr(self, "table", None)
-        has_row = self.selected_plate() is not None if table is not None else False
+        selected = self.selected_plate() if table is not None else None
+        has_row = selected is not None
+        self.selection_bar.set_active(has_row)
         self.add_button.setEnabled(admin)
         self.edit_button.setEnabled(admin and has_row)
         self.details_button.setEnabled(has_row)
         self.bulk_button.setEnabled(admin)
         self.retire_button.setEnabled(admin and has_row)
+        if has_row:
+            row = self.table.table.currentRow()
+            vehicle = self.table.cell_text(row, 1) if row >= 0 else ""
+            self.selection_bar.set_parts("", selected, vehicle)
         status = self._selected_status()
         if status == "retired":
             self.retire_button.setText("Return to service")
-            self.retire_button.setObjectName("ghostButton")
+            self.retire_button.setObjectName("barAction")
         else:
             self.retire_button.setText("Retire")
-            self.retire_button.setObjectName("dangerButton")
+            self.retire_button.setObjectName("barDanger")
         self.retire_button.style().unpolish(self.retire_button)
         self.retire_button.style().polish(self.retire_button)
 

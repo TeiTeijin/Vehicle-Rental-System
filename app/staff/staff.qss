@@ -1,4 +1,4 @@
-/* STAFF APP
+﻿/* STAFF APP
    Same palette as the customer app (app/ui/styles.qss) so the two windows
    look like one product, plus the semantic colours the operations screens
    need. Object names are defined in app/staff/theme.py and set from Python,
@@ -1741,4 +1741,599 @@ QLabel#detailPriceSuffix {
 
 QPushButton#checkAvailability {
     min-height: 36px;
+}
+
+/* ======================================================================
+   WARM LIST PAGES AND BOOKING MODALS
+   Opt-in: only widgets with variant="warm" or the warm object names below
+   are affected, so Dashboard, Reports, Settings, and sign-in keep the
+   existing sheet look. Values are sampled from the seven booking
+   references (1440x970, 1360px content column).
+   ====================================================================== */
+
+QLabel#warmPageTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+QLabel#warmPageSubtitle {
+    background: transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#pagePanel[variant="warm"] {
+    background: #FFFFFF;
+    border: 1px solid #DFD4C5;
+    border-radius: 18px;
+}
+
+QFrame#pagePanel[variant="warmHost"] {
+    background: transparent;
+    border: none;
+}
+
+/* -- filter chips ---------------------------------------------------- */
+
+QPushButton#statusFilterChip {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 15px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+QPushButton#statusFilterChip:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#statusFilterChip:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+/* -- cream selection bar --------------------------------------------- */
+
+QFrame#selectionBar {
+    background: #EADBBB;
+    border: none;
+    border-radius: 14px;
+}
+
+QLabel#selectionSummary {
+    background: transparent;
+    color: #4D4A42;
+    font-size: 15px;
+    font-weight: 400;
+}
+
+QPushButton#barPrimary {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#barPrimary:hover {
+    background: #333333;
+}
+
+QPushButton#barAction {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#barAction:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#barDanger {
+    background: #FFFFFF;
+    border: 1px solid #C07B72;
+    border-radius: 18px;
+    color: #9B2C1F;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#barDanger:hover {
+    background: #F8E0DC;
+}
+
+QPushButton#barPrimary:disabled,
+QPushButton#barAction:disabled,
+QPushButton#barDanger:disabled {
+    background: #EADBBB;
+    border-color: #DCCBAA;
+    color: #A79B87;
+}
+
+/* -- warm table ------------------------------------------------------ */
+
+QTableView[variant="warm"] {
+    background: #FFFFFF;
+    alternate-background-color: #FFFFFF;
+    border: none;
+    border-radius: 12px;
+    gridline-color: #F0EBE2;
+    selection-background-color: #F6EEDC;
+    selection-color: #171717;
+    font-size: 13px;
+}
+
+QTableView[variant="warm"]::item {
+    border-bottom: 1px solid #F0EBE2;
+    padding: 0 8px;
+}
+
+QTableView[variant="warm"]::item:selected {
+    background: #F6EEDC;
+    color: #171717;
+}
+
+QHeaderView#warmHeader {
+    background: transparent;
+    border: none;
+}
+
+QHeaderView#warmHeader::section {
+    background: #EEEAE1;
+    border: none;
+    color: #6F685E;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 8px;
+}
+
+QHeaderView#warmHeader::section:first {
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+}
+
+QHeaderView#warmHeader::section:last {
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+/* -- table chips ----------------------------------------------------- */
+
+QLabel#tableChip {
+    border: none;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 2px 10px;
+}
+
+QLabel#tableChip[tone="ok"] {
+    background: #DDF0E0;
+    color: #2C6A3C;
+}
+
+QLabel#tableChip[tone="warn"] {
+    background: #F7E4C4;
+    color: #744A15;
+}
+
+QLabel#tableChip[tone="danger"] {
+    background: #F6DDD8;
+    color: #9B2C1F;
+}
+
+QLabel#tableChip[tone="neutral"] {
+    background: #E6E1D6;
+    color: #5F574C;
+}
+
+/* -- modal frame ----------------------------------------------------- */
+
+QWidget#bookingModal {
+    background: transparent;
+}
+
+/* Plain QWidget hosts inside the white sheet must not inherit the page
+   cream. QSS paints backgrounds on named QWidgets even when the Card
+   underneath already painted white. */
+QWidget#bookingModalHeader,
+QWidget#bookingModalBody,
+QWidget#warmPageHeading,
+QWidget#warmTableFooter,
+QWidget#warmFormField,
+QWidget#warmFieldHost,
+QWidget#warmFactRow,
+QWidget#warmChipGrid,
+QWidget#warmDetailColumn,
+QWidget#summaryRow,
+QWidget#summaryDividerHost {
+    background: transparent;
+    border: none;
+}
+
+QLabel#bookingEyebrow {
+    background: #ECE6DD;
+    border-radius: 9px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#bookingModalTitle {
+    background: transparent;
+    color: #161616;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#bookingModalSubtitle {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#bookingModalDivider {
+    background: #F5F1EA;
+    border: none;
+}
+
+QFrame#bookingModalFooter {
+    background: #FFFFFF;
+    border: none;
+    border-top: 1px solid #F5F1EA;
+}
+
+QPushButton#modalPrimary {
+    background: #161616;
+    border: 1px solid #161616;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#modalPrimary:hover {
+    background: #333333;
+}
+
+QPushButton#modalSecondary {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #161616;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#modalSecondary:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#modalDanger {
+    background: #A3271D;
+    border: 1px solid #A3271D;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#modalDanger:hover {
+    background: #8E2119;
+}
+
+QPushButton#modalPrimary:disabled,
+QPushButton#modalSecondary:disabled,
+QPushButton#modalDanger:disabled {
+    background: #ECE6DD;
+    border-color: #E0D6C9;
+    color: #A79B87;
+}
+
+QLabel#modalError {
+    background: #F8E0DC;
+    border-radius: 8px;
+    color: #9B2C1F;
+    font-size: 12px;
+    padding: 8px 12px;
+}
+
+/* -- modal chips ----------------------------------------------------- */
+
+QPushButton#choiceChip {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 16px;
+    color: #161616;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 16px;
+}
+
+QPushButton#choiceChip:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#choiceChip:checked {
+    background: #161616;
+    border-color: #161616;
+    color: #FFFFFF;
+}
+
+QPushButton#choiceChip[variant="fuel"] {
+    border-radius: 17px;
+    padding: 0 4px;
+}
+
+QPushButton#choiceChip[variant="reason"] {
+    border-radius: 24px;
+    font-size: 13px;
+    padding: 0 20px;
+}
+
+/* -- modal tiles, summaries, notices --------------------------------- */
+
+QFrame#warmMetricTile {
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#warmMetricTile[tone="neutral"] {
+    background: #ECE6DD;
+}
+
+QFrame#warmMetricTile[tone="owed"] {
+    background: #F7E3C3;
+}
+
+QFrame#warmMetricTile[tone="cream"] {
+    background: #F1E7D6;
+}
+
+QFrame#warmMetricTile[large="true"] {
+    border-radius: 12px;
+}
+
+QLabel#metricLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+QLabel#metricValue {
+    background: transparent;
+    color: #171717;
+    font-weight: 700;
+}
+
+QFrame#modalSummary {
+    background: #F1E7D6;
+    border: none;
+    border-radius: 10px;
+}
+
+QLabel#summaryLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#summaryValue {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QFrame#summaryDivider {
+    background: #EDE3D2;
+    border: none;
+}
+
+QFrame#warmNotice {
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#warmNotice[tone="cream"] {
+    background: #F1E7D6;
+}
+
+QFrame#warmNotice[tone="red"] {
+    background: #F8E0DC;
+    border-radius: 8px;
+}
+
+QFrame#warmNotice[tone="green"] {
+    background: #DCEFE0;
+    border-radius: 8px;
+}
+
+QFrame#warmNotice[tone="amber"] {
+    background: #F7E3C3;
+    border-radius: 8px;
+}
+
+QLabel#warmNoticeText {
+    background: transparent;
+    color: #161616;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#warmSectionTitle {
+    background: transparent;
+    color: #746A5C;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QLabel#warmFieldLabel {
+    background: transparent;
+    color: #161616;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#warmFieldOptional {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* -- modal controls -------------------------------------------------- */
+
+QLineEdit#warmInput, QDateEdit#warmInput, QComboBox#warmInput,
+QSpinBox#warmInput, QDoubleSpinBox#warmInput {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #161616;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 12px;
+}
+
+QLineEdit#warmInput:focus, QDateEdit#warmInput:focus,
+QComboBox#warmInput:focus {
+    border-color: #171717;
+}
+
+QLineEdit#warmAmount {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #161616;
+    font-size: 26px;
+    font-weight: 700;
+    min-height: 50px;
+    padding: 0 16px;
+}
+
+QLineEdit#warmAmount:focus {
+    border-color: #171717;
+}
+
+QLabel#warmFieldValue {
+    background: transparent;
+    color: #161616;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#warmSuffix {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#warmAmountPrefix {
+    background: transparent;
+    color: #161616;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+/* -- invoice-style amount field -------------------------------------- */
+
+QFrame#warmAmountBox {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+}
+
+QLineEdit#warmAmount {
+    background: transparent;
+    border: none;
+    min-height: 0;
+    padding: 0;
+}
+
+QLineEdit#warmAmount:focus {
+    border: none;
+}
+
+/* Spin boxes are number inputs in the references, not steppers. */
+QSpinBox#warmInput::up-button,
+QSpinBox#warmInput::down-button {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
+
+QDateEdit#warmInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+/* Filter toggles read as outline pills, matching the chip row. */
+QPushButton#warmCheck {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 16px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+QPushButton#warmCheck:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#warmCheck:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+QPushButton#warmCheck:disabled {
+    background: #F1E8D8;
+    color: #A79B87;
+}
+QPushButton#warmLoadMore {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#warmLoadMore:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#choiceChip[variant="reason"] {
+    padding: 0 12px;
+    text-align: center;
+}
+
+
+QPushButton#warmCheck {
+    min-height: 30px;
 }
