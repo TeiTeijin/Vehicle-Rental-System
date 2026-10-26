@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -90,6 +91,23 @@ def qapp_process(_widget=None, turns: int = 8) -> None:
     app = QApplication.instance()
     for _ in range(turns):
         app.processEvents()
+
+
+def _wait_for_availability(panel, timeout_ms: int = 5000) -> None:
+    """Wait for the checker worker to report back.
+
+    Availability is deliberately asynchronous: the click starts the worker and
+    returns, so old tests may not read the result on the next line. Pump the
+    event loop until the panel leaves its checking state.
+    """
+    app = QApplication.instance()
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if getattr(panel, "_checking", False) is False:
+            return
+        time.sleep(0.005)
+    raise AssertionError("availability check did not finish")
 
 #: Rebuilt per test by `branch`; a run crossing midnight must not go stale.
 TODAY = date.today()
@@ -6652,6 +6670,7 @@ class TestVehicleDetailsDialog:
         dialog.end_edit.setMinimumDate(today.addDays(-30))
         dialog.end_edit.setDate(today.addDays(1))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert dialog.check_error.text() == "End cannot be before start."
         assert dialog.checked_window is None
         assert dialog.check_result.isHidden() is True
@@ -6670,6 +6689,7 @@ class TestVehicleDetailsDialog:
         dialog.start_edit.setDate(today.addDays(-1))
         dialog.end_edit.setDate(today.addDays(1))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert dialog.check_error.text() == "Start is in the past."
         assert dialog.checked_window is None
 
@@ -6703,6 +6723,7 @@ class TestVehicleDetailsDialog:
         dialog.start_edit.setDate(today.addDays(9))
         dialog.end_edit.setDate(today.addDays(9))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert dialog.check_error.isHidden() is True
         assert "1 day" in dialog.check_result.text()
         assert dialog.checked_window is not None
@@ -6732,6 +6753,7 @@ class TestVehicleDetailsDialog:
         dialog.start_edit.setDate(today.addDays(10))
         dialog.end_edit.setDate(today.addDays(11))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert dialog.check_error.isHidden() is True
         assert "Available" in dialog.check_result.text()
         assert "1 day" in dialog.check_result.text()
@@ -6747,6 +6769,7 @@ class TestVehicleDetailsDialog:
         dialog.start_edit.setDate(today.addDays(2))
         dialog.end_edit.setDate(today.addDays(3))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert "Not available" in dialog.check_result.text()
         # No prefill: the wizard must not silently reuse the clashing dates.
         assert dialog.checked_window is None
@@ -6762,6 +6785,7 @@ class TestVehicleDetailsDialog:
         dialog.start_edit.setDate(today.addDays(4))
         dialog.end_edit.setDate(today.addDays(5))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert dialog.check_error.isHidden() is True
         assert "Available" in dialog.check_result.text()
         assert dialog.checked_window is not None
@@ -6775,6 +6799,7 @@ class TestVehicleDetailsDialog:
         dialog.start_edit.setDate(today.addDays(30))
         dialog.end_edit.setDate(today.addDays(31))
         dialog.check_button.click()
+        _wait_for_availability(dialog.panel)
         assert "Not available" in dialog.check_result.text()
         assert "maintenance" in dialog.check_result.text()
         assert dialog.checked_window is None
@@ -6801,6 +6826,7 @@ class TestVehicleDetailsDialog:
         overlay.panel.start_edit.setDate(now.addDays(10))
         overlay.panel.end_edit.setDate(now.addDays(11))
         overlay.panel.check_button.click()
+        _wait_for_availability(overlay.panel)
         overlay.panel.rent_button.click()
         qapp_process(page)
 
@@ -7013,6 +7039,7 @@ class TestRentalWizard:
         overlay.panel.start_edit.setDate(today.addDays(10))
         overlay.panel.end_edit.setDate(today.addDays(11))
         overlay.panel.check_button.click()
+        _wait_for_availability(overlay.panel)
         overlay.panel.rent_button.click()
         qapp_process(page)
         return page, overlay, vid
@@ -7682,6 +7709,7 @@ class TestRentalWizard:
             overlay.panel.start_edit.setDate(today.addDays(10))
             overlay.panel.end_edit.setDate(today.addDays(11))
             overlay.panel.check_button.click()
+            _wait_for_availability(overlay.panel)
             overlay.panel.rent_button.click()
             qapp_process(page)
             assert page._wizard.state.customer_id is None
@@ -7758,6 +7786,7 @@ class TestRentalModalRedesign:
         overlay.panel.start_edit.setDate(today.addDays(10))
         overlay.panel.end_edit.setDate(today.addDays(11))
         overlay.panel.check_button.click()
+        _wait_for_availability(overlay.panel)
         overlay.panel.rent_button.click()
         qapp_process(page)
         return page, overlay, vid

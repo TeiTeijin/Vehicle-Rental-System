@@ -13,6 +13,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QProcess
 
+from app.config import BASE_DIR
+
 #: The child module that owns the WebEngine window.
 PREVIEW_MODULE = "app.staff.model_preview_window"
 
@@ -29,7 +31,9 @@ def launch_model_preview(glb_path: Path, label: str) -> bool:
         return False
     arguments = ["-m", PREVIEW_MODULE, str(path), str(label)]
     try:
-        result = QProcess.startDetached(sys.executable, arguments)
+        result = QProcess.startDetached(
+            sys.executable, arguments, str(BASE_DIR)
+        )
     except Exception:  # noqa: BLE001 - a preview must never break the desk
         return False
     if isinstance(result, tuple):

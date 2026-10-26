@@ -21,7 +21,6 @@ from pathlib import Path
 from PySide6.QtCore import (
     QDate,
     QEvent,
-    QEventLoop,
     QObject,
     QPointF,
     QRectF,
@@ -78,12 +77,6 @@ ACTIVE_BOOKING_STATES = ("pending", "confirmed", "ongoing")
 
 #: Overlay card width; the dim fills the whole window around it.
 OVERLAY_CARD_W = metrics.DETAILS_CARD_W
-
-#: How long a fresh availability check may settle inline before it becomes a
-#: fully background job. Local SQLite answers in a few milliseconds; waiting
-#: that tiny moment keeps the result attached to the click. A remote/slow
-#: check keeps running in the worker with the busy state visible.
-CHECK_INLINE_WAIT_MS = 200
 
 #: Cache variants a missing `front` photo may borrow. Side views never fall
 #: back to the three-quarter shot: showing the wrong side of a car is worse
@@ -757,7 +750,6 @@ class Gallery(QWidget):
         if self._current != "3d":
             self._sync_spinner()
             return
-        self._stack.setCurrentWidget(self.image_label)
         self.image_label.clear_image()
         self.image_label.setText(
             "No 3D model for this vehicle yet.\n"
@@ -1361,38 +1353,6 @@ class VehicleDetailsPanel(QWidget):
             self._check_signals,
         )
         media_pool().start(job)
-        self._wait_for_check()
-
-    def _wait_for_check(self) -> None:
-        """Let a fast check settle while the event loop keeps painting.
-
-        The query itself is already on the media pool. Local SQLite answers in
-        a few milliseconds, so waiting that moment keeps the result attached to
-        the click; anything slower exits this loop and keeps the busy state
-        until the worker lands.
-        """
-        if not self._checking:
-            return
-        loop = QEventLoop(self)
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.setInterval(CHECK_INLINE_WAIT_MS)
-        timer.timeout.connect(loop.quit)
-
-        def _stop(*_args) -> None:
-            loop.quit()
-
-        self._check_signals.finished.connect(_stop)
-        timer.start()
-        try:
-            loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-        finally:
-            timer.stop()
-            try:
-                self._check_signals.finished.disconnect(_stop)
-            except (RuntimeError, TypeError):
-                pass
-            loop.deleteLater()
 
     @Slot(int, object)
     def _on_check_finished(self, generation: int, result: dict) -> None:

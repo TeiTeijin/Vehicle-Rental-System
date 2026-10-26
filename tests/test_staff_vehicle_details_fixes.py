@@ -148,6 +148,27 @@ def _pump(qapp, predicate=None, timeout_ms: int = 3000) -> None:
         time.sleep(0.005)
 
 
+def _click_check_and_wait(qapp, dialog, timeout_ms: int = 3000) -> list:
+    """Run one checker click and wait for its worker signal to land."""
+    finished: list = []
+
+    def _landed(*args) -> None:
+        finished.append(args)
+
+    panel = dialog.panel
+    panel._check_signals.finished.connect(_landed)
+    try:
+        dialog.check_button.click()
+        _pump(qapp, lambda: bool(finished), timeout_ms)
+    finally:
+        try:
+            panel._check_signals.finished.disconnect(_landed)
+        except (RuntimeError, TypeError):
+            pass
+    assert finished, "availability check never finished"
+    return finished
+
+
 class _DummyPool:
     def __init__(self) -> None:
         self.jobs = []
@@ -316,6 +337,7 @@ class TestExternalPreviewLaunch:
     def test_launch_starts_the_child_module_with_path_and_label(
         self, monkeypatch, tmp_path
     ):
+        from app.config import BASE_DIR
         from app.staff import model_preview
 
         glb = tmp_path / "car model.glb"
@@ -330,11 +352,12 @@ class TestExternalPreviewLaunch:
 
         monkeypatch.setattr(model_preview, "QProcess", _Process)
         assert model_preview.launch_model_preview(glb, "Kia Soluto") is True
-        program, args, _rest = calls[0]
+        program, args, rest = calls[0]
         assert program == sys.executable
         assert args[:2] == ["-m", "app.staff.model_preview_window"]
         assert args[2] == str(glb)
         assert args[3] == "Kia Soluto"
+        assert rest and Path(rest[0]) == BASE_DIR
 
     def test_launch_returns_false_when_the_process_cannot_start(
         self, monkeypatch, tmp_path
@@ -503,13 +526,26 @@ class TestAvailability:
         today = dialog.start_edit.date()
         dialog.start_edit.setDate(today.addDays(10))
         dialog.end_edit.setDate(today.addDays(11))
-        dialog.check_button.click()
+        finished = []
 
+        def _landed(*args) -> None:
+            finished.append(args)
+
+        dialog.panel._check_signals.finished.connect(_landed)
+        started_at = time.monotonic()
+        dialog.check_button.click()
+        elapsed = time.monotonic() - started_at
+
+        # The click must return while the worker is still gated: no nested
+        # event loop may hold the GUI for the checker.
+        assert elapsed < 0.15
+        assert dialog.panel._checking is True
         assert dialog.check_button.isEnabled() is False
         assert dialog.check_spinner.is_running() is True
         gate.set()
-        _pump(qapp, lambda: dialog.check_button.isEnabled())
+        _pump(qapp, lambda: bool(finished))
 
+        assert finished
         assert seen["thread"] != threading.get_ident()
         assert dialog.check_button.isEnabled() is True
         assert dialog.check_spinner.is_running() is False
@@ -528,8 +564,7 @@ class TestAvailability:
         today = dialog.start_edit.date()
         dialog.start_edit.setDate(today.addDays(2))
         dialog.end_edit.setDate(today.addDays(3))
-        dialog.check_button.click()
-        _pump(qapp, lambda: dialog.check_button.isEnabled())
+        _click_check_and_wait(qapp, dialog)
 
         assert "Not available" in dialog.check_result.text()
         assert dialog.checked_window is None
@@ -543,8 +578,7 @@ class TestAvailability:
         dialog.end_edit.setDate(today.addDays(11))
         # A failed check keeps Rent gated until a later check succeeds.
         assert dialog.rent_button.isEnabled() is False
-        dialog.check_button.click()
-        _pump(qapp, lambda: dialog.check_button.isEnabled())
+        _click_check_and_wait(qapp, dialog)
         assert dialog.checked_window is not None
         assert dialog.rent_button.isEnabled() is True
         dialog.deleteLater()
@@ -564,8 +598,7 @@ class TestAvailability:
         today = dialog.start_edit.date()
         dialog.start_edit.setDate(today.addDays(10))
         dialog.end_edit.setDate(today.addDays(11))
-        dialog.check_button.click()
-        _pump(qapp, lambda: dialog.check_button.isEnabled())
+        _click_check_and_wait(qapp, dialog)
 
         assert dialog.check_error.isHidden() is False
         assert "database offline" in dialog.check_error.text()
