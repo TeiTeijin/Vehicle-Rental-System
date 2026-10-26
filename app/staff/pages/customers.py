@@ -34,7 +34,7 @@ from app.staff.ui_kit import (
     WarmHost,
     WarmPanel,
 )
-from app.staff.widgets import confirm, toast
+from app.staff.widgets import confirm_modal, toast
 from app.staff.workers import emit_safely, loader_pool
 from app.utils.money import ZERO, money
 from app.widgets.skeleton import Skeleton
@@ -675,15 +675,26 @@ class CustomersPage(StaffPage):
     # -- overlay panels (no OS windows; same glass as bookings) ---------
 
     def _overlay_panel(self, panel: QWidget) -> object:
-        from app.staff.overlay import FrostedOverlay
+        from app.staff.overlay import WARM_FROST, FrostedOverlay
 
         if self._customer_overlay is not None:
             self._customer_overlay.hide_overlay()
             self._customer_overlay.deleteLater()
             self._customer_overlay = None
         window = self.window()
-        overlay = FrostedOverlay(window if window is not None else self)
-        overlay.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        card_width = getattr(panel, "MODAL_WIDTH", None) or 640
+        # Leave room for the overlay's vertical scrollbar so the fixed-width
+        # sheet still measures its full 900/980px inside the viewport.
+        overlay = FrostedOverlay(
+            window if window is not None else self,
+            card_width=card_width + 16,
+            backdrop_tint=WARM_FROST,
+        )
+        # The redesigned profile can be taller than a short window, so the
+        # sheet scrolls instead of clipping its tabs or notes.
+        overlay.scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
         overlay.set_content(panel)
         overlay.show_overlay()
         self._customer_overlay = overlay
@@ -889,9 +900,13 @@ class CustomersPage(StaffPage):
             toast(self, "That action is for administrators.", "error")
             return
         if self._selected_active() is False:
-            if not confirm(self, f"Reactivate {email}?",
-                           detail="They become bookable again.",
-                           pref="behavior/confirm_deactivate"):
+            if not confirm_modal(
+                self,
+                f"Reactivate {email}?",
+                detail="They become bookable again.",
+                confirm_text="Reactivate customer",
+                pref="behavior/confirm_deactivate",
+            ):
                 return
             try:
                 with self.context.session() as session:
@@ -904,10 +919,12 @@ class CustomersPage(StaffPage):
             self._request_load(full=False)
             toast(self, f"{email} reactivated.")
             return
-        if not confirm(
-            self, f"Deactivate {email}?",
-            detail="They stay in history but cannot rent.",
+        if not confirm_modal(
+            self,
+            f"Deactivate {email}?",
+            detail="They stay in history but cannot rent until reactivated.",
             destructive=True,
+            confirm_text="Deactivate customer",
             pref="behavior/confirm_deactivate",
         ):
             return

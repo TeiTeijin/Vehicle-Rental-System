@@ -2865,3 +2865,537 @@ QCheckBox#fleetCheck::indicator:checked {
     background: #171717;
     border-color: #171717;
 }
+
+/* ======================================================================
+   CUSTOMER MODALS (add/edit, profile, settle)
+   The counter's warm paper language at the reference's 900px width:
+   white rounded sheet, pill eyebrow, large title, two columns, cream
+   preview/metric surfaces, dashed licence boxes, sticky footer.
+   Scoped to the customer modal so Fleet/Bookings keep their own sheets.
+   ====================================================================== */
+
+QWidget#customerModal,
+QWidget#customerModalHeader,
+QWidget#customerModalBody,
+QWidget#customerField,
+QWidget#customerFacts,
+QWidget#customerPreviewColumn,
+QWidget#customerPreviewRow,
+QWidget#customerNotesHost,
+QWidget#customerTabPage,
+QWidget#customerStatusCell,
+QWidget#customerProfileColumn,
+QWidget#settleColumn {
+    background: transparent;
+    border: none;
+}
+
+QFrame#customerModalFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F1EBE1;
+}
+
+QLabel#customerEyebrow {
+    background: #F0EAE0;
+    border-radius: 10px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#customerModalTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+QLabel#customerModalSubtitle {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QFrame#customerModalDivider {
+    background: #F1EBE1;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#customerSectionLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.7px;
+}
+
+QLabel#customerFieldLabel {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#customerFieldOptional {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLineEdit#customerInput,
+QDateEdit#customerInput {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 14px;
+    min-height: 40px;
+    padding: 0 12px;
+}
+
+QLineEdit#customerInput:focus,
+QDateEdit#customerInput:focus {
+    border-color: #171717;
+}
+
+QDateEdit#customerInput::drop-down {
+    border: none;
+    background: transparent;
+    width: 24px;
+}
+
+QLabel#customerDuplicateWarning {
+    background: #F8E0DC;
+    border-radius: 8px;
+    color: #9B2C1F;
+    font-size: 11px;
+    padding: 7px 10px;
+}
+
+QLabel#customerDuplicateWarning:empty {
+    background: transparent;
+    padding: 0;
+}
+
+/* -- source / method chips ------------------------------------------- */
+
+QPushButton#sourceChip,
+QPushButton#settleMethod {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 14px;
+}
+
+QPushButton#sourceChip:hover,
+QPushButton#settleMethod:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#sourceChip:checked,
+QPushButton#settleMethod:checked {
+    background: #171717;
+    border-color: #171717;
+    color: #FFFFFF;
+}
+
+/* -- preview panel --------------------------------------------------- */
+
+QFrame#customerPreview {
+    background: #F1E8D8;
+    border: 1px solid #EADFCF;
+    border-radius: 16px;
+}
+
+QLabel#customerAvatar,
+QLabel#customerAvatarLarge {
+    background: #EADBBB;
+    border-radius: 29px;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#customerPreviewName {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QFrame#customerPreviewRule {
+    background: #E4D7C4;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#customerFactKey {
+    background: transparent;
+    color: #7D7265;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#customerFactValue {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QFrame#customerLicenceNotice {
+    background: #F7E3C3;
+    border: none;
+    border-radius: 12px;
+}
+
+QLabel#customerNoticeText {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+}
+
+/* -- dashed licence photo boxes -------------------------------------- */
+
+QPushButton#docBox {
+    background: #FFFFFF;
+    border: 1px dashed #D8CCBB;
+    border-radius: 10px;
+    color: #171717;
+    text-align: center;
+}
+
+QPushButton#docBox:hover {
+    background: #FBF7F0;
+    border-color: #B8A68A;
+}
+
+QPushButton#docBox:disabled {
+    background: #FBF8F2;
+    border-color: #E7DED0;
+}
+
+QLabel#docBoxPreview {
+    background: transparent;
+    border: none;
+}
+
+QLabel#docBoxTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#docBoxSubtitle {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+/* -- profile --------------------------------------------------------- */
+
+QLabel#customerProfileName {
+    background: transparent;
+    color: #171717;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#customerProfileMeta,
+QLabel#customerProfileContact {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QFrame#customerActivityStrip {
+    background: #F5EFE4;
+    border: none;
+    border-top: 1px solid #F1E8D8;
+    border-bottom: 1px solid #F1E8D8;
+}
+
+QFrame#customerActivityTile {
+    border: none;
+    border-radius: 10px;
+}
+
+QFrame#customerActivityTile[tone="amber"] {
+    background: #F7E3C3;
+}
+
+QFrame#customerActivityTile[tone="plain"] {
+    background: #FFFFFF;
+    border: 1px solid #ECE4D8;
+}
+
+QLabel#customerActivityTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#customerActivityDetail {
+    background: transparent;
+    color: #171717;
+    font-size: 12px;
+}
+
+QFrame#customerMetricTile {
+    background: #ECE6DD;
+    border: none;
+    border-radius: 10px;
+}
+
+QLabel#customerMetricLabel {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+}
+
+QLabel#customerMetricValue {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QFrame#customerOwedBanner {
+    border: none;
+    border-radius: 12px;
+}
+
+QFrame#customerOwedBanner[tone="owed"] {
+    background: #F8E0DC;
+}
+
+QFrame#customerOwedBanner[tone="clear"] {
+    background: #E4F1E4;
+}
+
+QLabel#customerOwedLabel {
+    background: transparent;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#customerOwedAmount {
+    background: transparent;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+/* -- profile tabs and tables ---------------------------------------- */
+
+QTabWidget#customerTabs,
+QTabWidget#customerTabs QTabBar,
+QTabWidget#customerTabs QStackedWidget,
+QTabWidget#customerTabs QWidget#customerTabPage {
+    background: transparent;
+    border: none;
+}
+
+QTabWidget#customerTabs::pane {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #F1EBE1;
+}
+
+QTabWidget#customerTabs QTabBar::tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #7D7265;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 12px;
+    margin-right: 4px;
+}
+
+QTabWidget#customerTabs QTabBar::tab:hover {
+    color: #171717;
+}
+
+QTabWidget#customerTabs QTabBar::tab:selected {
+    color: #171717;
+    border-bottom: 2px solid #171717;
+}
+
+QTableWidget#customerBookingsTable {
+    background: transparent;
+    alternate-background-color: transparent;
+    border: none;
+    gridline-color: #F0EBE2;
+    font-size: 12px;
+    selection-background-color: transparent;
+}
+
+QTableWidget#customerBookingsTable::item {
+    border-bottom: 1px solid #F0EBE2;
+    color: #171717;
+    padding: 0 6px;
+}
+
+QTableWidget#customerBookingsTable QHeaderView::section {
+    background: #EEEAE1;
+    border: none;
+    color: #6F685E;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 6px;
+}
+
+QTableWidget#customerBookingsTable QHeaderView::section:first {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+QTableWidget#customerBookingsTable QHeaderView::section:last {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QFrame#customerIncidentRow {
+    background: #FFFFFF;
+    border: 1px solid #F0EBE2;
+    border-radius: 8px;
+}
+
+/* -- settle ---------------------------------------------------------- */
+
+QFrame#settleAmountBox {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 10px;
+}
+
+QLabel#settleAmountPrefix {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLineEdit#settleAmountInput {
+    background: transparent;
+    border: none;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 0;
+}
+
+QLineEdit#settleAmountInput:focus {
+    border: none;
+}
+
+QPushButton#settlePayAll {
+    background: transparent;
+    border: none;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
+}
+
+QPushButton#settlePayAll:hover {
+    color: #6B5E4F;
+}
+
+QLabel#settleRefHint {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 11px;
+}
+
+QPushButton#settleBooking {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 12px;
+    text-align: left;
+}
+
+QPushButton#settleBooking:hover {
+    background: #FBF7F0;
+}
+
+QPushButton#settleBooking:checked {
+    border: 1px solid #171717;
+}
+
+QLabel#settleRef {
+    background: transparent;
+    color: #171717;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+QLabel#settleOwed {
+    background: transparent;
+    color: #7D7265;
+    font-size: 11px;
+}
+
+QLabel#settleCheck {
+    background: transparent;
+    border: 1px solid #C9BCA6;
+    border-radius: 6px;
+    color: transparent;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#settleCoverage {
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    color: #7D7265;
+    font-size: 11px;
+    padding: 3px 9px;
+}
+
+QLabel#settleCoverage[state="full"] {
+    background: #DCEEDC;
+    color: #3F6D4E;
+}
+
+QLabel#settleCoverage[state="partial"] {
+    background: #F7E3C3;
+    color: #8A6523;
+}
+
+QFrame#settleSummary {
+    background: #F1E7D6;
+    border: none;
+    border-radius: 12px;
+}
+
+QFrame#settleSummaryRule {
+    background: #E4D7C4;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+QLabel#settleTotal {
+    background: transparent;
+    color: #171717;
+    font-size: 14px;
+    font-weight: 700;
+}

@@ -3156,7 +3156,7 @@ class TestCustomersPage:
         import app.staff.pages.customers as module
 
         monkeypatch.setattr(module, "toast", lambda *a, **k: None)
-        monkeypatch.setattr(module, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(module, "confirm_modal", lambda *a, **k: True)
         page = CustomersPage(shell)
         page.refresh()
         self._select(page, "Soon Lapsed")
@@ -3168,6 +3168,198 @@ class TestCustomersPage:
             for r in range(page.table.row_count())
         }
         assert off["Soon Lapsed"] == "Yes"
+
+    def test_deactivate_uses_the_warm_confirm_modal(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        calls = []
+
+        def _confirm(parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(module, "confirm_modal", _confirm)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Soon Lapsed")
+        page._on_deactivate_button()
+        _wait_for_customers(page)
+
+        assert calls, "the warm confirmation must be shown"
+        question, kwargs = calls[-1]
+        assert question == "Deactivate soon@example.com?"
+        assert kwargs["destructive"] is True
+        assert kwargs["confirm_text"] == "Deactivate customer"
+        assert kwargs["pref"] == "behavior/confirm_deactivate"
+        assert "history" in kwargs["detail"]
+        off = {
+            page.table.cell_text(r, 0): page.table.cell_text(r, 10)
+            for r in range(page.table.row_count())
+        }
+        assert off["Soon Lapsed"] == "Yes"
+
+    def test_reactivate_uses_the_warm_confirm_modal(
+        self, shell, branch, monkeypatch
+    ):
+        from app.services import customer_service
+
+        import app.staff.pages.customers as module
+
+        _built, context = branch
+        with context.session() as session:
+            customer = session.query(Users).filter_by(
+                email="soon@example.com"
+            ).one()
+            customer_service.deactivate_customer(session, customer)
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        calls = []
+
+        def _confirm(parent, question, **kwargs):
+            calls.append((question, kwargs))
+            return True
+
+        monkeypatch.setattr(module, "confirm_modal", _confirm)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Soon Lapsed")
+        assert page.deactivate_button.text() == "Reactivate"
+        page._on_deactivate_button()
+        _wait_for_customers(page)
+
+        assert calls, "the warm confirmation must be shown"
+        question, kwargs = calls[-1]
+        assert question == "Reactivate soon@example.com?"
+        assert kwargs["confirm_text"] == "Reactivate customer"
+        assert kwargs.get("destructive", False) is False
+        assert kwargs["pref"] == "behavior/confirm_deactivate"
+        off = {
+            page.table.cell_text(r, 0): page.table.cell_text(r, 10)
+            for r in range(page.table.row_count())
+        }
+        assert off["Soon Lapsed"] == "No"
+
+    def test_customer_form_modal_matches_the_warm_reference(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from app.staff.overlay import WARM_FROST
+
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = CustomersPage(shell)
+        page.refresh()
+        _wait_for_customers(page)
+        assert page.open_add() is True
+        overlay = page._customer_overlay
+        panel = overlay.scroll.widget()
+        try:
+            qapp_process(page)
+            assert overlay.scroll.width() >= 900
+            assert overlay._backdrop_tint == WARM_FROST
+            assert panel.card.width() == 900
+            assert panel.eyebrow_label.text() == "NEW CUSTOMER"
+            assert panel.title_label.text() == (
+                "Identity, licence and how to reach them"
+            )
+            assert panel.preview_panel.objectName() == "customerPreview"
+            assert panel.preview_name.text() == "New customer"
+            assert panel.preview_avatar.text() == "NC"
+            assert panel.front_button.objectName() == "docBox"
+            assert panel.back_button.objectName() == "docBox"
+            assert set(panel.source_chips) == {"walk_in", "online"}
+            assert panel.source_combo.isHidden() is True
+            assert panel.source_chips["walk_in"].isChecked() is True
+            assert panel.footer.isVisibleTo(panel) is True
+            assert panel._go.text() == "Save customer"
+            # Every existing input still has its named attribute.
+            for edit in (
+                panel.name_edit,
+                panel.email_edit,
+                panel.phone_edit,
+                panel.address_edit,
+                panel.emergency_edit,
+                panel.licence_edit,
+            ):
+                assert edit.objectName() == "customerInput"
+            panel.name_edit.setText("Maria Santos")
+            assert panel.preview_name.text() == "Maria Santos"
+            assert panel.preview_avatar.text() == "MS"
+        finally:
+            page._hide_overlay()
+
+    def test_customer_profile_modal_has_summary_and_tabs(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from PySide6.QtWidgets import QFrame, QPushButton
+
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Ana Reyes")
+        assert page.open_details() is True
+        overlay = page._customer_overlay
+        details = overlay.scroll.widget()
+        try:
+            qapp_process(page)
+            assert overlay.scroll.width() >= 900
+            assert details.card.width() == 900
+            assert details.tabs.count() == 3
+            assert [
+                details.tabs.tabText(i) for i in range(3)
+            ][:2] == ["Bookings", "Payments"]
+            assert details.tabs.tabText(2).startswith("Incidents")
+            metrics = details.findChildren(QFrame, "customerMetricTile")
+            assert len(metrics) == 4
+            assert details.owed_banner.objectName() == "customerOwedBanner"
+            assert len(details.findChildren(QPushButton, "docBox")) == 2
+            assert details.note_edit.placeholderText().startswith("Add a note")
+            assert details.edit_button.text() == "Edit"
+            assert details.close_button.text() == "Close"
+            assert details.rental_button.text() == "New rental"
+            assert details.footer.isVisibleTo(details) is True
+        finally:
+            page._hide_overlay()
+
+    def test_settle_modal_uses_split_booking_cards(
+        self, qapp, shell, branch, monkeypatch
+    ):
+        from app.services import payment_service
+
+        import app.staff.pages.customers as module
+
+        monkeypatch.setattr(module, "toast", lambda *a, **k: None)
+        page = CustomersPage(shell)
+        page.refresh()
+        self._select(page, "Ana Reyes")
+        assert page.open_settle() is True
+        overlay = page._customer_overlay
+        panel = overlay.scroll.widget()
+        try:
+            qapp_process(page)
+            assert overlay.scroll.width() >= 980
+            assert panel.card.width() == 980
+            assert panel._unpaid
+            assert len(panel._buttons_map) == len(panel._unpaid)
+            assert panel.method_combo.isHidden() is True
+            assert set(panel.method_chips) == set(payment_service.METHODS)
+            assert panel.pay_all_button.text().startswith("Pay all")
+            total = sum(owed for _bid, owed in panel._unpaid)
+            panel.amount_edit.setText(f"{total:,.2f}")
+            assert panel.preview.text()
+            assert all(
+                button.coverage_label.text().endswith("paid in full")
+                for button in panel._buttons_map.values()
+            )
+            assert panel.recording_row[0].text() == "Recording now"
+            assert f"{total:,.2f}" in panel.recording_row[1].text()
+            assert panel._go.text().startswith("Record payment · ₱")
+        finally:
+            page._hide_overlay()
 
     def test_settle_cascades_across_bookings(self, shell, branch, monkeypatch):
         import app.staff.pages.customers as module

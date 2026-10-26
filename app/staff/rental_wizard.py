@@ -1034,7 +1034,8 @@ class LicencePanel(ModalStep):
             if item.widget() is not None:
                 item.widget().deleteLater()
         self._form_panel = CustomerFormPanel(
-            self._context, None, preset_licence=licence, parent=self._form
+            self._context, None, preset_licence=licence, parent=self._form,
+            inline=True,
         )
         self._form_panel.submitted.connect(self._on_create_values)
         self._form_panel.cancelled.connect(lambda: self._form.setVisible(False))
