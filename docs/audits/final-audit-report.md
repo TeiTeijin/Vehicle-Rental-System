@@ -90,8 +90,21 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 - **Fresh SQLite:** `scripts.init_db` then the documented order (`migrate_staff_schema` → `migrate_customer_booking` → `migrate_guarantor_profile`) twice → all exits 0. Result: 15 tables, `BRANCH` and both PSGC tables present, `USERS` has 28 columns; second pass is idempotent.
 - **Legacy SQLite copy:** staff and customer migrations exit 0 on both passes; `BRANCH`, PSGC tables, and online-booking columns are present; a sample `VEHICLE` row survives. The guarantor migration exits 1 on both passes with the documented F-003 message (`license_number` still NOT NULL); it leaves the data intact and is repeatable. This is the accepted Low legacy-only limitation.
 - **Golden path:** `tests/test_final_audit_flow.py` → 1 passed. It covers online booking → staff confirm → check-in → rental and deposit payments → checkout/settlement → receipt → customer payment history → dashboard/report. Log: `/tmp/opencode/task25-golden.log`.
-- **UI evidence:** The full suite includes offscreen customer and staff Qt tests (schedule, checkout, payment history, staff pages). Interactive manual click-through was not possible on this headless host; no UI step is claimed as manually verified.
+- **Live UI smoke:** A visible click-through was run on the real Wayland desktop (1920x1080) with OS-level mouse/keyboard input (`ydotool`) and screenshots (`grim`) against a throwaway SQLite database. See **Live UI smoke** below.
 - **Constraints:** no live MySQL writes (throwaway SQLite only); GUI tests ran with `QT_QPA_PLATFORM=offscreen`; no conflict markers; `git diff --check` clean; working tree clean after the sign-off commit.
+
+## Live UI smoke (2026-10-26)
+
+A visible end-to-end pass was run against `/tmp/opencode/ui-smoke/ui-smoke.db` on the real Wayland desktop, using `ydotool` for actual mouse/keyboard input and `grim` for screenshots. No live MySQL or repository data was used.
+
+1. **Customer booking:** signed in as the demo shopper, searched for the Isuzu F-Series, chose 26–28 Oct 2026, paid cash, and received reference **RW-HMZQJ5** with total **₱15,758.40**. The success overlay and Bookings tab showed the pending booking.
+2. **Staff processing:** signed in as admin, searched by the customer reference, recorded the rental (**₱15,758.40**) and deposit (**₱5,000.00**), confirmed, checked in at 39,472 km, checked out at 39,600 km, and generated receipt 363.
+3. **Customer result:** the Completed tab showed the returned Isuzu F-Series; Payments showed the rental as paid and the deposit as held/refunded.
+4. **Staff reporting:** the Dashboard's Recent Transactions showed the rental, deposit, and refund; Reports loaded the revenue view; Fleet details showed **“All-time: Rented 1× · revenue ₱15,758.40 · maintenance ₱4,500.00.”**
+5. **Pricing checks:** a 7-day Isuzu F-Series at ₱6,200/day showed rental **₱39,060.00** (10% long-term discount; undiscounted ₱43,400) and total **₱45,617.60**; a 2-day Honda Click at ₱2,500/day showed rental **₱3,500.00** (70% motorcycle multiplier; undiscounted ₱5,000) and total **₱5,790.40**.
+6. **Deposit-applied label:** a scratch-data fixture created through the payment service showed the customer row as **“Deposit applied · Applied to penalties”**, with **“Applied”** as the time label and the note **“Security deposit applied to penalties; no cash changed hands.”**
+
+Screenshots (local scratch, not committed): `/tmp/opencode/ui-smoke/15-booking-success.png`, `21-staff-bookings.png`, `32-staff-confirmed2.png`, `37-staff-completed.png`, `48-customer-completed-tab.png`, `49-customer-payments.png`, `54-staff-dashboard-final.png`, `55-staff-reports-final.png`, `69-moto-schedule.png`, `74-fseries-7day.png`, `75-customer-payments-deposit-applied.png`, `79-fleet-details.png`, and `receipt-363.png`.
 
 ## Deferred and waived items
 
@@ -99,8 +112,8 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 
 ## Known environmental limitations
 
-- CarImages/media API availability is external; failures are recorded as Environmental and retested when available.
-- Interactive manual UI click-through is not available on this headless host. Offscreen Qt tests and the service-level golden path are used instead; no unexercised UI step is claimed as manually verified.
+- CarImages/media API availability is external; the live smoke showed placeholder media where the API was unavailable, and failures remain classified as Environmental.
+- The live UI smoke used a local Wayland desktop and a throwaway SQLite database; screenshots are local scratch and are not committed.
 
 ## Sign-off
 

@@ -1749,7 +1749,7 @@ git push origin final-audit
 
 Do **not** merge `final-audit` into `main`. Present the report and request explicit approval. Only after approval should a separate merge task be created.
 
-**Task 25 result (2026-10-26):** full suite exit 0 (1289 collected, 1288 passed, 1 skipped); 119 migration tests passed; fresh and legacy SQLite orders verified; golden path passed. Interactive manual UI click-through was unavailable on the headless host, so offscreen Qt evidence and the service-level golden path are recorded instead. F-003 remains deferred/documented. Sign-off report committed and pushed; merge approval is pending the user.
+**Task 25 result (2026-10-26):** full suite exit 0 (1289 collected, 1288 passed, 1 skipped); 119 migration tests passed; fresh and legacy SQLite orders verified; golden path passed. A visible end-to-end UI smoke was also run on the real Wayland desktop with OS-level mouse/keyboard input and screenshots: customer booking → staff payment/confirm/check-in/checkout/receipt → customer completed/payment history → dashboard/reports/fleet. F-003 remains deferred/documented. Sign-off report committed and pushed; merge approval is pending the user.
 
 **Exit criteria:** full suite green, all Critical/High findings closed, report complete, branch pushed, and approval requested.
 
