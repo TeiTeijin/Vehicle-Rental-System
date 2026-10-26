@@ -816,12 +816,14 @@ def test_payments_selection_bar_names_the_selected_row(payments_page):
     assert page.collect_button.parentWidget() is page.selection_bar
     assert page.view_booking_button.parentWidget() is page.selection_bar
 
-    # Selecting a payment row clears the other card, so the bar names one row.
+    # Selecting a payment row clears the other card, so the bar names that
+    # payment's own booking, not whatever outstanding row was selected first.
+    selected_booking = page.takings.cell_text(0, 1)
     page.takings.table.selectRow(0)
     page._refresh_selection()
     assert page.outstanding.table.selectionModel().hasSelection() is False
     summary = page.selection_bar.summary_label.text()
-    assert booking_id in summary
+    assert selected_booking in summary
     assert "Ana Reyes" in summary
     assert "Ref" in summary
 
