@@ -553,3 +553,91 @@ class TestWarmStaffModals:
                 assert row.is_active is True
         finally:
             window.deleteLater()
+
+
+class TestSettingsResponsiveLayout:
+    """The Settings grids must survive the staff app's 900x640 minimum.
+
+    Before this, a fixed three-column grid gave every field ~102px at the
+    minimum width: labels painted over their neighbours, combo/button text
+    was clipped, and the branch-name edit showed only the tail of
+    "RentWheels". The grid now reflows to one column at that width and keeps
+    the three-column design on a 1440px window.
+    """
+
+    @staticmethod
+    def _pump() -> None:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        for _ in range(10):
+            app.processEvents()
+
+    @classmethod
+    def _shown_page(cls, branch, width: int, height: int):
+        from app.staff.shell import StaffShell
+
+        _built, context = branch
+        window = StaffShell(context)
+        window._on_signed_in(context.user)
+        window.show_page("settings")
+        page = window._page_widgets["settings"]
+        page.refresh()
+        window.show()
+        window.setMinimumSize(0, 0)
+        window.resize(width, height)
+        cls._pump()
+        return window, page
+
+    def test_minimum_width_uses_one_column_and_no_clipped_text(self, branch, qapp):
+        from PySide6.QtWidgets import QCheckBox, QLabel
+
+        window, page = self._shown_page(branch, 900, 640)
+        try:
+            for grid in (
+                page._appearance_grid,
+                page._behavior_grid,
+                page._account_grid,
+                page._pricing_grid,
+                page._ops_grid,
+                page._receipt_grid,
+            ):
+                assert grid.columns == 1
+            assert page._users_actions.columns == 2
+
+            # Labels wrap rather than paint past their field column.
+            for label in page.findChildren(QLabel):
+                if label.objectName() == "settingsFieldLabel":
+                    assert label.wordWrap() is True
+
+            # Every checkbox and the branch-name edit have their full text
+            # width at the narrow breakpoint.
+            for check in page.findChildren(QCheckBox):
+                if check.objectName() == "settingsCheck":
+                    assert check.width() >= check.sizeHint().width()
+            assert page.branch_name.width() >= (
+                page.branch_name.fontMetrics().horizontalAdvance("RentWheels")
+                + 24
+            )
+            for button in page._users_actions.findChildren(
+                type(page.save_shared_btn)
+            ):
+                assert button.width() >= button.sizeHint().width()
+        finally:
+            window.deleteLater()
+
+    def test_wide_window_keeps_three_columns(self, branch, qapp):
+        window, page = self._shown_page(branch, 1440, 900)
+        try:
+            for grid in (
+                page._appearance_grid,
+                page._behavior_grid,
+                page._account_grid,
+                page._pricing_grid,
+                page._ops_grid,
+                page._receipt_grid,
+            ):
+                assert grid.columns == 3
+            assert page._users_actions.columns == 3
+        finally:
+            window.deleteLater()

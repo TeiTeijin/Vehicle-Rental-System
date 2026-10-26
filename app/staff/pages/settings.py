@@ -8,11 +8,13 @@ to the code constants, so an unmigrated database behaves as before.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -89,14 +91,151 @@ def _panel(
     return box, body
 
 
-def _grid() -> QGridLayout:
-    grid = QGridLayout()
-    grid.setContentsMargins(0, 0, 0, 0)
-    grid.setHorizontalSpacing(16)
-    grid.setVerticalSpacing(14)
-    for column in range(3):
-        grid.setColumnStretch(column, 1)
-    return grid
+@dataclass(frozen=True)
+class _GridEntry:
+    widget: QWidget
+    row: int
+    column: int
+    rowspan: int = 1
+    colspan: int = 1
+    full_width: bool = False
+
+
+class _ResponsiveGrid(QWidget):
+    """Settings grid that reflows from three columns down to one.
+
+    The 3-column layout is the wide design. At the staff app's 900px minimum
+    the settings card body is only ~340px wide, so keeping three columns
+    squeezes every label and control. This widget keeps the logical grid
+    positions and re-applies them with 2 or 1 columns when there is not
+    enough room.
+    """
+
+    MAX_COLUMNS = 3
+    TWO_COLUMN_AT = 470
+    THREE_COLUMN_AT = 760
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(16)
+        self._grid.setVerticalSpacing(14)
+        self._entries: list[_GridEntry] = []
+        self._columns = 0
+
+    @property
+    def columns(self) -> int:
+        """The number of columns currently laid out (for tests)."""
+        return self._columns
+
+    def addWidget(
+        self,
+        widget: QWidget,
+        row: int,
+        column: int,
+        rowspan: int = 1,
+        colspan: int = 1,
+        *,
+        full_width: bool = False,
+    ) -> None:
+        self._entries.append(
+            _GridEntry(widget, row, column, rowspan, colspan, full_width)
+        )
+        self._apply(self._target_columns())
+
+    def _target_columns(self) -> int:
+        if self.width() >= self.THREE_COLUMN_AT:
+            return self.MAX_COLUMNS
+        if self.width() >= self.TWO_COLUMN_AT:
+            return 2
+        return 1
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        target = self._target_columns()
+        if target != self._columns:
+            self._apply(target)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        target = self._target_columns()
+        if target != self._columns:
+            self._apply(target)
+
+    def _clear(self) -> None:
+        while self._grid.count():
+            self._grid.takeAt(0)
+        for column in range(self.MAX_COLUMNS):
+            self._grid.setColumnStretch(column, 0)
+
+    def _apply(self, columns: int) -> None:
+        if not self._entries:
+            self._columns = columns
+            return
+        self._clear()
+        self._columns = max(1, min(columns, self.MAX_COLUMNS))
+        for column in range(self._columns):
+            self._grid.setColumnStretch(column, 1)
+        if self._columns == self.MAX_COLUMNS:
+            self._apply_wide()
+        else:
+            self._apply_narrow(self._columns)
+        self._grid.activate()
+        self.updateGeometry()
+
+    def _apply_wide(self) -> None:
+        for entry in self._entries:
+            colspan = max(
+                1, min(entry.colspan, self.MAX_COLUMNS - entry.column)
+            )
+            self._grid.addWidget(
+                entry.widget,
+                entry.row,
+                entry.column,
+                entry.rowspan,
+                colspan,
+            )
+
+    def _apply_narrow(self, columns: int) -> None:
+        rows = sorted({entry.row for entry in self._entries})
+        out_row = 0
+        for row in rows:
+            items = sorted(
+                (entry for entry in self._entries if entry.row == row),
+                key=lambda entry: entry.column,
+            )
+            cursor = 0
+            for entry in items:
+                if entry.full_width:
+                    if cursor:
+                        out_row += 1
+                        cursor = 0
+                    self._grid.addWidget(
+                        entry.widget, out_row, 0, 1, columns
+                    )
+                    out_row += 1
+                    continue
+                span = max(1, min(entry.colspan, columns))
+                if cursor + span > columns:
+                    out_row += 1
+                    cursor = 0
+                self._grid.addWidget(
+                    entry.widget, out_row, cursor, 1, span
+                )
+                cursor += span
+                if cursor >= columns:
+                    out_row += 1
+                    cursor = 0
+            if cursor:
+                out_row += 1
+
+
+def _grid() -> _ResponsiveGrid:
+    return _ResponsiveGrid()
 
 
 def _field(text: str, widget: QWidget, parent: QWidget) -> QWidget:
@@ -110,6 +249,9 @@ def _field(text: str, widget: QWidget, parent: QWidget) -> QWidget:
     column.setSpacing(6)
     label = QLabel(text, host)
     label.setObjectName("settingsFieldLabel")
+    # At the narrow breakpoint a field can be one third of its wide width;
+    # a long label must wrap rather than paint past its column.
+    label.setWordWrap(True)
     column.addWidget(label)
     column.addWidget(widget)
     return host
@@ -127,17 +269,166 @@ def _inline_host(*widgets: QWidget, parent: QWidget) -> QWidget:
     return host
 
 
+class _CheckHost(QWidget):
+    """One or more checkboxes in a row, stacked when the row cannot fit.
+
+    A QCheckBox never elides its caption, so a horizontal row narrower than
+    the sum of its size hints paints clipped text ("Require GCash refer...").
+    At the narrow settings breakpoint the checks get one line each instead.
+    """
+
+    HORIZONTAL_SPACING = 26
+    VERTICAL_SPACING = 10
+
+    def __init__(
+        self, checks: tuple[QCheckBox, ...], parent: QWidget
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("settingsFieldHost")
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._checks = checks
+        self._stacked = False
+        self._row = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(self.HORIZONTAL_SPACING)
+        for check in checks:
+            check.setObjectName("settingsCheck")
+            self._row.addWidget(check)
+        self._row.addStretch(1)
+
+    @property
+    def stacked(self) -> bool:
+        """Whether the checks are currently on separate lines (for tests)."""
+        return self._stacked
+
+    def _needed_width(self) -> int:
+        if not self._checks:
+            return 0
+        return (
+            sum(check.sizeHint().width() for check in self._checks)
+            + self.HORIZONTAL_SPACING * (len(self._checks) - 1)
+        )
+
+    def _fit(self) -> None:
+        stacked = self.width() < self._needed_width()
+        if stacked == self._stacked:
+            return
+        self._stacked = stacked
+        self._row.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if stacked
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self._row.setSpacing(
+            self.VERTICAL_SPACING if stacked else self.HORIZONTAL_SPACING
+        )
+        self._row.activate()
+        self.updateGeometry()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._fit()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        self._fit()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self._fit()
+
+
 def _check_host(*checks: QCheckBox, parent: QWidget) -> QWidget:
-    host = QWidget(parent)
-    host.setObjectName("settingsFieldHost")
-    row = QHBoxLayout(host)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(26)
-    for check in checks:
-        check.setObjectName("settingsCheck")
-        row.addWidget(check)
-    row.addStretch(1)
-    return host
+    return _CheckHost(checks, parent)
+
+
+class _ActionRow(QWidget):
+    """Button row that drops to fewer columns instead of clipping captions."""
+
+    def __init__(
+        self,
+        buttons: tuple[QPushButton, ...],
+        parent: QWidget,
+        *,
+        spacing: int = 10,
+    ) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._buttons = buttons
+        self._spacing = spacing
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(spacing)
+        self._grid.setVerticalSpacing(spacing)
+        self._columns = 0
+        self._apply(self._target_columns())
+
+    @property
+    def columns(self) -> int:
+        """The number of buttons per row currently used (for tests)."""
+        return self._columns
+
+    def _fits(self, columns: int) -> bool:
+        count = len(self._buttons)
+        if columns < 1 or count == 0:
+            return True
+        for start in range(0, count, columns):
+            chunk = self._buttons[start:start + columns]
+            needed = (
+                sum(button.sizeHint().width() for button in chunk)
+                + self._spacing * (len(chunk) - 1)
+            )
+            if needed > self.width():
+                return False
+        return True
+
+    def _target_columns(self) -> int:
+        count = len(self._buttons)
+        for columns in range(count, 0, -1):
+            if self._fits(columns):
+                return columns
+        return 1
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        target = self._target_columns()
+        if target != self._columns:
+            self._apply(target)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        target = self._target_columns()
+        if target != self._columns:
+            self._apply(target)
+
+    def changeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            target = self._target_columns()
+            if target != self._columns:
+                self._apply(target)
+
+    def _apply(self, columns: int) -> None:
+        while self._grid.count():
+            self._grid.takeAt(0)
+        self._columns = max(1, columns)
+        for column in range(len(self._buttons)):
+            self._grid.setColumnStretch(column, 0)
+        for index, button in enumerate(self._buttons):
+            self._grid.addWidget(
+                button,
+                index // self._columns,
+                index % self._columns,
+                alignment=Qt.AlignmentFlag.AlignLeft
+                | Qt.AlignmentFlag.AlignVCenter,
+            )
+        self._grid.activate()
+        self.updateGeometry()
 
 
 def _pill(text: str, *, kind: str = "secondary",
@@ -255,14 +546,15 @@ class SettingsPage(StaffPage):
             lambda on: prefs.set("appearance/reduce_motion", bool(on)))
 
         grid = _grid()
+        self._appearance_grid = grid
         grid.addWidget(_field("Theme (fixed)", self.theme_combo, self), 0, 0)
         grid.addWidget(_field("Accent (preview)", accent_host, self), 0, 1)
         grid.addWidget(_field("UI scale", self.font_spin, self), 0, 2)
         grid.addWidget(
             _check_host(self.sidebar_check, self.motion_check, parent=self),
-            1, 0, 1, 3,
+            1, 0, 1, 3, full_width=True,
         )
-        layout.addLayout(grid)
+        layout.addWidget(grid)
         layout.addStretch(1)
         return box
 
@@ -371,6 +663,7 @@ class SettingsPage(StaffPage):
         self.logout_combo.currentIndexChanged.connect(self._on_logout)
 
         grid = _grid()
+        self._behavior_grid = grid
         grid.addWidget(_field("Dashboard refresh", self.refresh_combo, self), 0, 0)
         grid.addWidget(_field("Page after login", self.default_page_combo, self), 0, 1)
         grid.addWidget(_field("Table rows", self.rows_combo, self), 0, 2)
@@ -392,9 +685,9 @@ class SettingsPage(StaffPage):
                 self.confirm_deactivate,
                 parent=self,
             ),
-            3, 0, 1, 3,
+            3, 0, 1, 3, full_width=True,
         )
-        layout.addLayout(grid)
+        layout.addWidget(grid)
         layout.addStretch(1)
         return box
 
@@ -487,13 +780,14 @@ class SettingsPage(StaffPage):
         for edit in (self.cur_pw, self.new_pw, self.confirm_pw):
             edit.setObjectName("warmInput")
         grid = _grid()
+        self._account_grid = grid
         self.cur_show = self._password_control(self.cur_pw)
         self.new_show = self._password_control(self.new_pw)
         self.confirm_show = self._password_control(self.confirm_pw)
         grid.addWidget(_field("Current password", self.cur_show, self), 0, 0)
         grid.addWidget(_field("New password", self.new_show, self), 0, 1)
         grid.addWidget(_field("Confirm new", self.confirm_show, self), 0, 2)
-        layout.addLayout(grid)
+        layout.addWidget(grid)
         note = QLabel("At least 8 characters", self)
         note.setObjectName("settingsHint")
         layout.addWidget(note)
@@ -569,17 +863,15 @@ class SettingsPage(StaffPage):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         layout.addWidget(self.users_table)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(10)
+        buttons = []
         for text, slot in (("Add staff", self.open_add_staff),
                            ("Reset password", self.open_reset_pw),
                            ("Deactivate / reactivate", self._on_toggle_active)):
             btn = _pill(text, parent=self)
             btn.clicked.connect(slot)
-            row.addWidget(btn)
-        row.addStretch(1)
-        layout.addLayout(row)
+            buttons.append(btn)
+        self._users_actions = _ActionRow(tuple(buttons), self)
+        layout.addWidget(self._users_actions)
         self.users_error = _error(self)
         layout.addWidget(self.users_error)
         layout.addStretch(1)
@@ -755,6 +1047,7 @@ class SettingsPage(StaffPage):
             "Shared",
         )
         grid = _grid()
+        self._pricing_grid = grid
         fields = (
             ("scheduling_fee", "Scheduling fee", 0, 0),
             ("late_fee_per_day", "Late fee per day", 0, 1),
@@ -788,7 +1081,7 @@ class SettingsPage(StaffPage):
         grid.addWidget(
             _field("Motorcycle multiplier", self.moto_mult, self), 4, 2
         )
-        layout.addLayout(grid)
+        layout.addWidget(grid)
         self.pricing_error = _error(self)
         layout.addWidget(self.pricing_error)
         layout.addStretch(1)
@@ -817,11 +1110,12 @@ class SettingsPage(StaffPage):
         self.maint_km.setRange(0, 100000)
 
         grid = _grid()
+        self._ops_grid = grid
         grid.addWidget(_field("Default payment method", self.method_combo, self), 0, 0)
         grid.addWidget(_field("Default channel", self.channel_combo, self), 0, 1)
         grid.addWidget(
             _check_host(self.gcash_check, self.sameday_check, parent=self),
-            1, 0, 1, 2,
+            1, 0, 1, 2, full_width=True,
         )
         grid.addWidget(
             _field("Licence expiring window (days)", self.licence_spin, self), 2, 0
@@ -832,7 +1126,7 @@ class SettingsPage(StaffPage):
         grid.addWidget(
             _field("Maintenance due (km)", self.maint_km, self), 2, 2
         )
-        layout.addLayout(grid)
+        layout.addWidget(grid)
         self.ops_error = _error(self)
         layout.addWidget(self.ops_error)
         layout.addStretch(1)
@@ -854,14 +1148,15 @@ class SettingsPage(StaffPage):
         self.fee_note_check = QCheckBox("Show scheduling-fee note on receipts", self)
         self.auto_open_check = QCheckBox("Open PDF after export", self)
         grid = _grid()
+        self._receipt_grid = grid
         grid.addWidget(_field("Branch name", self.branch_name, self), 0, 0)
         grid.addWidget(_field("Branch address", self.branch_addr, self), 0, 1)
         grid.addWidget(_field("Branch phone", self.branch_phone, self), 0, 2)
         grid.addWidget(
             _check_host(self.fee_note_check, self.auto_open_check, parent=self),
-            1, 0, 1, 3,
+            1, 0, 1, 3, full_width=True,
         )
-        layout.addLayout(grid)
+        layout.addWidget(grid)
         self.receipt_error = _error(self)
         layout.addWidget(self.receipt_error)
         layout.addStretch(1)
@@ -888,6 +1183,7 @@ class SettingsPage(StaffPage):
         layout.addLayout(row)
         self.cache_label = QLabel("", self)
         self.cache_label.setObjectName("settingsHint")
+        self.cache_label.setWordWrap(True)
         layout.addWidget(self.cache_label)
         row2 = QHBoxLayout()
         row2.setContentsMargins(0, 0, 0, 0)
@@ -907,6 +1203,7 @@ class SettingsPage(StaffPage):
         about = QLabel(f"RentWheels Staff {VERSION} · "
                        "PySide6 · SQLAlchemy · SQLite/MySQL", self)
         about.setObjectName("settingsHint")
+        about.setWordWrap(True)
         layout.addWidget(about)
         self.system_error = _error(self)
         layout.addWidget(self.system_error)
