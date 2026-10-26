@@ -27,9 +27,10 @@ BACKGROUND = "#EFE6D5"
 def create_window(glb_path: Path, label: str) -> QMainWindow:
     """Build the preview window for one local GLB.
 
-    The window is not shown here so callers (and tests) can inspect it first.
+    The window is deliberately left hidden here; :func:`load_document` shows
+    it before handing the document to WebEngine. Creating the page while the
+    view is hidden is what could leave the external preview blank.
     """
-    path = Path(glb_path)
     window = QMainWindow()
     window.setWindowTitle(f"3D preview - {label}")
     window.resize(960, 640)
@@ -45,12 +46,20 @@ def create_window(glb_path: Path, label: str) -> QMainWindow:
     )
     view.page().setBackgroundColor(QColor(BACKGROUND))
 
+    window.setCentralWidget(view)
+    return window
+
+
+def load_document(window: QMainWindow, glb_path: Path, label: str) -> None:
+    """Show *window*, then load the model-viewer document into its view."""
+    path = Path(glb_path)
+    view = window.centralWidget()
+    window.show()
+
     # `model_viewer_document` names the vehicle in the model-viewer alt text.
     vehicle = SimpleNamespace(make=label, model="")
     document = vehicle_photo.model_viewer_document(path, vehicle)
-    window.setCentralWidget(view)
     view.setHtml(document, QUrl.fromLocalFile(str(path.parent) + "/"))
-    return window
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     app = QApplication.instance() or QApplication(argv[:1])
     window = create_window(glb, label)
-    window.show()
+    load_document(window, glb, label)
     return app.exec()
 
 

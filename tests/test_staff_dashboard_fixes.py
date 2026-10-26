@@ -27,6 +27,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QComboBox,
+    QLabel,
     QLineEdit,
 )
 
@@ -334,6 +335,29 @@ class TestOverflowActions:
         )
         page.overflow_menu.actions()[0].trigger()
         assert calls, "the header action did not call refresh_async"
+        assert calls == [((), {"force": True})]
+
+    def test_the_refresh_action_bypasses_the_ttl_cache(
+        self, shell, branch, monkeypatch
+    ):
+        import app.staff.pages.dashboard as module
+
+        page = _page(shell)
+        page._apply_figures(DashboardFigures(today=date.today()))
+        assert page._last_figures is not None
+        monkeypatch.setattr(
+            module.prefs, "dashboard_refresh_ms", lambda: 600_000
+        )
+        started = []
+        monkeypatch.setattr(
+            page._pool, "start", lambda loader: started.append(loader)
+        )
+        generation = page._load_gen
+
+        page._run_overflow_action("Refresh dashboard")
+
+        assert started, "the explicit refresh reused the TTL cache"
+        assert page._load_gen == generation + 1
 
 
 # --------------------------------------------------------------------------
@@ -357,6 +381,24 @@ class TestLoadingAndFailure:
         page.refresh()
         assert page.load_state == "loaded"
         assert page.status_banner.isHidden() is True
+
+    def test_an_empty_successful_load_replaces_the_loading_row(
+        self, shell, branch
+    ):
+        page = DashboardPage(shell, animate=False)
+        assert page.load_state == "loading"
+        page._load_gen = 1
+
+        page._on_async_loaded(1, DashboardFigures(today=date.today()))
+        QApplication.processEvents()
+
+        assert page.load_state == "loaded"
+        messages = [
+            row.text()
+            for row in page._transaction_rows
+            if isinstance(row, QLabel)
+        ]
+        assert messages == ["No payments recorded yet."]
 
     def test_an_async_failure_shows_the_error_and_a_retry_button(
         self, shell, branch, monkeypatch

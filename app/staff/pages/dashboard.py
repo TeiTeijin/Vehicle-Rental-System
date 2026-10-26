@@ -652,7 +652,10 @@ class DashboardPage(StaffPage):
     # -- data -------------------------------------------------------------
 
     def overflow_actions(self) -> list[tuple[str, Callable[[], None]]]:
-        return [("Refresh dashboard", self.refresh_async)]
+        # The explicit action must bypass the auto-refresh TTL and re-query.
+        return [
+            ("Refresh dashboard", lambda: self.refresh_async(force=True))
+        ]
 
     def refresh(self) -> None:
         """Synchronous refresh, kept for tests and explicit reloads."""
@@ -712,13 +715,16 @@ class DashboardPage(StaffPage):
             self._render_transactions_message("Could not load transactions.")
 
     def _apply_figures(self, figures) -> None:
+        # Mark the load complete before filling: an empty recent-transactions
+        # result must render its real empty state, not the loading placeholder
+        # left behind by `_begin_loading`.
+        self._load_state = "loaded"
+        self._load_error = None
         self._fill_revenue(figures)
         self._fill_channels(figures)
         self._fill_activity(figures)
         self._fill_transactions(figures)
         self._fill_target(figures)
-        self._load_state = "loaded"
-        self._load_error = None
         self.status_banner.hide()
         self._first_load = False
         self._last_figures = figures
