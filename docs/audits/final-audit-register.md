@@ -230,7 +230,7 @@ Severity: `Critical` · `High` · `Medium` · `Low` · `Environmental`
 
 ## Task 25 notes: final verification and sign-off
 
-- **Full suite:** exit 0; 1289 collected, 1288 passed, 1 skipped (Windows ACL check at `tests/test_security_hardening.py:299`). Log: `/tmp/opencode/task25-full.log`.
+- **Full suite:** exit 0; 1289 collected, 1288 passed, 1 skipped (Windows ACL check at `tests/test_security_hardening.py:299`). Log: `/tmp/opencode/task25-full-final.log` (fresh rerun after the session restart).
 - **Migration suite:** 119 tests passed, exit 0. Log: `/tmp/opencode/task25-migrations.log`.
 - **Fresh SQLite:** `init_db` + documented order twice → all exits 0; 15 tables; `BRANCH` and PSGC tables present; 28 `USERS` columns; idempotent.
 - **Legacy SQLite copy:** staff/customer migrations exit 0 twice; `BRANCH`, PSGC, and online columns present; sample vehicle row survives. Guarantor migration exits 1 twice with the documented F-003 message and leaves data intact.

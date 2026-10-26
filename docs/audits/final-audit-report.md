@@ -85,7 +85,7 @@ Detailed findings and evidence live in `docs/audits/final-audit-register.md`.
 
 ## Final verification (Task 25)
 
-- **Full suite:** `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -rs` → exit 0; 1289 collected, 1288 passed, 1 skipped (`tests/test_security_hardening.py:299`, Windows ACL check). Log: `/tmp/opencode/task25-full.log`.
+- **Full suite:** `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -rs` → exit 0; 1289 collected, 1288 passed, 1 skipped (`tests/test_security_hardening.py:299`, Windows ACL check). Log: `/tmp/opencode/task25-full-final.log` (fresh rerun after the session restart).
 - **Migration suite:** `pytest tests/test_migrate_*.py -q` → exit 0, 119 tests. Log: `/tmp/opencode/task25-migrations.log`.
 - **Fresh SQLite:** `scripts.init_db` then the documented order (`migrate_staff_schema` → `migrate_customer_booking` → `migrate_guarantor_profile`) twice → all exits 0. Result: 15 tables, `BRANCH` and both PSGC tables present, `USERS` has 28 columns; second pass is idempotent.
 - **Legacy SQLite copy:** staff and customer migrations exit 0 on both passes; `BRANCH`, PSGC tables, and online-booking columns are present; a sample `VEHICLE` row survives. The guarantor migration exits 1 on both passes with the documented F-003 message (`license_number` still NOT NULL); it leaves the data intact and is repeatable. This is the accepted Low legacy-only limitation.
