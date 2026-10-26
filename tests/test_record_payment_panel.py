@@ -94,6 +94,30 @@ def test_zero_outstanding_is_shown_and_blocks_the_payment(qapp):
         panel.deleteLater()
 
 
+def test_zero_rental_outstanding_still_allows_a_security_deposit(qapp):
+    panel = PaymentPanel(Decimal("0.00"), show_kind=True)
+    seen: list[dict] = []
+    panel.submitted.connect(seen.append)
+    try:
+        assert panel.go_button.isEnabled() is False
+        panel.amount_edit.setText("2000.00")
+        assert panel.go_button.isEnabled() is False
+
+        panel.kind_chips.buttons["deposit"].click()
+        assert panel.kind_combo.currentData() == "deposit"
+        assert panel.go_button.isEnabled() is True
+        assert panel.go_button.text() == "Record ₱2,000.00"
+
+        panel._on_go()
+        assert seen[-1]["amount"] == Decimal("2000.00")
+        assert seen[-1]["kind"] == "deposit"
+
+        panel.kind_chips.buttons["rental"].click()
+        assert panel.go_button.isEnabled() is False
+    finally:
+        panel.deleteLater()
+
+
 def test_open_payment_for_rereads_the_live_balance(
     qapp, session, customer, vehicle, staff
 ):

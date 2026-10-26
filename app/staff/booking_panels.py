@@ -1318,6 +1318,13 @@ class PaymentPanel(BookingModal):
         key = self.kind_combo.itemData(index)
         if key:
             self.kind_chips.select(key)
+        self._refresh_total_button()
+
+    def _selected_kind(self) -> str:
+        if not self.show_kind:
+            # Checkout settlement must never record a deposit.
+            return "rental"
+        return self.kind_combo.currentData() or "rental"
 
     def _on_quick_amount(self, key: str) -> None:
         if key == "custom":
@@ -1340,7 +1347,7 @@ class PaymentPanel(BookingModal):
             self.ref_edit.clear()
 
     def _refresh_total_button(self) -> None:
-        if self._outstanding <= ZERO:
+        if self._selected_kind() == "rental" and self._outstanding <= ZERO:
             self.go_button.setText("Nothing to collect")
             self.go_button.setEnabled(False)
             return
@@ -1355,7 +1362,8 @@ class PaymentPanel(BookingModal):
         self.go_button.setEnabled(value > ZERO)
 
     def _on_go(self) -> None:
-        if self._outstanding <= ZERO:
+        kind = self._selected_kind()
+        if kind == "rental" and self._outstanding <= ZERO:
             self.set_error("There is nothing to collect on this booking.")
             return
         if (
@@ -1373,10 +1381,6 @@ class PaymentPanel(BookingModal):
             self.set_error("Payment amount must be greater than zero.")
             return
         self.set_error("")
-        kind = self.kind_combo.currentData() or "rental"
-        if not self.show_kind:
-            # Checkout settlement must never record a deposit.
-            kind = "rental"
         self.submitted.emit(
             {
                 "amount": value,
