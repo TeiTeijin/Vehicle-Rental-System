@@ -11,6 +11,7 @@ __pycache__/
 # Local environment
 .venv/
 venv/
+.worktrees/
 
 # Databases (created by SQLAlchemy; the demo seed writes demo.db)
 *.db
