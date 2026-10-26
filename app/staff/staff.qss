@@ -2411,3 +2411,208 @@ QPushButton#choiceChip[variant="reason"] {
 QPushButton#warmCheck {
     min-height: 30px;
 }
+
+/* ======================================================================
+   SETTINGS
+   Warm Settings cards: left title/tag rail + right control column, plus
+   the Add staff, Reset password, and Accent color sheets. Scoped by
+   object name so the rest of the app keeps its existing surfaces.
+   ====================================================================== */
+
+QWidget#settingsCardRail,
+QWidget#settingsField,
+QWidget#settingsFieldHost {
+    background: transparent;
+    border: none;
+}
+
+QLabel#settingsCardTitle {
+    background: transparent;
+    color: #171717;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+QLabel#settingsCardCaption {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#settingsTag {
+    background: #ECE6DD;
+    border-radius: 9px;
+    color: #6B5E4F;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+
+QLabel#settingsFieldLabel {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#settingsHint {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+QLabel#settingsAdminNote {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+QLabel#settingsPreview {
+    background: #F1E7D6;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+QLabel#settingsEmailValue {
+    background: #F1E7D6;
+    border-radius: 10px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+QPushButton#settingsPrimary {
+    background: #171717;
+    border: 1px solid #171717;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#settingsPrimary:hover {
+    background: #333333;
+}
+
+QPushButton#settingsSecondary {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 18px;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#settingsSecondary:hover {
+    background: #F6EEDC;
+}
+
+QPushButton#settingsDanger {
+    background: #FFFFFF;
+    border: 1px solid #C07B72;
+    border-radius: 18px;
+    color: #9B2C1F;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton#settingsDanger:hover {
+    background: #F8E0DC;
+}
+
+QPushButton#settingsPrimary:disabled,
+QPushButton#settingsSecondary:disabled,
+QPushButton#settingsDanger:disabled {
+    background: #EADBBB;
+    border-color: #DCCBAA;
+    color: #A79B87;
+}
+
+QPushButton#settingsInline {
+    background: #FFFFFF;
+    border: 1px solid #E0D6C9;
+    border-radius: 16px;
+    color: #171717;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 12px;
+}
+
+QPushButton#settingsInline:hover {
+    background: #F6EEDC;
+}
+
+QCheckBox#settingsCheck {
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QLabel#settingsAccentPreview {
+    min-height: 40px;
+}
+
+QLabel#settingsContrast {
+    background: transparent;
+    color: #8B7F70;
+    font-size: 12px;
+}
+
+QSlider#accentSlider {
+    min-height: 30px;
+}
+
+QSlider#accentSlider::groove:horizontal {
+    height: 14px;
+    border-radius: 7px;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 #EF3E36,
+        stop: 0.17 #F5D43A,
+        stop: 0.34 #4ED26B,
+        stop: 0.50 #2FD3C4,
+        stop: 0.67 #2A6BEA,
+        stop: 0.84 #7B3FE4,
+        stop: 1 #D6298A
+    );
+}
+
+QSlider#accentSlider::handle:horizontal {
+    width: 24px;
+    margin: -7px 0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    border: 3px solid #171717;
+}
+
+QSpinBox#warmInput:focus,
+QDoubleSpinBox#warmInput:focus {
+    border-color: #171717;
+}
+
+QDoubleSpinBox#warmInput::up-button,
+QDoubleSpinBox#warmInput::down-button {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
+
+QWidget#bookingModal[variant="settings"] QLabel#bookingModalTitle {
+    font-size: 26px;
+}
+
+QWidget#bookingModal[variant="settings"] QLabel#warmFieldLabel {
+    font-size: 13px;
+}
