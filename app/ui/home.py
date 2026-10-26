@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -77,6 +78,12 @@ from app.ui.vehicles import CatalogPage, VehicleCard, card_for
 HERO_STAGE_HEIGHT = 516
 HERO_NAME_TOP = 4
 HERO_PHOTO_TOP = 100
+
+#: On short windows the hero gives vertical room back so the Browse & Filter
+#: bar -- the primary way into the catalog -- is reachable without scrolling.
+#: 1024x768 is the tight target: its customer viewport is only ~696px tall.
+HERO_STAGE_HEIGHT_COMPACT = 380
+HERO_COMPACT_BELOW = 810
 
 #: Every name is set at this size and only shrinks when it would run wide
 #: (the reference's type is one size; the short names simply look shorter).
@@ -152,6 +159,7 @@ class HeroCarousel(QWidget):
         self._index = 0
         self._hovered = False
         self._name_rise: QPropertyAnimation | None = None
+        self._stage_height = HERO_STAGE_HEIGHT
 
         self.eyebrow = make_label("", "heroEyebrow")
         self.eyebrow.setAlignment(Qt.AlignCenter)
@@ -159,7 +167,7 @@ class HeroCarousel(QWidget):
         # The stage positions its two children by hand so they overlap.
         self.stage = QWidget(self)
         self.stage.setObjectName("heroStage")
-        self.stage.setFixedHeight(HERO_STAGE_HEIGHT)
+        self.stage.setFixedHeight(self._stage_height)
 
         self.name = make_label("", "heroName")
         self.name.setParent(self.stage)
@@ -390,7 +398,7 @@ class HeroCarousel(QWidget):
             return
         self._fit_name()
         self.photo.setGeometry(
-            0, HERO_PHOTO_TOP, width, HERO_STAGE_HEIGHT - HERO_PHOTO_TOP
+            0, HERO_PHOTO_TOP, width, self._stage_height - HERO_PHOTO_TOP
         )
         # The name is the backdrop; the car's cutout is the foreground.
         self.name.raise_()
@@ -401,10 +409,19 @@ class HeroCarousel(QWidget):
         centre = (
             self.stage.y()
             + HERO_PHOTO_TOP
-            + (HERO_STAGE_HEIGHT - HERO_PHOTO_TOP) // 2
+            + (self._stage_height - HERO_PHOTO_TOP) // 2
         )
         self.arrow_prev.move(0, centre - 23)
         self.arrow_next.move(self.width() - 46, centre - 23)
+
+    def set_compact(self, compact: bool) -> None:
+        """Shrink the stage on short windows so the filter bar stays above fold."""
+        height = HERO_STAGE_HEIGHT_COMPACT if compact else HERO_STAGE_HEIGHT
+        if height == self._stage_height:
+            return
+        self._stage_height = height
+        self.stage.setFixedHeight(height)
+        self._place_stage()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -710,19 +727,20 @@ class BrowseFilterBar(QFrame):
 
         self.brand_combo = QComboBox()
         self.brand_combo.setObjectName("browseBrand")
-        self.brand_combo.setMinimumWidth(180)
+        self.brand_combo.setMinimumWidth(160)
+        self.brand_combo.setMaximumWidth(240)
         self.brand_combo.setToolTip("Show vehicles from one brand")
         self.brand_combo.addItem("All brands", None)
         self.brand_combo.currentIndexChanged.connect(self._clear_error)
 
-        self.min_rate = self._rate_spin("Minimum daily price")
-        self.max_rate = self._rate_spin("Maximum daily price")
-        dash = hint_label("\u2013", tone="muted")
-        dash.setAlignment(Qt.AlignCenter)
+        self.min_rate = self._rate_spin("browseMinRate", "Minimum daily price")
+        self.max_rate = self._rate_spin("browseMaxRate", "Maximum daily price")
+        self.min_caption = make_label("Min / day", "browseRateLabel")
+        self.max_caption = make_label("Max / day", "browseRateLabel")
 
         self.browse_button = primary_button("Browse vehicles")
         self.browse_all_button = ghost_button("Browse all vehicles")
-        self.reset_button = text_button("Reset")
+        self.reset_button = ghost_button("Reset")
 
         self.browse_button.clicked.connect(self._on_browse)
         self.browse_all_button.clicked.connect(self._on_browse_all)
@@ -733,33 +751,44 @@ class BrowseFilterBar(QFrame):
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(10)
-        controls.addWidget(self.brand_combo, 2)
-        controls.addWidget(self.min_rate)
-        controls.addWidget(dash)
-        controls.addWidget(self.max_rate)
-        controls.addWidget(self.reset_button, 0, Qt.AlignVCenter)
+        controls.setSpacing(8)
+        controls.addWidget(self.brand_combo, 2, Qt.AlignBottom)
+        controls.addLayout(self._rate_field(self.min_caption, self.min_rate))
+        controls.addLayout(self._rate_field(self.max_caption, self.max_rate))
         controls.addStretch(1)
-        controls.addWidget(self.browse_all_button, 0, Qt.AlignVCenter)
-        controls.addWidget(self.browse_button, 0, Qt.AlignVCenter)
+        controls.addWidget(self.reset_button, 0, Qt.AlignBottom)
+        controls.addWidget(self.browse_all_button, 0, Qt.AlignBottom)
+        controls.addWidget(self.browse_button, 0, Qt.AlignBottom)
 
         col = QVBoxLayout(self)
         col.setContentsMargins(20, 16, 20, 16)
-        col.setSpacing(10)
+        col.setSpacing(8)
         col.addWidget(self.caption)
         col.addLayout(controls)
         col.addWidget(self.error)
 
     @staticmethod
-    def _rate_spin(tooltip: str) -> QSpinBox:
+    def _rate_field(caption: QLabel, spin: QSpinBox) -> QVBoxLayout:
+        """One labelled price input: the caption names which end it is."""
+        field = QVBoxLayout()
+        field.setContentsMargins(0, 0, 0, 0)
+        field.setSpacing(4)
+        field.addWidget(caption)
+        field.addWidget(spin)
+        return field
+
+    @staticmethod
+    def _rate_spin(object_name: str, tooltip: str) -> QSpinBox:
         spin = QSpinBox()
+        spin.setObjectName(object_name)
         spin.setRange(0, BROWSE_RATE_MAX)
         spin.setSpecialValueText("Any")
         spin.setPrefix("\u20b1 ")
-        spin.setSuffix(" / day")
+        # The "Min / day" and "Max / day" captions carry the unit. Keeping it
+        # out of the value lets "₱ 1,000,000" fit at 1024px.
         spin.setGroupSeparatorShown(True)
         spin.setKeyboardTracking(False)
-        spin.setMinimumWidth(140)
+        spin.setMinimumWidth(128)
         spin.setToolTip(tooltip)
         return spin
 
@@ -890,6 +919,7 @@ class HomePage(QWidget):
         self._sweep_timer.timeout.connect(self._sweep)
         self.dashboard.verticalScrollBar().valueChanged.connect(self._schedule_sweep)
 
+        self._sync_compact_hero()
         self.load()
 
     # ---------- data ----------
@@ -1015,12 +1045,18 @@ class HomePage(QWidget):
         self._pending = remaining
 
     # ---------- lifecycle ----------
+    def _sync_compact_hero(self) -> None:
+        """Give the filter bar room back when the window is short."""
+        self.hero.set_compact(self.height() < HERO_COMPACT_BELOW)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._sync_compact_hero()
         self._schedule_sweep()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_compact_hero()
         self._schedule_sweep()
 
     def _fail(self, message: str) -> None:

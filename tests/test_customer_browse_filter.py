@@ -14,6 +14,8 @@ from decimal import Decimal
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtCore import QPoint  # noqa: E402
+from PySide6.QtGui import QFontMetrics  # noqa: E402
 
 from app.services import vehicle_service  # noqa: E402
 from app.services.vehicle_photos import VehicleRef  # noqa: E402
@@ -158,7 +160,7 @@ def test_browse_filter_bar_reports_values_and_resets(qapp):
         bar.brand_combo.setCurrentIndex(bar.brand_combo.findText("Toyota"))
         bar.min_rate.setValue(1200)
         bar.max_rate.setValue(3400)
-        assert bar.min_rate.text() == "\u20b1 1,200 / day"
+        assert bar.min_rate.text() == "\u20b1 1,200"
 
         emitted: list[BrowseFilters] = []
         bar.browse_requested.connect(emitted.append)
@@ -203,6 +205,87 @@ def test_browse_filter_bar_rejects_an_inverted_range(qapp):
         bar.browse_all_requested.connect(lambda: all_requested.append(True))
         bar.browse_all_button.click()
         assert all_requested == [True]
+    finally:
+        bar.deleteLater()
+
+
+def test_browse_filter_bar_labels_and_names_the_price_fields(qapp):
+    bar = BrowseFilterBar()
+    try:
+        # The two price inputs carry stable object names, and each has a
+        # visible caption -- both read "Any" when unset, so the captions are
+        # what tells a customer which end is which.
+        assert bar.min_rate.objectName() == "browseMinRate"
+        assert bar.max_rate.objectName() == "browseMaxRate"
+        assert bar.min_caption.text() == "Min / day"
+        assert bar.max_caption.text() == "Max / day"
+        assert bar.min_caption.isVisibleTo(bar)
+        assert bar.max_caption.isVisibleTo(bar)
+        assert bar.min_rate.text() == "Any"
+        assert bar.max_rate.text() == "Any"
+
+        # No "/ day" suffix on the value itself: the captions carry it, and
+        # dropping it keeps the longest value inside the field at 1024px.
+        assert bar.min_rate.suffix() == ""
+        assert bar.max_rate.suffix() == ""
+    finally:
+        bar.deleteLater()
+
+
+def test_browse_filter_bar_reset_is_a_real_button(qapp):
+    bar = BrowseFilterBar()
+    try:
+        assert bar.reset_button.objectName() == "ghostButton"
+        assert bar.reset_button.minimumHeight() >= 36
+        bar.show()
+        qapp.processEvents()
+        assert bar.reset_button.height() >= 36
+    finally:
+        bar.deleteLater()
+
+
+def test_browse_filter_bar_longest_price_fits_its_field(qapp):
+    bar = BrowseFilterBar()
+    try:
+        bar.resize(930, bar.sizeHint().height())
+        bar.show()
+        qapp.processEvents()
+
+        for spin in (bar.min_rate, bar.max_rate):
+            spin.setValue(home_ui.BROWSE_RATE_MAX)
+            qapp.processEvents()
+            assert spin.text() == "\u20b1 1,000,000"
+            metrics = QFontMetrics(spin.lineEdit().font())
+            assert metrics.horizontalAdvance(spin.text()) <= spin.lineEdit().width()
+    finally:
+        bar.deleteLater()
+
+
+def test_browse_filter_bar_keeps_horizontal_headroom_at_1024(qapp):
+    bar = BrowseFilterBar()
+    try:
+        bar.set_makes(["Mitsubishi", "Toyota"])
+        bar.resize(930, bar.sizeHint().height())
+        bar.show()
+        qapp.processEvents()
+
+        # 930 is the bar's actual width inside the 1024px window (40px page
+        # margins each side). Leave at least 50px of headroom so the controls
+        # never squeeze or overlap at that width.
+        assert bar.minimumSizeHint().width() <= 880
+        for widget in (
+            bar.brand_combo,
+            bar.min_rate,
+            bar.max_rate,
+            bar.browse_button,
+            bar.browse_all_button,
+            bar.reset_button,
+        ):
+            if not widget.isVisible():
+                continue
+            left = widget.mapTo(bar, QPoint(0, 0)).x()
+            assert left >= 0
+            assert left + widget.width() <= bar.width() + 1
     finally:
         bar.deleteLater()
 
@@ -335,3 +418,28 @@ def test_home_search_and_type_chips_still_use_the_whole_snapshot(
     assert len(calls) == 1
     assert calls[0]["title"] == "All vehicles"
     assert _ids(calls[0]["items"]) == [1, 2, 3, 4, 5, 6]
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "expected_stage"),
+    [
+        # The customer window's content area below the 72px top bar.
+        (1024, 696, home_ui.HERO_STAGE_HEIGHT_COMPACT),
+        (1440, 868, home_ui.HERO_STAGE_HEIGHT),
+    ],
+)
+def test_home_keeps_the_browse_bar_above_the_fold(
+    home, qapp, width, height, expected_stage
+):
+    home.resize(width, height)
+    home.show()
+    home.show_dashboard()
+    qapp.processEvents()
+    qapp.processEvents()
+
+    viewport = home.dashboard.viewport()
+    top = home.browse_filter.mapTo(viewport, QPoint(0, 0)).y()
+    assert home.hero.stage.height() == expected_stage
+    assert top >= 0
+    assert top + home.browse_filter.height() <= viewport.height()
+    assert home.dashboard.verticalScrollBar().value() == 0

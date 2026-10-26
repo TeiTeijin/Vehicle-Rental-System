@@ -722,6 +722,7 @@ QComboBox[state="error"] { border: 1px solid @danger; }
     font-size: 11pt;
 }
 #browseFilterBar QSpinBox:focus { border: 1px solid @gold; }
+#browseRateLabel { color: @text_muted; font-size: 8pt; font-weight: 700; }
 
 #shelf { background: transparent; }
 #shelfArrow {
