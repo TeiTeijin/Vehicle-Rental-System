@@ -22,6 +22,11 @@ from app.staff.metrics import (
 )
 from app.staff.section_row import paint_active_row
 
+#: Width of the icon-only rail. The full rail is :data:`SIDEBAR_W`.
+COLLAPSED_W = 64
+#: Tighter inset in the rail, so a 16px glyph sits comfortably in 64px.
+COLLAPSED_PAD = 12
+
 
 class NavItem(QAbstractButton):
     def __init__(
@@ -39,6 +44,7 @@ class NavItem(QAbstractButton):
         self._icon_name = icon_name
         self._page_enabled = enabled
         self._hovered = False
+        self._collapsed = False
 
         self.setObjectName(theme.OBJ_SIDEBAR_ITEM)
         self.setProperty("page_key", key)
@@ -64,6 +70,27 @@ class NavItem(QAbstractButton):
     def page_enabled(self) -> bool:
         return self._page_enabled
 
+    @property
+    def collapsed(self) -> bool:
+        return self._collapsed
+
+    @property
+    def label_visible(self) -> bool:
+        return not self._collapsed
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        collapsed = bool(collapsed)
+        if collapsed == self._collapsed:
+            return
+        self._collapsed = collapsed
+        self.update()
+
+    def icon_x(self) -> int:
+        """Leading edge of the glyph; the rail centres it, the full rail doesn't."""
+        if self._collapsed:
+            return max(0, (self.width() - NAV_ICON) // 2)
+        return 16
+
     def set_active(self, active: bool) -> None:
         if self.isChecked() != active:
             self.setChecked(active)
@@ -85,8 +112,8 @@ class NavItem(QAbstractButton):
                 self.rect(),
                 active=self.isChecked(),
                 hovered=self._hovered or self.hasFocus(),
-                label=self._label_text,
-                label_x=16,
+                label=self._label_text if self.label_visible else "",
+                label_x=self.icon_x(),
                 glyph=glyph,
             )
         finally:
@@ -114,25 +141,27 @@ class Sidebar(QFrame):
         self.setObjectName(theme.OBJ_SIDEBAR)
         self.setFixedWidth(SIDEBAR_W)
         self._items: dict[str, NavItem] = {}
+        self._headers: list[QLabel] = []
+        self._collapsed = False
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(
+        self._root = QVBoxLayout(self)
+        self._root.setContentsMargins(
             SIDEBAR_PAD, SIDEBAR_PAD, SIDEBAR_PAD, SIDEBAR_PAD
         )
-        root.setSpacing(0)
+        self._root.setSpacing(0)
 
-        wordmark = QLabel(self)
-        wordmark.setObjectName(theme.OBJ_SIDEBAR_WORDMARK)
-        wordmark.setAlignment(
+        self.wordmark = QLabel(self)
+        self.wordmark.setObjectName(theme.OBJ_SIDEBAR_WORDMARK)
+        self.wordmark.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         logo = branding.wordmark_pixmap(SIDEBAR_W - 2 * SIDEBAR_PAD)
         if logo.isNull():
-            wordmark.setText("rentwheels")
+            self.wordmark.setText("rentwheels")
         else:
-            wordmark.setPixmap(logo)
-        root.addWidget(wordmark)
-        root.addSpacing(14)
+            self.wordmark.setPixmap(logo)
+        self._root.addWidget(self.wordmark)
+        self._root.addSpacing(14)
 
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
@@ -154,17 +183,42 @@ class Sidebar(QFrame):
         self._list_layout.setSpacing(NAV_GAP)
         self._list_layout.addStretch(1)
         self._scroll.setWidget(self._list)
-        root.addWidget(self._scroll, 1)
+        self._root.addWidget(self._scroll, 1)
 
         self.sign_out = NavItem("sign_out", "Log out", "logout", parent=self)
         self.sign_out.clicked.connect(self.sign_out_requested.emit)
-        root.addSpacing(10)
-        root.addWidget(self.sign_out)
+        self._root.addSpacing(10)
+        self._root.addWidget(self.sign_out)
+        self._apply_collapsed()
+
+    @property
+    def collapsed(self) -> bool:
+        return self._collapsed
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        """Switch between the full 210px rail and the 64px icon rail."""
+        collapsed = bool(collapsed)
+        if collapsed == self._collapsed:
+            return
+        self._collapsed = collapsed
+        self._apply_collapsed()
+
+    def _apply_collapsed(self) -> None:
+        pad = COLLAPSED_PAD if self._collapsed else SIDEBAR_PAD
+        self._root.setContentsMargins(pad, pad, pad, pad)
+        self.setFixedWidth(COLLAPSED_W if self._collapsed else SIDEBAR_W)
+        self.wordmark.setVisible(not self._collapsed)
+        for header in self._headers:
+            header.setVisible(not self._collapsed)
+        for item in self._items.values():
+            item.set_collapsed(self._collapsed)
+        self.sign_out.set_collapsed(self._collapsed)
 
     def build(
         self, sections: list[tuple[str, list[tuple[str, str, str, bool]]]]
     ) -> None:
         self._items.clear()
+        self._headers.clear()
 
         self._list = QWidget()
         self._list.setObjectName("sidebarList")
@@ -178,6 +232,7 @@ class Sidebar(QFrame):
                 continue
             header = QLabel(group_label, self._list)
             header.setObjectName(theme.OBJ_SIDEBAR_GROUP)
+            self._headers.append(header)
             self._list_layout.addWidget(header)
             self._list_layout.addSpacing(2)
             for key, label, icon_name, enabled in items:
@@ -197,6 +252,7 @@ class Sidebar(QFrame):
                 self._list_layout.addWidget(row)
             self._list_layout.addSpacing(NAV_GAP)
         self._list_layout.addStretch(1)
+        self._apply_collapsed()
 
     def _on_row(self, key: str) -> None:
         row = self._items.get(key)

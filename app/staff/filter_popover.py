@@ -88,6 +88,13 @@ PANE_PAD_LEFT = 14
 #: Leading icon size inside a side-panel row.
 NAV_ICON = 14
 
+#: Why an option or whole axis is greyed out: the other active filters have
+#: already excluded every vehicle it could have matched.
+NO_FILTER_MATCH_TOOLTIP = (
+    "No matches with the current other filters. "
+    "Clear one of them to see these options again."
+)
+
 #: (Content key, side-panel label, icon name), in display order.
 _CATEGORY_SPECS: tuple[tuple[str, str, str], ...] = (
     ("makes", "Car brand", "vehicle"),
@@ -189,6 +196,19 @@ class FilterCard(QAbstractButton):
     def key(self) -> str:
         return self._key
 
+    def set_available(self, available: bool) -> None:
+        """Grey the card when the other filters leave it unreachable.
+
+        A dead card without a reason reads as a broken app, so the tooltip
+        carries the explanation to every part of the row a pointer can hit.
+        """
+        self.setEnabled(available)
+        tip = f"Toggle {self.name.text()}" if available else NO_FILTER_MATCH_TOOLTIP
+        self.setToolTip(tip)
+        self.name.setToolTip(tip)
+        if self.thumb is not None:
+            self.thumb.setToolTip(tip)
+
     def set_photo(self, pixmap: QPixmap | None) -> None:
         """Swap the placeholder silhouette for a real car photo."""
         if self.thumb is None:
@@ -288,6 +308,12 @@ class _BrandRow(ActiveRow):
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
+
+    def set_available(self, available: bool) -> None:
+        tip = f"Toggle {self.label}" if available else NO_FILTER_MATCH_TOOLTIP
+        self.setToolTip(tip)
+        self.name.setToolTip(tip)
+        self.thumb.setToolTip(tip)
 
     def nextCheckState(self) -> None:  # noqa: N802
         self._box.setChecked(not self._box.isChecked())
@@ -411,9 +437,11 @@ class _BrandPane(QWidget):
 
     def set_boxes_enabled(self, values: set[str] | None) -> None:
         for name, box in self.boxes.items():
-            box.setEnabled(values is None or name in values)
+            available = values is None or name in values
+            box.setEnabled(available)
             row = self.rows.get(name)
             if row is not None:
+                row.set_available(available)
                 row._sync_selected(box.isChecked())
 
     def visible_brands(self) -> list[str]:
@@ -483,7 +511,7 @@ class _CardGroup(QWidget):
 
     def set_boxes_enabled(self, values: set | None) -> None:
         for key, card in self.boxes.items():
-            card.setEnabled(values is None or key in values)
+            card.set_available(values is None or key in values)
 
 
 # -- Passengers stepper ----------------------------------------------------------
@@ -1119,9 +1147,12 @@ class FilterPopover(QFrame):
                 if not values and axis != exempt:
                     self._muted.add(axis)
                     widget.setEnabled(False)
+                    self._set_axis_muted(axis, True)
+                    self._set_axis_boxes(axis, set())
                     continue
                 self._muted.discard(axis)
                 widget.setEnabled(True)
+                self._set_axis_muted(axis, False)
                 self._set_axis_boxes(axis, values or None)
             if exempt != "min_rate":
                 self._apply_rate_ceiling(
@@ -1151,9 +1182,30 @@ class FilterPopover(QFrame):
         self._muted = set()
         for axis, widget in self._axis_widgets.items():
             widget.setEnabled(True)
+            self._set_axis_muted(axis, False)
             self._set_axis_boxes(axis, None)
         self.price_group.setEnabled(True)
         self._apply_rate_ceiling(MAX_RATE)
+
+    def _set_axis_muted(self, axis: str, muted: bool) -> None:
+        """Explain a greyed axis on every part of it a pointer can land on."""
+        widget = self._axis_widgets.get(axis)
+        if widget is None:
+            return
+        tip = NO_FILTER_MATCH_TOOLTIP if muted else ""
+        widget.setToolTip(tip)
+        heading = getattr(widget, "heading", None)
+        if heading is not None:
+            heading.setToolTip(tip)
+        if axis == "makes":
+            self.brand_pane.search.setToolTip(tip)
+        elif axis == "seats":
+            for child in (
+                self.seat_group.minus,
+                self.seat_group.value_label,
+                self.seat_group.plus,
+            ):
+                child.setToolTip(tip)
 
     def _set_axis_boxes(self, axis: str, values: set | None) -> None:
         if axis == "makes":
@@ -1168,8 +1220,7 @@ class FilterPopover(QFrame):
         group = self._check_groups.get(axis)
         if group is None:
             return
-        for key, card in group.boxes.items():
-            card.setEnabled(values is None or key in values)
+        group.set_boxes_enabled(None if values is None else set(values))
 
     def _apply_rate_ceiling(self, ceiling: int) -> None:
         min_spin = self.price_group.min_rate

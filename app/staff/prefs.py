@@ -1,8 +1,12 @@
 """Per-PC preferences via QSettings (never the shared database).
 
 Appearance / Behavior / Files / session prefs live here so each counter
-PC keeps its own theme, scale, and export folder. Shared branch policy
+PC keeps its own scale, sidebar, and export folder. Shared branch policy
 (prices, deposits, defaults) lives in `settings_service` instead.
+
+Only preferences with a real consumer are stored. Theme, accent, date
+format, and currency are preview-only in this build and deliberately do
+not claim a value here.
 """
 
 from __future__ import annotations
@@ -16,8 +20,6 @@ APP = "Staff"
 
 DEFAULTS: dict[str, object] = {
     # -- appearance --
-    "appearance/theme": "light",          # light | dark | system
-    "appearance/accent": "#1F4E5F",       # petrol default
     "appearance/font_scale": 1.0,
     "appearance/sidebar_collapsed": False,
     "appearance/reduce_motion": False,
@@ -25,8 +27,6 @@ DEFAULTS: dict[str, object] = {
     "behavior/dashboard_refresh_ms": 30000,  # 0 = off
     "behavior/default_page": "dashboard",    # dashboard | new_rental
     "behavior/rows_per_page": 100,
-    "behavior/date_format": "dd MMM yyyy",
-    "behavior/currency": "₱",
     "behavior/confirm_cancel": True,
     "behavior/confirm_retire": True,
     "behavior/confirm_deactivate": True,
@@ -36,8 +36,8 @@ DEFAULTS: dict[str, object] = {
     "files/export_folder": "",
 }
 
-THEMES = ("light", "dark", "system")
 DEFAULT_PAGES = ("dashboard", "new_rental")
+#: Preview choices only: this build has no consumer that applies either.
 DATE_FORMATS = ("dd MMM yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy")
 CURRENCIES = ("₱", "PHP ", "$")
 REFRESH_CHOICES = (("Off", 0), ("15s", 15000), ("30s", 30000), ("60s", 60000))
@@ -106,13 +106,3 @@ def export_folder(fallback: Path) -> Path:
         except OSError:
             return fallback
     return fallback
-
-
-def currency_symbol() -> str:
-    raw = str(get("behavior/currency") or "₱")
-    return raw if raw in CURRENCIES else "₱"
-
-
-def date_format() -> str:
-    raw = str(get("behavior/date_format") or "dd MMM yyyy")
-    return raw if raw in DATE_FORMATS else "dd MMM yyyy"

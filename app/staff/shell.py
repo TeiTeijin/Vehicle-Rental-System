@@ -336,9 +336,7 @@ class StaffShell(QMainWindow):
             from app.staff import prefs as _prefs2
             collapsed = bool(_prefs2.get("appearance/sidebar_collapsed"))
             if self._sidebar is not None:
-                from app.staff import metrics as _metrics
-                self._sidebar.setFixedWidth(
-                    64 if collapsed else _metrics.SIDEBAR_W)
+                self._sidebar.set_collapsed(collapsed)
         except Exception:
             pass
         self._reset_idle()

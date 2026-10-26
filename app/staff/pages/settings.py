@@ -219,14 +219,25 @@ class SettingsPage(StaffPage):
     def _build_appearance(self):
         box, layout = _panel(
             "Appearance",
-            "Dark is stored now; the full dark palette ships later.",
+            "The light theme is fixed in this build; dark mode ships later. "
+            "Accent is a preview only.",
             "This PC only",
         )
+        # No consumer reads a theme preference yet, so the control must not
+        # pretend it can change one. Dark mode is explicitly a later build.
         self.theme_combo = _combo(["light", "dark", "system"], self)
-        self.theme_combo.currentTextChanged.connect(self._on_theme)
+        self.theme_combo.setEnabled(False)
+        self.theme_combo.setToolTip(
+            "Dark mode is not available in this build; it ships later. "
+            "The app stays on the light theme."
+        )
+        self._accent_colour = theme.PETROL
         self.accent_preview = QLabel("", self)
         self.accent_preview.setFixedSize(38, 38)
-        self.accent_btn = _pill("Pick accent", parent=self)
+        self.accent_btn = _pill("Preview accent", parent=self)
+        self.accent_btn.setToolTip(
+            "Preview only — the app accent is not applied in this build."
+        )
         self.accent_btn.clicked.connect(self._on_accent)
         accent_host = _inline_host(self.accent_preview, self.accent_btn, parent=self)
         self.font_spin = QDoubleSpinBox(self)
@@ -234,15 +245,18 @@ class SettingsPage(StaffPage):
         self.font_spin.setRange(0.9, 1.25)
         self.font_spin.setSingleStep(0.05)
         self.font_spin.valueChanged.connect(self._on_font_scale)
-        self.sidebar_check = QCheckBox("Collapse sidebar by default", self)
+        self.sidebar_check = QCheckBox("Collapse sidebar", self)
+        self.sidebar_check.setToolTip(
+            "Applies immediately and is remembered on this PC."
+        )
         self.sidebar_check.toggled.connect(self._on_sidebar)
         self.motion_check = QCheckBox("Reduce motion (no shimmer / chart animation)", self)
         self.motion_check.toggled.connect(
             lambda on: prefs.set("appearance/reduce_motion", bool(on)))
 
         grid = _grid()
-        grid.addWidget(_field("Theme", self.theme_combo, self), 0, 0)
-        grid.addWidget(_field("Accent", accent_host, self), 0, 1)
+        grid.addWidget(_field("Theme (fixed)", self.theme_combo, self), 0, 0)
+        grid.addWidget(_field("Accent (preview)", accent_host, self), 0, 1)
         grid.addWidget(_field("UI scale", self.font_spin, self), 0, 2)
         grid.addWidget(
             _check_host(self.sidebar_check, self.motion_check, parent=self),
@@ -252,15 +266,9 @@ class SettingsPage(StaffPage):
         layout.addStretch(1)
         return box
 
-    def _on_theme(self, value: str) -> None:
-        if value in prefs.THEMES:
-            prefs.set("appearance/theme", value)
-            toast(self, f"Theme: {value} (applies on next open).")
-
     def _on_accent(self) -> None:
         from app.staff.settings_panels import AccentPanel
-        current = str(prefs.get("appearance/accent"))
-        panel = AccentPanel(current, self)
+        panel = AccentPanel(self._accent_colour, self)
         panel.submitted.connect(self._on_accent_picked)
         panel.cancelled.connect(self._hide_overlay)
         self._overlay_panel(panel, width=540)
@@ -269,15 +277,15 @@ class SettingsPage(StaffPage):
         accent = str(values.get("accent") or "").strip()
         if not QColor(accent).isValid():
             return
-        prefs.set("appearance/accent", accent)
+        self._accent_colour = accent
         self._paint_accent()
         self._hide_overlay()
-        toast(self, f"Accent: {accent}.")
+        toast(self, "Accent preview updated; not applied app-wide in this build.")
 
     def _paint_accent(self) -> None:
-        colour = str(prefs.get("appearance/accent"))
         self.accent_preview.setStyleSheet(
-            f"background: {colour}; border: 1px solid {theme.BORDER}; border-radius: 10px;")
+            f"background: {self._accent_colour}; "
+            f"border: 1px solid {theme.BORDER}; border-radius: 10px;")
 
     def _on_font_scale(self, value: float) -> None:
         prefs.set("appearance/font_scale", float(value))
@@ -306,8 +314,7 @@ class SettingsPage(StaffPage):
             return
         collapsed = bool(prefs.get("appearance/sidebar_collapsed"))
         try:
-            from app.staff.metrics import SIDEBAR_W
-            bar.setFixedWidth(64 if collapsed else SIDEBAR_W)
+            bar.set_collapsed(collapsed)
         except Exception:
             pass
 
@@ -316,7 +323,8 @@ class SettingsPage(StaffPage):
     def _build_behavior(self):
         box, layout = _panel(
             "Behavior",
-            "Refresh Off stops the dashboard timer.",
+            "Refresh Off stops the dashboard timer. Date and currency are "
+            "previews only; reports and receipts are unchanged.",
             "This PC only",
         )
         self.refresh_combo = _combo([label for label, _ms in prefs.REFRESH_CHOICES], self)
@@ -330,11 +338,17 @@ class SettingsPage(StaffPage):
             lambda v: prefs.set("behavior/rows_per_page", int(v))
             if v.isdigit() else None)
         self.date_combo = _combo(list(prefs.DATE_FORMATS), self)
+        self.date_combo.setToolTip(
+            "Preview only — report and receipt formatting is unchanged."
+        )
         self.date_combo.currentTextChanged.connect(
-            lambda v: (prefs.set("behavior/date_format", v), self._preview_formats()))
+            lambda _value: self._preview_formats())
         self.currency_combo = _combo(list(prefs.CURRENCIES), self)
+        self.currency_combo.setToolTip(
+            "Preview only — report and receipt formatting is unchanged."
+        )
         self.currency_combo.currentTextChanged.connect(
-            lambda v: (prefs.set("behavior/currency", v), self._preview_formats()))
+            lambda _value: self._preview_formats())
         self.format_preview = QLabel("", self)
         self.format_preview.setObjectName("settingsPreview")
         self.format_preview.setMinimumHeight(40)
@@ -360,11 +374,17 @@ class SettingsPage(StaffPage):
         grid.addWidget(_field("Dashboard refresh", self.refresh_combo, self), 0, 0)
         grid.addWidget(_field("Page after login", self.default_page_combo, self), 0, 1)
         grid.addWidget(_field("Table rows", self.rows_combo, self), 0, 2)
-        grid.addWidget(_field("Date format", self.date_combo, self), 1, 0)
-        grid.addWidget(_field("Currency", self.currency_combo, self), 1, 1)
+        grid.addWidget(
+            _field("Date format (preview)", self.date_combo, self), 1, 0
+        )
+        grid.addWidget(
+            _field("Currency (preview)", self.currency_combo, self), 1, 1
+        )
         grid.addWidget(_field("Toast duration (ms)", self.toast_spin, self), 1, 2)
         grid.addWidget(_field("Auto-logout", self.logout_combo, self), 2, 0)
-        grid.addWidget(_field("Preview", self.format_preview, self), 2, 1, 1, 2)
+        grid.addWidget(
+            _field("Preview (not saved)", self.format_preview, self), 2, 1, 1, 2
+        )
         grid.addWidget(
             _check_host(
                 self.confirm_cancel,
@@ -397,8 +417,8 @@ class SettingsPage(StaffPage):
 
     def _preview_formats(self) -> None:
         from datetime import date
-        symbol = str(prefs.get("behavior/currency"))
-        fmt = str(prefs.get("behavior/date_format"))
+        symbol = self.currency_combo.currentText()
+        fmt = self.date_combo.currentText()
         mapping = {"dd MMM yyyy": "%d %b %Y", "MM/dd/yyyy": "%m/%d/%Y",
                    "yyyy-MM-dd": "%Y-%m-%d", "dd-MM-yyyy": "%d-%m-%Y"}
         self.format_preview.setText(
@@ -1088,7 +1108,8 @@ class SettingsPage(StaffPage):
                        destructive=destructive, pref=pref)
 
     def _fill_local(self) -> None:
-        self._set_combo_text(self.theme_combo, str(prefs.get("appearance/theme")))
+        self._set_combo_text(self.theme_combo, "light")
+        self._accent_colour = theme.PETROL
         self._paint_accent()
         try:
             self.font_spin.setValue(float(prefs.get("appearance/font_scale")))
@@ -1103,8 +1124,8 @@ class SettingsPage(StaffPage):
                 break
         self._set_combo_text(self.default_page_combo, str(prefs.get("behavior/default_page")))
         self._set_combo_text(self.rows_combo, str(prefs.get("behavior/rows_per_page")))
-        self._set_combo_text(self.date_combo, str(prefs.get("behavior/date_format")))
-        self._set_combo_text(self.currency_combo, str(prefs.get("behavior/currency")))
+        self._set_combo_text(self.date_combo, prefs.DATE_FORMATS[0])
+        self._set_combo_text(self.currency_combo, prefs.CURRENCIES[0])
         self._preview_formats()
         self.confirm_cancel.setChecked(bool(prefs.get("behavior/confirm_cancel")))
         self.confirm_retire.setChecked(bool(prefs.get("behavior/confirm_retire")))
