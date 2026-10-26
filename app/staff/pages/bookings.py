@@ -1125,8 +1125,20 @@ class BookingsPage(StaffPage):
         booking_id = self._selected_or_warn()
         if booking_id is None:
             return False
+        return self.open_details_for(booking_id)
+
+    def open_details_for(self, booking_id: int) -> bool:
+        """Open details for a known booking id (Payments View booking).
+
+        Deep-linking from another page cannot rely on this table already
+        holding rows: the caller navigates here before the async load lands.
+        """
         from app.staff.booking_panels import BookingDetailsPanel
 
+        try:
+            self.focus_booking(booking_id)
+        except Exception:  # noqa: BLE001 - highlight only, never blocks details
+            pass
         panel = BookingDetailsPanel(self.context, booking_id, self)
         panel.closed.connect(self._on_details_closed)
         self._overlay_panel(panel)

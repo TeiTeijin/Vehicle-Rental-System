@@ -63,11 +63,18 @@ class StatusPill(QLabel):
 
 def _status_tone(status: str | None) -> str:
     key = (status or "").strip().lower()
-    if key in ("confirmed", "ongoing", "available"):
+    if key in ("confirmed", "ongoing", "available", "paid"):
         return "ok"
-    if key in ("pending", "reserved", "maintenance", "in_progress", "scheduled"):
+    if key in (
+        "pending",
+        "reserved",
+        "maintenance",
+        "in_progress",
+        "scheduled",
+        "refunded",
+    ):
         return "warn"
-    if key == "cancelled":
+    if key in ("cancelled", "failed"):
         return "danger"
     return "neutral"
 
@@ -120,6 +127,10 @@ class ChipCell(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # The blanket cream QWidget rule would paint a cream block behind
+        # every chip in a white card. This host is a layout shim only.
+        self.setObjectName("tableChipCell")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -335,8 +346,9 @@ class LoadStateTable(QWidget):
                 row, column, ChipCell(chip, align=column_spec.align)
             )
             # ResizeToContents measures the item, not the cell widget. Keep
-            # the label in the (invisible) item so the chip gets its width.
-            placeholder = QTableWidgetItem(f"{label}  ")
+            # the label in the (invisible) item so the chip gets its width;
+            # the trailing pad pays for the chip's 10px side padding + border.
+            placeholder = QTableWidgetItem(f"{label}      ")
             placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
             placeholder.setTextAlignment(column_spec.align)
             return placeholder
@@ -346,7 +358,19 @@ class LoadStateTable(QWidget):
             self._table.setCellWidget(
                 row, column, ChipCell(chip, align=column_spec.align)
             )
-            placeholder = QTableWidgetItem(f"{text}  ")
+            placeholder = QTableWidgetItem(f"{text}      ")
+            placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
+            placeholder.setTextAlignment(column_spec.align)
+            return placeholder
+        if warm and column_spec.kind == "kind":
+            # Ledger kinds read as outlined pills, not filled status chips:
+            # "Rental"/"Deposit" are categories, not states.
+            text = "" if value is None else str(value)
+            chip = TableChip(text, tone="outline")
+            self._table.setCellWidget(
+                row, column, ChipCell(chip, align=column_spec.align)
+            )
+            placeholder = QTableWidgetItem(f"{text}      ")
             placeholder.setForeground(QBrush(Qt.GlobalColor.transparent))
             placeholder.setTextAlignment(column_spec.align)
             return placeholder

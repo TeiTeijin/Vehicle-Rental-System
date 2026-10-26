@@ -3590,9 +3590,94 @@ class TestPaymentsPage:
         bookings = BookingsPage(shell)
         assert page._tools_panel.objectName() == bookings._tools_panel.objectName()
         assert page.body.spacing() == bookings.body.spacing()
-        # Even split: both ledger boxes share the leftover height equally.
-        assert page.body.stretch(page.body.indexOf(page._takings_panel)) == 1
-        assert page.body.stretch(page.body.indexOf(page._outstanding_panel)) == 1
+        # Reference proportions: All payments is the taller card (6:5).
+        assert page.body.stretch(page.body.indexOf(page._takings_panel)) == 6
+        assert page.body.stretch(page.body.indexOf(page._outstanding_panel)) == 5
+
+    def test_view_booking_opens_the_booking_details(self, shell, branch):
+        built, _context = branch
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+        for row in range(page.outstanding.row_count()):
+            if page.outstanding.cell_text(row, 0) == f"#{built.overdue.booking_id}":
+                page.outstanding.table.selectRow(row)
+                break
+        else:  # pragma: no cover - guards the fixture
+            raise AssertionError("overdue booking not outstanding")
+
+        assert page._on_view_booking() is True
+        assert shell.current_page_key == "bookings"
+        bookings = shell._page_widgets["bookings"]
+        assert bookings._booking_overlay is not None
+        from app.staff.booking_panels import BookingDetailsPanel
+
+        panel = bookings._booking_overlay.findChild(BookingDetailsPanel)
+        assert panel is not None
+
+    def test_a_payment_row_enables_collect_and_view(self, shell, branch):
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+        page.takings.table.selectRow(0)
+        assert page.selected_booking_id() is not None
+        assert page.collect_button.isEnabled() is True
+        assert page.view_booking_button.isEnabled() is True
+        summary = page.selection_bar.summary_label.text()
+        assert "Ref" in summary
+        assert page.takings.cell_text(0, 2) in summary
+
+    def test_load_more_grows_each_cards_own_cap(self, shell, branch):
+        page = PaymentsPage(shell)
+        page.refresh()
+        _wait_for_payments(page)
+
+        outstanding_cap_before = page._outstanding_cap
+        takings_rows = page.takings.row_count()
+        page._takings_cap = takings_rows
+        page._update_takings_footer(takings_rows)
+        assert page.takings_load_more.isHidden() is False
+        page.takings_load_more.click()
+        _wait_for_payments(page)
+        assert page._takings_cap == takings_rows + 50
+        assert page.takings_footer_count.text().endswith(
+            f"of {takings_rows + 50}"
+        )
+        # Still more cap available, so the button stays (reference footers
+        # always offer the next page); it disappears at the hard ceiling.
+        assert page.takings_load_more.isHidden() is False
+        # Outstanding keeps its own cap: growing one card never reloads the
+        # other with the wrong page size.
+        assert page._outstanding_cap == outstanding_cap_before
+
+        outstanding_rows = page.outstanding.row_count()
+        page._outstanding_cap = outstanding_rows
+        page._update_outstanding_footer(outstanding_rows)
+        assert page.outstanding_load_more.isHidden() is False
+        page.outstanding_load_more.click()
+        _wait_for_payments(page)
+        assert page._outstanding_cap == outstanding_rows + 50
+        assert page.outstanding_load_more.isHidden() is False
+        assert page._takings_cap == takings_rows + 50
+        # The ceiling hides the button instead of offering a no-op press.
+        page._outstanding_cap = 500
+        page._update_outstanding_footer(outstanding_rows)
+        assert page.outstanding_load_more.isHidden() is True
+
+    def test_the_page_fits_at_1440x1000(self, shell, branch, qapp):
+        shell._on_signed_in(shell.context.user)
+        shell.resize(1440, 1000)
+        shell.show()
+        assert shell.show_page("payments") is True
+        page = shell._page_widgets["payments"]
+        _wait_for_payments(page)
+        qapp_process(shell)
+        qapp_process(page)
+        assert page.scroll_area.verticalScrollBar().maximum() == 0
+        assert page._takings_panel.isVisible() is True
+        assert page._outstanding_panel.isVisible() is True
+        assert page._outstanding_panel.geometry().bottom() <= page._content.height()
+        assert page.selection_bar.isVisible() is True
 
 
 # --------------------------------------------------------------------------
