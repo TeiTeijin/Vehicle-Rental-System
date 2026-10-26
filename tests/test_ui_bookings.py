@@ -46,7 +46,6 @@ from app.staff.pages.bookings import BookingsPage  # noqa: E402
 from app.staff.tables import TableChip  # noqa: E402
 from app.staff.ui_kit import (  # noqa: E402
     BookingModal,
-    PageHeading,
     WarmHost,
     WarmPanel,
 )
@@ -345,11 +344,10 @@ def _select(page: BookingsPage, booking_id: int) -> int:
 # -- page shell -------------------------------------------------------------
 
 
-def test_bookings_page_has_a_warm_heading_and_panels(page):
-    assert isinstance(page.heading, PageHeading)
-    assert page.heading.title_label.text() == "Bookings"
-    assert page.heading.subtitle_label is page.count_caption
-    assert page.count_caption.text()
+def test_bookings_page_has_warm_panels_without_a_second_heading(page):
+    assert not hasattr(page, "heading")
+    assert page.count_caption.isHidden()
+    assert page.body.itemAt(0).widget() is page._tools_panel
     assert isinstance(page._tools_panel, WarmHost)
     assert page._tools_panel.property("variant") == "warmHost"
     assert isinstance(page.filter_card, WarmPanel)

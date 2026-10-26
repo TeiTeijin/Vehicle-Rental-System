@@ -240,3 +240,24 @@ class FrostedOverlay(QWidget):
         ):
             self.hide_overlay()
         super().mousePressEvent(event)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Scroll the open sheet from anywhere on the frosted glass.
+
+        The scroll area only receives wheel events over its 540px column.
+        A wheel notch over the surrounding backdrop used to do nothing, so
+        the natural next click landed outside the card and dismissed the
+        modal. Forward those events to the same scrollbar.
+        """
+        bar = self.scroll.verticalScrollBar()
+        pixel = event.pixelDelta().y()
+        angle = event.angleDelta().y()
+        if pixel:
+            bar.setValue(bar.value() - pixel)
+        elif angle:
+            step = max(1, bar.singleStep()) * 3
+            bar.setValue(bar.value() - int(angle / 120 * step))
+        else:
+            super().wheelEvent(event)
+            return
+        event.accept()

@@ -6,15 +6,27 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QLabel, QPushButton, QWidget  # noqa: E402
+from PySide6.QtCore import QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QWheelEvent  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
+from app.staff import theme  # noqa: E402
 from app.staff.overlay import OVERLAY_CARD_W, FrostedOverlay  # noqa: E402
-from app.staff.tables import ALIGN_LEFT, Column, LoadStateTable  # noqa: E402
+from app.staff.tables import (  # noqa: E402
+    ALIGN_LEFT,
+    Column,
+    LoadStateTable,
+    TableChip,
+)
 from app.staff.ui_kit import (  # noqa: E402
     BookingModal,
     ChipGroup,
     MetricTile,
-    PageHeading,
     SelectionBar,
     StatusChipRow,
     WarmPanel,
@@ -72,12 +84,15 @@ def test_warm_panel_marks_variant(qapp):
     assert panel.body.contentsMargins().left() == 16
 
 
-def test_page_heading_has_inline_subtitle(qapp):
-    heading = PageHeading("Bookings", "Latest 100")
-    assert heading.title_label.text() == "Bookings"
-    assert heading.subtitle_label.text() == "Latest 100"
-    heading.set_subtitle("1-10 of latest 10")
-    assert heading.subtitle_label.text() == "1-10 of latest 10"
+def test_table_chip_is_a_true_pill(qapp):
+    chip = TableChip("Active", tone="ok")
+    assert chip.height() == TableChip.HEIGHT == 22
+    block = theme.load_stylesheet().split("QLabel#tableChip {", 1)[1].split(
+        "}", 1
+    )[0]
+    # Qt drops a border radius larger than half the label height, which is
+    # what left the old 19px chip square. Tie the QSS value to the height.
+    assert f"border-radius: {TableChip.HEIGHT // 2}px" in block
 
 
 def test_warm_table_sets_variant_height_and_chip(qapp):
@@ -115,6 +130,37 @@ def test_overlay_card_width_override(qapp):
     assert overlay.scroll.width() == 540
     overlay.set_card_width(OVERLAY_CARD_W)
     assert overlay.scroll.width() == OVERLAY_CARD_W
+
+
+def test_overlay_wheel_scrolls_from_the_backdrop(qapp):
+    window = QWidget()
+    window.resize(700, 600)
+    overlay = FrostedOverlay(window, card_width=540)
+    content = QWidget()
+    content.setMinimumHeight(1200)
+    overlay.set_content(content)
+    overlay.show_overlay()
+    qapp.processEvents()
+
+    bar = overlay.scroll.verticalScrollBar()
+    assert bar.maximum() > 0
+    # x=10 is on the frosted glass, left of the 540px column.
+    event = QWheelEvent(
+        QPointF(10, 300),
+        QPointF(10, 300),
+        QPoint(),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(overlay, event)
+
+    assert event.isAccepted() is True
+    assert bar.value() > 0
+    overlay.hide_overlay()
+    window.deleteLater()
 
 
 def test_booking_modal_is_540_and_exposes_parts(qapp):

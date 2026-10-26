@@ -82,7 +82,15 @@ def _payment_tone(text: str) -> str:
 
 
 class TableChip(QLabel):
-    """20px warm-table chip (status or payment state)."""
+    """22px warm-table chip (status or payment state).
+
+    A fixed height is load-bearing: Qt drops the stylesheet's border radius
+    when it exceeds half the label height, which left the old 19px chip with
+    square corners. The QSS radius is half of this height, so the chip is a
+    true pill at every DPI.
+    """
+
+    HEIGHT = 22
 
     def __init__(
         self,
@@ -95,6 +103,7 @@ class TableChip(QLabel):
         self.setObjectName("tableChip")
         self.setProperty("tone", tone)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(self.HEIGHT)
         self.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )

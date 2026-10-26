@@ -29,7 +29,6 @@ from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
 from app.staff.ui_kit import (
-    PageHeading,
     SelectionBar,
     StatusChipRow,
     WarmHost,
@@ -271,10 +270,10 @@ class CustomersPage(StaffPage):
         # page body's rhythm are unchanged.
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
-        self.heading = PageHeading("Customers", parent=self)
-        # The old count caption is the heading's inline subtitle now.
-        self.count_caption = self.heading.subtitle_label
-        self.body.addWidget(self.heading)
+        # No second page heading above the tools card; keep the old count
+        # label hidden for callers that still read it.
+        self.count_caption = QLabel("", self)
+        self.count_caption.setVisible(False)
 
         self._tools_panel = WarmHost(self)
         self._filter_card = WarmPanel(self._tools_panel)

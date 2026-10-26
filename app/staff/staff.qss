@@ -1751,20 +1751,6 @@ QPushButton#checkAvailability {
    references (1440x970, 1360px content column).
    ====================================================================== */
 
-QLabel#warmPageTitle {
-    background: transparent;
-    color: #171717;
-    font-size: 28px;
-    font-weight: 700;
-}
-
-QLabel#warmPageSubtitle {
-    background: transparent;
-    color: #7D7265;
-    font-size: 13px;
-    font-weight: 400;
-}
-
 QFrame#pagePanel[variant="warm"] {
     background: #FFFFFF;
     border: 1px solid #DFD4C5;
@@ -1914,7 +1900,9 @@ QHeaderView#warmHeader::section:last {
 
 QLabel#tableChip {
     border: none;
-    border-radius: 10px;
+    /* Half of TableChip.HEIGHT: Qt ignores a radius larger than half the
+       label height, so this must stay in sync with the 22px fixed height. */
+    border-radius: 11px;
     font-size: 12px;
     font-weight: 500;
     padding: 2px 10px;
@@ -1951,7 +1939,6 @@ QWidget#bookingModal {
    underneath already painted white. */
 QWidget#bookingModalHeader,
 QWidget#bookingModalBody,
-QWidget#warmPageHeading,
 QWidget#warmTableFooter,
 QWidget#warmFormField,
 QWidget#warmFieldHost,
@@ -1993,7 +1980,9 @@ QFrame#bookingModalDivider {
 }
 
 QFrame#bookingModalFooter {
-    background: #FFFFFF;
+    /* Transparent so the Card's rounded bottom corners stay visible; an
+       opaque footer painted a square white block over them. */
+    background: transparent;
     border: none;
     border-top: 1px solid #F5F1EA;
 }

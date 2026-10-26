@@ -38,7 +38,6 @@ from app.staff.pages.fleet import FleetPage  # noqa: E402
 from app.staff.pages.maintenance import MaintenancePage  # noqa: E402
 from app.staff.shell import StaffShell  # noqa: E402
 from app.staff.tables import LoadState  # noqa: E402
-from app.staff.ui_kit import PageHeading  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
 
 TODAY = date.today()
@@ -325,19 +324,15 @@ def _panel_variant(widget) -> str | None:
 
 
 @pytest.mark.parametrize(
-    "page_attr,title",
-    [
-        ("fleet_page", "Fleet"),
-        ("customers_page", "Customers"),
-        ("maintenance_page", "Maintenance"),
-    ],
+    "page_attr",
+    ["fleet_page", "customers_page", "maintenance_page"],
 )
-def test_each_page_has_a_warm_heading_and_panels(request, page_attr, title):
+def test_each_page_has_warm_panels_without_a_second_heading(request, page_attr):
     page = request.getfixturevalue(page_attr)
     assert isinstance(page, StaffPage)
-    assert isinstance(page.heading, PageHeading)
-    assert page.heading.title_label.text() == title
-    assert page.heading.subtitle_label is page.count_caption
+    assert not hasattr(page, "heading")
+    assert page.count_caption.isHidden()
+    assert page.body.itemAt(0).widget() is page._tools_panel
     assert page._tools_panel.objectName() == "pagePanel"
     assert _panel_variant(page._tools_panel) in ("warm", "warmHost")
     assert _panel_variant(page._data_panel) == "warm"

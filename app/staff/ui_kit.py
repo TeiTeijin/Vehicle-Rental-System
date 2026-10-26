@@ -69,37 +69,6 @@ def _label(
     return label
 
 
-class PageHeading(QWidget):
-    """Page title with an inline count/subtitle, on the warm page."""
-
-    def __init__(
-        self,
-        title: str,
-        subtitle: str = "",
-        *,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setObjectName("warmPageHeading")
-        row = QHBoxLayout(self)
-        row.setContentsMargins(2, 0, 0, 0)
-        row.setSpacing(16)
-        self.title_label = _label(
-            title, parent=self, size=28, weight=QFont.Weight.Bold
-        )
-        self.title_label.setObjectName("warmPageTitle")
-        self.subtitle_label = _label(
-            subtitle, parent=self, size=13, colour=WARM_MUTED
-        )
-        self.subtitle_label.setObjectName("warmPageSubtitle")
-        row.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignBottom)
-        row.addWidget(self.subtitle_label, 0, Qt.AlignmentFlag.AlignBottom)
-        row.addStretch(1)
-
-    def set_subtitle(self, text: str) -> None:
-        self.subtitle_label.setText(text)
-
-
 class WarmPanel(QFrame):
     """White 18px card with the standard 16px inner rhythm."""
 

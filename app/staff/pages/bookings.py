@@ -30,7 +30,6 @@ from app.staff.metrics import CARD_GUTTER, PAGE_PANEL_PAD, SIDEBAR_GAP, TOOL_ROW
 from app.staff.pages.base import StaffPage
 from app.staff.tables import ALIGN_LEFT, ALIGN_RIGHT, Column, LoadState, LoadStateTable
 from app.staff.ui_kit import (
-    PageHeading,
     SelectionBar,
     StatusChipRow,
     WarmHost,
@@ -260,16 +259,11 @@ class BookingsPage(StaffPage):
         self.layout().setContentsMargins(SIDEBAR_GAP, 0, SIDEBAR_GAP, 0)
         self.body.setSpacing(CARD_GUTTER)
 
-        self._heading = PageHeading(
-            "Bookings",
-            f"Latest {self._row_cap} bookings (showing 0).",
-            parent=self,
-        )
-        #: Public alias used by the other list pages' warm-heading tests.
-        self.heading = self._heading
-        #: Kept as its own name for callers/tests; it is the inline subtitle.
-        self.count_caption = self._heading.subtitle_label
-        self.body.addWidget(self._heading)
+        # The page title lives in the sidebar/shell, not in a second heading
+        # above the tools card. Keep the old count label as a hidden
+        # compatibility shim for callers that still read it.
+        self.count_caption = QLabel("", self)
+        self.count_caption.setVisible(False)
 
         # One transparent host keeps the old `_tools_panel` containment
         # contract: the white filter card, the hidden combo bridge, the chip
