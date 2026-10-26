@@ -271,14 +271,12 @@ def confirm_modal(
                 return True
         except Exception:
             pass
-    from app.staff.overlay import FrostedOverlay, WARM_FROST
+    from app.staff.overlay import FrostedOverlay
     from app.staff.ui_kit import ConfirmPanel
 
     window = parent.window() if parent is not None else None
     host = window if window is not None else parent
-    overlay = FrostedOverlay(
-        host, card_width=540, backdrop_tint=WARM_FROST
-    )
+    overlay = FrostedOverlay(host, card_width=540)
     panel = ConfirmPanel(
         question,
         detail,

@@ -5969,7 +5969,7 @@ class TestVehicleDetailsDialog:
         # Frosted glass (v9): the dim is scoped to the overlay itself so it
         # can never cascade onto the white card.
         assert "VehicleDetailsOverlay" in overlay.styleSheet()
-        assert "rgba(32, 22, 16, 180)" in overlay.styleSheet()
+        assert "rgba(23, 23, 23, 110)" in overlay.styleSheet()
         overlay.hide_overlay()
 
     def test_overlay_backdrop_is_frosted_and_click_through(

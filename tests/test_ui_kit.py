@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (  # noqa: E402
 from app.staff import theme  # noqa: E402
 from app.staff.overlay import (  # noqa: E402
     OVERLAY_CARD_W,
-    WARM_FROST,
     FrostedOverlay,
 )
 from app.staff.tables import (  # noqa: E402
@@ -302,7 +301,7 @@ def _drive_confirm_modal(
             return
         panel = overlay.findChild(ConfirmPanel)
         seen["shown"] = overlay.isVisible()
-        seen["tint"] = overlay._backdrop_tint
+        seen["tint"] = overlay.styleSheet()
         seen["card_width"] = panel.card.width()
         seen["title"] = panel.title_label.text()
         seen["detail"] = panel.subtitle_label.text()
@@ -337,7 +336,7 @@ def _assert_confirm_modal_cleaned_up(
     assert seen.get("timed_out") is not True
     assert seen["shown"] is True
     assert seen["keep_focus"] is True
-    assert seen["tint"] == WARM_FROST
+    assert "rgba(23, 23, 23, 110)" in seen["tint"]
     assert seen["card_width"] == 540
     overlay = seen["overlay"]
     assert overlay.isVisible() is False

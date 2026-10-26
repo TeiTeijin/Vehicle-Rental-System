@@ -58,7 +58,6 @@ from app.services import booking_service, image_cache, vehicle_photos
 from app.services.errors import ConflictError
 from app.staff import icons, theme
 from app.staff.cards import Caption, Card, MoneyNumber, Pill, SectionLabel
-from app.staff.overlay import WARM_FROST
 from app.staff.rental_ui import (
     MODAL_MUTED,
     MODAL_RADIUS,
@@ -84,8 +83,8 @@ OVERLAY_CARD_W = MODAL_WIDTH
 #: Frosted-glass backdrop: blur radius applied to the frozen page snapshot.
 BACKDROP_BLUR_RADIUS = 12
 
-#: Dark warm frost baked over the blurred snapshot (counter reference).
-BACKDROP_TINT = WARM_FROST
+#: Dim baked over the blurred snapshot (same ink as DimOverlay).
+BACKDROP_DIM = 110
 
 #: Snapshot downscale before blurring: faster and smoother (classic frosted
 #: trick). The small image is blurred cheaply, then upscaled.
@@ -1276,10 +1275,8 @@ class VehicleDetailsOverlay(QWidget):
         #: outside clicks must not discard a half-filled rental.
         self._dismissible = True
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        tint = BACKDROP_TINT
         self.setStyleSheet(
-            f"VehicleDetailsOverlay {{ background: rgba({tint.red()},"
-            f" {tint.green()}, {tint.blue()}, {tint.alpha()});"
+            "VehicleDetailsOverlay { background: rgba(23, 23, 23, 110);"
             " border: none; }"
         )
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1377,7 +1374,9 @@ class VehicleDetailsOverlay(QWidget):
             full.setDevicePixelRatio(dpr)
             painter = QPainter(full)
             try:
-                painter.fillRect(full.rect(), BACKDROP_TINT)
+                painter.fillRect(
+                    full.rect(), QColor(23, 23, 23, BACKDROP_DIM)
+                )
             finally:
                 painter.end()
             self.backdrop.setPixmap(full)

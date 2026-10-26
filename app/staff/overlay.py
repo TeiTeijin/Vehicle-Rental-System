@@ -32,10 +32,6 @@ BACKDROP_DIM = 110
 BACKDROP_DOWNSCALE = 4
 BACKDROP_RERENDER_MS = 120
 
-#: Dark warm frost sampled from the counter references. The wizard and its
-#: confirmation use this so the cream page never shows through as a pale band.
-WARM_FROST = QColor(32, 22, 16, 180)
-
 
 class FrostedOverlay(QWidget):
     """Window-embedded modal glass with swappable card content."""
@@ -44,20 +40,11 @@ class FrostedOverlay(QWidget):
     closed = Signal()
 
     def __init__(
-        self,
-        window: QWidget,
-        *,
-        card_width: int = OVERLAY_CARD_W,
-        backdrop_tint: QColor | None = None,
+        self, window: QWidget, *, card_width: int = OVERLAY_CARD_W
     ) -> None:
         super().__init__(window)
         self._window = window
         self._card_width = int(card_width or OVERLAY_CARD_W)
-        self._backdrop_tint = (
-            QColor(backdrop_tint)
-            if backdrop_tint is not None
-            else QColor(23, 23, 23, BACKDROP_DIM)
-        )
         #: False while a wizard owns the overlay: Escape and outside clicks
         #: must not throw away a half-filled rental.
         self._dismissible = True
@@ -66,10 +53,9 @@ class FrostedOverlay(QWidget):
         # ever cascades onto descendants. The blurred snapshot carries its
         # own baked-in dim and covers this; this fill is the fallback when
         # the grab fails.
-        tint = self._backdrop_tint
         self.setStyleSheet(
-            f"FrostedOverlay {{ background: rgba({tint.red()}, {tint.green()},"
-            f" {tint.blue()}, {tint.alpha()}); border: none; }}"
+            "FrostedOverlay { background: rgba(23, 23, 23, 110);"
+            " border: none; }"
         )
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -183,7 +169,7 @@ class FrostedOverlay(QWidget):
             full.setDevicePixelRatio(dpr)
             painter = QPainter(full)
             try:
-                painter.fillRect(full.rect(), self._backdrop_tint)
+                painter.fillRect(full.rect(), QColor(23, 23, 23, BACKDROP_DIM))
             finally:
                 painter.end()
             self.backdrop.setPixmap(full)
